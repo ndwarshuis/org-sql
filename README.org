@@ -1,5 +1,5 @@
 * Org-SQL
-This is a SQL backend for Emacs Org-Mode. It scans through text files formatted in org-mode, parses them, and add key information such as keywords, timestamps, and links to a database. For now only SQLite is supported.
+This is a SQL backend for Emacs Org-Mode. It scans through text files formatted in org-mode, parses them, and adds key information such as todo keywords, timestamps, and links to a relational database. For now only SQLite is supported.
 ** Motivation and Goals
 Despite the fact that Emacs is the (second?) greatest text editor of all time, it is not a good data analysis platform, and neither is Lisp a good data analysis language. This is the strong-suite of other languages such as Python and R which have powerful data manipulation packages (=dplyr= and =pandas=) as well as specialized presentation platforms (=shiny= and =dash=). The common thread between these data analysis tools is a tabular data storage system, for which SQL is the most common language.
 
