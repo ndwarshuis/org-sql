@@ -1,6 +1,6 @@
 * Org-SQL
 This is a SQL backend for Emacs Org-Mode. It scans through text files formatted in org-mode, parses them, and add key information such as keywords, timestamps, and links to a database. For now only SQLite is supported.
-** Motivation And Goals
+** Motivation and Goals
 Despite the fact that Emacs is the (second?) greatest text editor of all time, it is not a good data analysis platform, and neither is Lisp a good data analysis language. This is the strong-suite of other languages such as Python and R which have powerful data manipulation packages (=dplyr= and =pandas=) as well as specialized presentation platforms (=shiny= and =dash=). The common thread between these data analysis tools is a tabular data storage system, for which SQL is the most common language.
 
 Therefore, the primary goal of =org-sql= is to provide a link between the text-based universe of Emacs / Org-mode and the table-based universe of data analysis platforms.
@@ -62,16 +62,16 @@ git clone git@github.com:ndwarshuis/org-sql.git ~/config/path/org-sql/
 
 This will create a new database with the appropriate schema
 *** Updating and maintenance
-Run =org-sql-user-update=. This will synchronize the database with all files as indicated in =org-sql-files= by first checking if the file if in the database and inserting it if not. If the file is already present, it will check the md5 to assess if updates are needed. This function will insert the *entire* content of any org file that is either new or changed.
+Run =org-sql-user-update=. This will synchronize the database with all files as indicated in =org-sql-files= by first checking if the file is in the database and inserting it if not. If the file is already present, it will check the md5 to assess if updates are needed. This function will insert the *entire* content of any org file that is either new or changed.
 
 Note that the database will take several seconds to minutes if inserting many files depending on the speed of your device (particularly IO) and the size/number of files. This operation will also block Emacs until complete.
 ** Database Layout
-The database is arranged by files at the top level and by =org-mode= features moving down the hierarchy. Foreign keys reference columns that are the same name and are marked in /italics/, and primary table keys are marked in *bold*. All dates are converted into ISO 8601 format before entering into the database.
+The database is arranged by files at the top level and by =org-mode= features moving down to child tables. Primary keys are foreign keys are marked with P and F in parens respecively. All dates are converted into ISO 8601 format before entering into the database.
 *** files
 Stores one row per org file
-| columne       | type    | description               |
+| column        | type    | description               |
 |---------------+---------+---------------------------|
-| *file_path*   | text    | path to an org file       |
+| file_path (P) | text    | path to an org file       |
 | md5           | text    | md5 sum of the org file   |
 | size          | integer | size of the file in bytes |
 | time_modified | date    | unused                    |
@@ -79,86 +79,86 @@ Stores one row per org file
 | time_accessed | date    | unused                    |
 *** headlines
 Stores one row for each headline in a given org file as well as any atomic metadata attached to that headline
-| columne           | type    | description                                              |
-|-------------------+---------+----------------------------------------------------------|
-| */file_path/*     | text    | path to file containing the headline                     |
-| *headline_offset* | integer | offset of the headline's first character in the org file |
-| tree_path         | text    | outline tree path of the headline                        |
-| headline_text     | text    | raw text of the headline                                 |
-| time_created      | date    | time created as given by the CREATED timestamp           |
-| time_closed       | date    | closed timestamp                                         |
-| time_scheduled    | date    | scheduled timestamp                                      |
-| time_deadlined    | date    | deadlined timestamp                                      |
-| keyword           | text    | the TODO state keyword                                   |
-| effort            | integer | the value of the Effort property in minutes              |
-| priority          | integer | integer value of the priority                            |
-| contents          | text    | unused                                                   |
+| column              | type    | description                                              |
+|---------------------+---------+----------------------------------------------------------|
+| file_path (PF)      | text    | path to file containing the headline                     |
+| headline_offset (F) | integer | offset of the headline's first character in the org file |
+| tree_path (P)       | text    | outline tree path of the headline                        |
+| headline_text       | text    | raw text of the headline                                 |
+| time_created        | date    | time created as given by the CREATED timestamp           |
+| time_closed         | date    | closed timestamp                                         |
+| time_scheduled      | date    | scheduled timestamp                                      |
+| time_deadlined      | date    | deadlined timestamp                                      |
+| keyword             | text    | the TODO state keyword                                   |
+| effort              | integer | the value of the Effort property in minutes              |
+| priority            | integer | integer value of the priority                            |
+| contents            | text    | unused                                                   |
 
-note: the =CREATED= timestamp is non-standard
+note: the =CREATED= timestamp is non-standard. Future version will include tools for managing this
 *** links
 Stores one row for each link in a given org file and headline
-| columne           | type    | description                                              |
-|-------------------+---------+----------------------------------------------------------|
-| */file_path/*     | text    | path to file containing the link                         |
-| /headline_offset/ | integer | offset of the headline's first character in the org file |
-| *link_offset*     | integer | offset of the link's first character in the org file     |
-| link_path         | text    | target of the link (url or similar)                      |
-| link_text         | text    | display text of the link in the org buffer               |
-| link_type         | text    | type of the link (eg http, mu4e, file, etc)              |
+| column              | type    | description                                              |
+|---------------------+---------+----------------------------------------------------------|
+| file_path (PF)      | text    | path to file containing the link                         |
+| headline_offset (F) | integer | offset of the headline's first character in the org file |
+| link_offset (P)     | integer | offset of the link's first character in the org file     |
+| link_path           | text    | target of the link (url or similar)                      |
+| link_text           | text    | display text of the link in the org buffer               |
+| link_type           | text    | type of the link (eg http, mu4e, file, etc)              |
 *** properties
 Stores one row for each property identified in an org file and a given headline. This is also where one could identify if a headline is archived as it will have properties such as =ARCHIVE_TIME=
-| columne           | type    | description                                              |
-|-------------------+---------+----------------------------------------------------------|
-| */file_path/*     | text    | path to file containing the property                     |
-| /headline_offset/ | integer | offset of the headline's first character in the org file |
-| *property_offset* | integer | offset of the property's first character in the org file |
-| key_text          | text    | the property key                                         |
-| val_text          | text    | the property value                                       |
-| inherited         | boolean | unused                                                   |
+| column              | type    | description                                              |
+|---------------------+---------+----------------------------------------------------------|
+| file_path (PF)      | text    | path to file containing the property                     |
+| headline_offset (F) | integer | offset of the headline's first character in the org file |
+| property_offset (P) | integer | offset of the property's first character in the org file |
+| key_text            | text    | the property key                                         |
+| val_text            | text    | the property value                                       |
+| inherited           | boolean | unused                                                   |
 *** tags
 Stores tags similarly to the properties table
-| columne             | type    | description                                              |
-|---------------------+---------+----------------------------------------------------------|
-| */file_path/*       | text    | path to file containing the tag                          |
-| */headline_offset/* | integer | offset of the headline's first character in the org file |
-| *tag*               | text    | the tag value                                            |
-| *inherited*         | boolean | 1 if inherited, 0 if not                                 |
+| column               | type    | description                                              |
+|----------------------+---------+----------------------------------------------------------|
+| file_path (PF)       | text    | path to file containing the tag                          |
+| headline_offset (PF) | integer | offset of the headline's first character in the org file |
+| tag (P)              | text    | the tag value                                            |
+| inherited (P)        | boolean | 1 if inherited, 0 if not                                 |
 *** clocking
 Stores one row for each clock entry identified in an org file and its given headline
-| columne           | type    | description                                              |
-|-------------------+---------+----------------------------------------------------------|
-| */file_path/*     | text    | path to file containing the clock                        |
-| /headline_offset/ | integer | offset of the headline's first character in the org file |
-| *clock_offset*    | integer | offset of the clock's first character in the org file    |
-| time_start        | date    | timestamp for the start of the clock                     |
-| time_end          | date    | timestamp for the end of the clock                       |
-| clock_note        | date    | the note text beneath the clock if available             |
+| column              | type    | description                                              |
+|---------------------+---------+----------------------------------------------------------|
+| file_path (PF)      | text    | path to file containing the clock                        |
+| headline_offset (F) | integer | offset of the headline's first character in the org file |
+| clock_offset (P)    | integer | offset of the clock's first character in the org file    |
+| time_start          | date    | timestamp for the start of the clock                     |
+| time_end            | date    | timestamp for the end of the clock                       |
+| clock_note          | date    | the note text beneath the clock if available             |
 *** logbook
 Stores one row for each entry in the logbook underneath a headline (excluding clocks). Some entries may have additional information associated with them for planning and state changes as given in the child tables below.
-| columne           | type    | description                                              |
-|-------------------+---------+----------------------------------------------------------|
-| */file_path/*     | text    | path to file containing the entry                        |
-| /headline_offset/ | integer | offset of the headline's first character in the org file |
-| *entry_offset*    | integer | offset of the entry's first character in the org file    |
-| time_logged       | date    | timestamp for when the entry was taken                   |
-| header            | text    | the first line of the note, usually standardized         |
-| note              | note    | the text underneath the entry header                     |
+| column              | type    | description                                              |
+|---------------------+---------+----------------------------------------------------------|
+| file_path (PF)      | text    | path to file containing the entry                        |
+| headline_offset (F) | integer | offset of the headline's first character in the org file |
+| entry_offset (P)    | integer | offset of the entry's first character in the org file    |
+| time_logged         | date    | timestamp for when the entry was taken                   |
+| header              | text    | the first line of the note, usually standardized         |
+| note                | note    | the text underneath the entry header                     |
 
 note: the header should match =org-log-note-headings= unless it is a clock note
 *** state_changes
 Stores one row per logbook entry with state change information (as triggered by any keywords configured to log in =org-todo-headings=)
-| columne          | type    | description                                           |
+| column          | type    | description                                           |
 |------------------+---------+-------------------------------------------------------|
-| */file_path/*    | text    | path to file containing the entry                     |
-| */entry_offset/* | integer | offset of the clock's first character in the org file |
+| file_path (PF)  | text    | path to file containing the entry                     |
+| entry_offset (PF) | integer | offset of the clock's first character in the org file |
 | state_old        | text    | former todo state keyword                             |
 | state_new        | text    | updated todo state keyword                            |
 *** planning_changes
 Stores one row per logbook entry with planning changes as triggered by setting =org-log-reschedule= and =org-log-redeadline=.
-| columne          | type    | description                                           |
+| column          | type    | description                                           |
 |------------------+---------+-------------------------------------------------------|
-| */file_path/*    | text    | path to file containing the entry                     |
-| */entry_offset/* | integer | offset of the clock's first character in the org file |
+| file_path (PF)  | text    | path to file containing the entry                     |
+| entry_offset (PF) | integer | offset of the clock's first character in the org file |
 | time_old         | date    | timestamp for the former planning entry               |
 | time_new         | date    | timestamp for the update planning entry               |
 | planning_type    | text    | either "s" (scheduled) or "d" (deadline)              |
