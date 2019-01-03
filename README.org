@@ -1,7 +1,46 @@
 * Org-SQL
-A SQL backend for Emacs Org-Mode
-** Motivation
+This is a SQL backend for Emacs Org-Mode. It scans through text files formatted in org-mode, parses them, and add key information such as keywords, timestamps, and links to a database. For now only SQLite is supported.
+** Motivation And Goals
+Despite the fact that Emacs is the (second?) greatest text editor of all time, it is not a good data analysis platform, and neither is Lisp a good data analysis language. This is the strong-suite of other languages such as Python and R which have powerful data manipulation packages (=dplyr= and =pandas=) as well as specialized presentation platforms (=shiny= and =dash=). The common thread between these data analysis tools is a tabular data storage system, for which SQL is the most common language.
+
+Therefore, the primary goal of =org-sql= is to provide a link between the text-based universe of Emacs / Org-mode and the table-based universe of data analysis platforms.
+
+A common use case for org-mode is a daily planner. Within this use case, some questions that can easily be answered with a SQL-backed approach:
+- How much time do I spend doing pre-planned work? (track how much time is spent clocking)
+- How well do I estimate how long tasks take? (compare effort and clocked time)
+- Which types of tasks do I concentrate on the most? (tag entries and sort based on effort and clocking)
+- How indecisive am I? (track how many times schedule or deadline timestamps are changed)
+- How much do I overplan? (track number of canceled tasks)
+- How much do I delegate (track properties indicating which people are working on tasks)
+- How many outstanding tasks/projects do I have? (count keywords and tags on headlines)
+
+There are other uses for an Org-mode SQL database. If one has many org files scattered throughout their filesystem, a database is an easy way to aggregate key information such as links or timestamps. Or if one primary uses org-mode for taking notes, it could be a way to aggregate and analyze meeting minutes.
+
+Of course, these could all be done directly in Org-mode with Lisp code (indeed there are already built-in functions for reporting aggregated effort and clock-time). But why do that when one could analyze *all* org files by making a descriptive dashboard with a relatively few lines of R or Python code?
 ** Configuration
+The following options are useful to customize:
+| variable                      | default      | description                                      |
+|-------------------------------+--------------+--------------------------------------------------|
+| =org-sql-use-tag-inheritance= | t            | use tag inheritance when populating the database |
+| =org-sqlite-db-path=          | ~/Org/org.db | the path to the sqlite database                  |
+| =org-sql-ignored-properties=  | nil          | list of properties to ignore when populating     |
+| =org-sql-files=               | nil          | list of org files to insert into database        |
+| =org-sql-buffer=              | "*SQL: Org*" | the name of the buffer for the SQLite connection |
+*** logbooks
+In addition to the options above, the parsing functions rely on built-in =org-mode= variables for processing logbook entries (the part underneat headlines which stores reschedule events, clocking, notes, etc). Critically, logbooks can only be reliably parsed if they are in their own drawer, which means =org-log-into-drawer= must be non-nil. This is a limitation of =org-mode= itself as the org-element API has no way of knowing if a logging entry is part of the log or just a regular list without a defined drawer (in theory clocks could still be detected but this is not implemented yet).
+
+Additionally, =org-log-note-headings= is expected to be left at its default setting in order to accurately parse timestamps and todo-stats on notes. This will hopefully be expanded in the future.
+
+In order to actually produce logbook entries, one needs to set the relevant =org-mode= variables. Please refer to their documentation in =org-mode= itself for their meaning:
+- =org-log-done=
+- =org-log-reschedule=
+- =org-log-redeadline=
+- =org-log-note-clock-out=
+- =org-log-refile=
+- =org-log-repeat=
+- =org-todo-keywords= (in this one can set which todo keywords changes are logged)
+
+Obvsiously, =org-sql= cannot read your mind and thus requires these variables to be held consistent through the lifetime of the org files in question. If not, entries will be missed.
 ** Installation
 Clone this repository into your config directory and add the package to =load-path=
 
@@ -16,3 +55,114 @@ git clone git@github.com:ndwarshuis/org-sql.git ~/config/path/org-sql/
 *** Dependencies
 - Org-mode
 - dash
+** Usage
+*** Initialize database
+1. Run =org-sql-cmd-open-connection=
+2. Run =org-sql-init-db=
+
+This will create a new database with the appropriate schema
+*** Updating and maintanence
+Run =org-sql-user-update=. This will synchronize the database with all files as indicated in =org-sql-files= by first checking if the file if in the database and inserting it if not. If the file is already present, it will check the md5 to assess if updates are needed. This function will insert the *entire* content of any org file that is either new or changed.
+
+Note that the database will take several seconds to minutes if inserting many files depending on the speed of your device (particularly IO) and the size/number of files. This operation will also block Emacs until complete.
+** Database Layout
+The database is arranged by files at the top level and by =org-mode= features moving down the hierarchy. Foreign keys reference columns that are the same name and are marked in /italics/, and primary table keys are marked in *bold*. All dates are converted into ISO 8601 format before entering into the database.
+*** files
+Stores one row per org file
+| columne       | type    | description               |
+|---------------+---------+---------------------------|
+| *file_path*   | text    | path to an org file       |
+| md5           | text    | md5 sum of the org file   |
+| size          | integer | size of the file in bytes |
+| time_modified | date    | unused                    |
+| time_created  | date    | unused                    |
+| time_accessed | date    | unused                    |
+*** headlines
+Stores one row for each headline in a given org file as well as any atomic metadata attached to that headline
+| columne           | type    | description                                              |
+|-------------------+---------+----------------------------------------------------------|
+| */file_path/*     | text    | path to file containing the headline                     |
+| *headline_offset* | integer | offset of the headline's first character in the org file |
+| tree_path         | text    | outline tree path of the headline                        |
+| headline_text     | text    | raw text of the headline                                 |
+| time_created      | date    | time created as given by the CREATED timestamp           |
+| time_closed       | date    | closed timestamp                                         |
+| time_scheduled    | date    | scheduled timestamp                                      |
+| time_deadlined    | date    | deadlined timestamp                                      |
+| keyword           | text    | the TODO state keyword                                   |
+| effort            | integer | the value of the Effort property in minutes              |
+| prority           | integer | integer value of the priority                            |
+| contents          | text    | unused                                                   |
+
+note: the =CREATED= timestamp is non-standard
+*** links
+Stores one row for each link in a given org file and headline
+| columne           | type    | description                                              |
+|-------------------+---------+----------------------------------------------------------|
+| */file_path/*     | text    | path to file containing the link                         |
+| /headline_offset/ | integer | offset of the headline's first character in the org file |
+| *link_offset*     | integer | offset of the link's first character in the org file     |
+| link_path         | text    | target of the link (url or similar)                      |
+| link_text         | text    | display text of the link in the org buffer               |
+| link_type         | text    | type of the link (eg http, mu4e, file, etc)              |
+*** properties
+Stores one row for each property identified in an org file and a given headline. This is also where one could identify if a headline is archived as it will have properties such as =ARCHIVE_TIME=
+| columne           | type    | description                                              |
+|-------------------+---------+----------------------------------------------------------|
+| */file_path/*     | text    | path to file containing the property                     |
+| /headline_offset/ | integer | offset of the headline's first character in the org file |
+| *property_offset* | integer | offset of the property's first character in the org file |
+| key_text          | text    | the property key                                         |
+| val_text          | text    | the property value                                       |
+| inherited         | boolean | unused                                                   |
+*** tags
+Stores tags similarly to the properties table
+| columne             | type    | description                                              |
+|---------------------+---------+----------------------------------------------------------|
+| */file_path/*       | text    | path to file containing the tag                          |
+| */headline_offset/* | integer | offset of the headline's first character in the org file |
+| *tag*               | text    | the tag value                                            |
+| *inherited*         | boolean | 1 if inherited, 0 if not                                 |
+*** clocking
+Stores one row for each clock entry identified in an org file and its given headline
+| columne           | type    | description                                              |
+|-------------------+---------+----------------------------------------------------------|
+| */file_path/*     | text    | path to file containing the clock                        |
+| /headline_offset/ | integer | offset of the headline's first character in the org file |
+| *clock_offset*    | integer | offset of the clock's first character in the org file    |
+| time_start        | date    | timestamp for the start of the clock                     |
+| time_end          | date    | timestamp for the end of the clock                       |
+| clock_note        | date    | the note text beneath the clock if available             |
+*** logbook
+Stores one row for each entry in the logbook underneath a headline (excluding clocks). Some entries may have additional information associated with them for planning and state changes as given in the child tables below.
+| columne           | type    | description                                              |
+|-------------------+---------+----------------------------------------------------------|
+| */file_path/*     | text    | path to file containing the entry                        |
+| /headline_offset/ | integer | offset of the headline's first character in the org file |
+| *entry_offset*    | integer | offset of the entry's first character in the org file    |
+| time_logged       | date    | timestamp for when the entry was taken                   |
+| header            | text    | the first line of the note, usually standardized         |
+| note              | note    | the text underneath the entry header                     |
+
+note: the header should match =org-log-note-headings= unless it is a clock note
+*** state_changes
+Stores one row per logbook entry with state change information (as triggered by any keywords configured to log in =org-todo-headings=)
+| columne          | type    | description                                           |
+|------------------+---------+-------------------------------------------------------|
+| */file_path/*    | text    | path to file containing the entry                     |
+| */entry_offset/* | integer | offset of the clock's first character in the org file |
+| state_old        | text    | former todo state keyword                             |
+| state_new        | text    | updated todo state keyword                            |
+*** planning_changes
+Stores one row per logbook entry with planning changes as triggered by setting =org-log-reschedule= and =org-log-redeadline=.
+| columne          | type    | description                                           |
+|------------------+---------+-------------------------------------------------------|
+| */file_path/*    | text    | path to file containing the entry                     |
+| */entry_offset/* | integer | offset of the clock's first character in the org file |
+| time_old         | date    | timestamp for the former planning entry               |
+| time_new         | date    | timestamp for the update planning entry               |
+| planning_type    | text    | either "s" (scheduled) or "d" (deadline)              |
+** Contributions
+Pull requests welcome, especially those for other SQL implementations.
+** Acknowledgments
+The idea for this is based on [[http://kitchingroup.cheme.cmu.edu/blog/2017/01/03/Find-stuff-in-org-mode-anywhere/][John Kitchin's]] implementation, which uses =emacsql= as the SQL backend.
