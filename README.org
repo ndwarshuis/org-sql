@@ -67,6 +67,17 @@ Run =org-sql-user-update=. This will synchronize the database with all files as 
 Note that the database will take several seconds to minutes if inserting many files depending on the speed of your device (particularly IO) and the size/number of files. This operation will also block Emacs until complete.
 ** Database Layout
 The database is arranged by files at the top level and by =org-mode= features moving down to child tables. Primary keys are foreign keys are marked with P and F in parens respecively. All dates are converted into ISO 8601 format before entering into the database.
+*** hierarchy
+The databases are arranged as follows according to the foreign key contraints:
+
+- files
+  - headlines
+    - tags
+    - properties
+    - clocking
+    - logbook
+      - state_changes
+      - planning_changes
 *** files
 Stores one row per org file
 | column        | type    | description               |
