@@ -96,7 +96,6 @@ Stores one row for each headline in a given org file as well as any atomic metad
 | headline_offset (F) | integer | offset of the headline's first character in the org file |
 | tree_path (P)       | text    | outline tree path of the headline                        |
 | headline_text       | text    | raw text of the headline                                 |
-| time_created        | date    | time created as given by the CREATED timestamp           |
 | time_closed         | date    | closed timestamp                                         |
 | time_scheduled      | date    | scheduled timestamp                                      |
 | time_deadlined      | date    | deadlined timestamp                                      |
@@ -104,8 +103,6 @@ Stores one row for each headline in a given org file as well as any atomic metad
 | effort              | integer | the value of the Effort property in minutes              |
 | priority            | integer | integer value of the priority                            |
 | contents            | text    | unused                                                   |
-
-note: the =CREATED= timestamp is non-standard. Future version will include tools for managing this
 *** links
 Stores one row for each link in a given org file and headline
 | column              | type    | description                                              |
