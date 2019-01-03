@@ -25,7 +25,7 @@ The following options are useful to customize:
 | org-sqlite-db-path          | ~/Org/org.db   | the path to the sqlite database                  |
 | org-sql-ignored-properties  | nil            | list of properties to ignore when populating     |
 | org-sql-files               | nil            | list of org files to insert into database        |
-| org-sql-buffer              | ="*SQL: Org*"= | the name of the buffer for the SQLite connection |
+| org-sql-buffer              | =*SQL: Org*=   | the name of the buffer for the SQLite connection |
 *** logbooks
 In addition to the options above, the parsing functions rely on built-in =org-mode= variables for processing logbook entries (the part underneath headlines which stores reschedule events, clocking, notes, etc). Critically, logbooks can only be reliably parsed if they are in their own drawer, which means =org-log-into-drawer= must be non-nil. This is a limitation of =org-mode= itself as the org-element API has no way of knowing if a logging entry is part of the log or just a regular list without a defined drawer (in theory clocks could still be detected but this is not implemented yet).
 
