@@ -68,7 +68,7 @@ Note that the database will take several seconds to minutes if inserting many fi
 ** Database Layout
 The database is arranged by files at the top level and by =org-mode= features moving down to child tables. Primary keys are foreign keys are marked with P and F in parens respecively. All dates are converted into ISO 8601 format before entering into the database.
 *** hierarchy
-The databases are arranged as follows according to the foreign key contraints:
+The databases are arranged as follows according to their foreign key contraints:
 
 - files
   - headlines
