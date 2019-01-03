@@ -1,8 +1,8 @@
-Org-SQL
-
-* Motivation
-* Configuration
-* Installation
+* Org-SQL
+A SQL backend for Emacs Org-Mode
+** Motivation
+** Configuration
+** Installation
 Clone this repository into your config directory and add the package to =load-path=
 
 #+BEGIN_SRC sh
@@ -13,6 +13,6 @@ git clone git@github.com:ndwarshuis/org-sql.git ~/config/path/org-sql/
 (add-to-list 'load-path "~/config/path/org-sql/")
 (require 'org-sql)
 #+END_SRC
-** Dependencies
+*** Dependencies
 - Org-mode
 - dash
