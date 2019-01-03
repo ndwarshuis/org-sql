@@ -43,7 +43,7 @@ to store them. This is in addition to any properties specifified by
 ;; TODO, make a formating function to convert a lisp obj to schema
 (defconst org-sql-schemas
   '("CREATE TABLE files (file_path TEXT PRIMARY KEY ASC,md5 TEXT NOT NULL,size INTEGER NOT NULL,time_modified DATE,time_created DATE,time_accessed DATE);"
-    "CREATE TABLE headlines (file_path TEXT,headline_offset INTEGER,tree_path TEXT,headline_text TEXT NOT NULL,time_created DATE,time_closed DATE,time_scheduled DATE,time_deadlined DATE,keyword TEXT,effort INTEGER,priority INTEGER,content TEXT,PRIMARY KEY (file_path ASC, headline_offset ASC),FOREIGN KEY (file_path) REFERENCES files (file_path) ON UPDATE CASCADE ON DELETE CASCADE);"
+    "CREATE TABLE headlines (file_path TEXT,headline_offset INTEGER,tree_path TEXT,headline_text TEXT NOT NULL,time_closed DATE,time_scheduled DATE,time_deadlined DATE,keyword TEXT,effort INTEGER,priority INTEGER,content TEXT,PRIMARY KEY (file_path ASC, headline_offset ASC),FOREIGN KEY (file_path) REFERENCES files (file_path) ON UPDATE CASCADE ON DELETE CASCADE);"
     "CREATE TABLE tags (file_path TEXT,headline_offset INTEGER,tag TEXT,inherited BOOLEAN,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path, headline_offset, tag, inherited));"
     "CREATE TABLE properties (file_path TEXT,headline_offset INTEGER,property_offset INTEGER,key_text TEXT NOT NULL,val_text TEXT NOT NULL,inherited BOOLEAN,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, property_offset ASC));"
     "CREATE TABLE clocking (file_path TEXT,headline_offset INTEGER,clock_offset INTEGER,time_start DATE,time_end DATE,clock_note TEXT,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset)ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, clock_offset ASC));"
@@ -398,15 +398,15 @@ If ISO is t, return the timestamp in ISO 8601 format."
 (defun org-sql-element-split-by-type (type contents &optional right)
   "Split org-element sequence of objects CONTENTS by first instance of TYPE.
 If RIGHT is t, get the right half instead of the left."
-  (let ((scan
-         (lambda (c &optional acc)
-           (if c
-               (let ((cur (car c))
-                     (rem (cdr c)))
-                 (if (equal type (org-element-type cur))
-                     (if right rem acc)
-                   (funcall scan rem (append acc (list cur)))))
-             (unless right acc)))))
+  (letrec ((scan
+            (lambda (c &optional acc)
+              (if c
+                  (let ((cur (car c))
+                        (rem (cdr c)))
+                    (if (equal type (org-element-type cur))
+                        (if right rem acc)
+                      (funcall scan rem (append acc (list cur)))))
+                (unless right acc)))))
     (funcall scan contents)))
         
 (defun org-sql-element-parent-headline (obj)
@@ -448,17 +448,17 @@ ACC is treated as a set; therefore no duplicates are retained."
   "Attempts to match HEADER-TEXT with `org-sql-log-note-headings-regexp'.
 If match successful, returns list whose car is the match type
 and cdr is the match data."
-  (let* ((scan
-          (lambda (str note-regex-alist)
-            (when note-regex-alist
-              (let* ((cur (car note-regex-alist))
-                     (rem (cdr note-regex-alist))
-                     (type (car cur))
-                     (re (cdr cur)))
-                (if (string-match re str)
-                    type
-                  (funcall scan str rem))))))
-         (type (funcall scan header-text org-sql-log-note-headings-regexp)))
+  (letrec ((scan
+            (lambda (str note-regex-alist)
+              (when note-regex-alist
+                (let* ((cur (car note-regex-alist))
+                       (rem (cdr note-regex-alist))
+                       (type (car cur))
+                       (re (cdr cur)))
+                  (if (string-match re str)
+                      type
+                    (funcall scan str rem))))))
+           (type (funcall scan header-text org-sql-log-note-headings-regexp)))
     (when type (cons type (match-data)))))
     
 (defun org-sql-todo-keywords ()
@@ -892,9 +892,9 @@ HL-PART is an object as returned by `org-sql-partition-headline'."
          (offset (org-element-property :begin hl))
          (rxv-tp (org-sql-element-parent-tree-path hl))
          (hl-txt (org-element-property :raw-value hl))
-         (t-created (->> hl
-                         (org-element-property :CREATED)
-                         org-sql-ts-fmt-iso))
+         ;; (t-created (->> hl
+         ;;                 (org-element-property :CREATED)
+         ;;                 org-sql-ts-fmt-iso))
          (t-closed (org-sql-element-ts-raw :closed hl t))
          (t-scheduled (org-sql-element-ts-raw :scheduled hl t))
          (t-deadline (org-sql-element-ts-raw :deadline hl t))
@@ -915,7 +915,7 @@ HL-PART is an object as returned by `org-sql-partition-headline'."
                         :headline_offset offset
                         :tree_path rxv-tp
                         :headline_text hl-txt
-                        :time_created t-created
+                        ;; :time_created t-created
                         :time_closed t-closed
                         :time_scheduled t-scheduled
                         :time_deadlined t-deadline
