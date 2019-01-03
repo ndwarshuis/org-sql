@@ -19,15 +19,15 @@ There are other uses for an Org-mode SQL database. If one has many org files sca
 Of course, these could all be done directly in Org-mode with Lisp code (indeed there are already built-in functions for reporting aggregated effort and clock-time). But why do that when one could analyze *all* org files by making a descriptive dashboard with a relatively few lines of R or Python code?
 ** Configuration
 The following options are useful to customize:
-| variable                      | default      | description                                      |
-|-------------------------------+--------------+--------------------------------------------------|
-| =org-sql-use-tag-inheritance= | t            | use tag inheritance when populating the database |
-| =org-sqlite-db-path=          | ~/Org/org.db | the path to the sqlite database                  |
-| =org-sql-ignored-properties=  | nil          | list of properties to ignore when populating     |
-| =org-sql-files=               | nil          | list of org files to insert into database        |
-| =org-sql-buffer=              | "*SQL: Org*" | the name of the buffer for the SQLite connection |
+| variable                    | default        | description                                      |
+|-----------------------------+----------------+--------------------------------------------------|
+| org-sql-use-tag-inheritance | t              | use tag inheritance when populating the database |
+| org-sqlite-db-path          | ~/Org/org.db   | the path to the sqlite database                  |
+| org-sql-ignored-properties  | nil            | list of properties to ignore when populating     |
+| org-sql-files               | nil            | list of org files to insert into database        |
+| org-sql-buffer              | "\*SQL: Org\*" | the name of the buffer for the SQLite connection |
 *** logbooks
-In addition to the options above, the parsing functions rely on built-in =org-mode= variables for processing logbook entries (the part underneat headlines which stores reschedule events, clocking, notes, etc). Critically, logbooks can only be reliably parsed if they are in their own drawer, which means =org-log-into-drawer= must be non-nil. This is a limitation of =org-mode= itself as the org-element API has no way of knowing if a logging entry is part of the log or just a regular list without a defined drawer (in theory clocks could still be detected but this is not implemented yet).
+In addition to the options above, the parsing functions rely on built-in =org-mode= variables for processing logbook entries (the part underneath headlines which stores reschedule events, clocking, notes, etc). Critically, logbooks can only be reliably parsed if they are in their own drawer, which means =org-log-into-drawer= must be non-nil. This is a limitation of =org-mode= itself as the org-element API has no way of knowing if a logging entry is part of the log or just a regular list without a defined drawer (in theory clocks could still be detected but this is not implemented yet).
 
 Additionally, =org-log-note-headings= is expected to be left at its default setting in order to accurately parse timestamps and todo-stats on notes. This will hopefully be expanded in the future.
 
@@ -40,7 +40,7 @@ In order to actually produce logbook entries, one needs to set the relevant =org
 - =org-log-repeat=
 - =org-todo-keywords= (in this one can set which todo keywords changes are logged)
 
-Obvsiously, =org-sql= cannot read your mind and thus requires these variables to be held consistent through the lifetime of the org files in question. If not, entries will be missed.
+Obviously, =org-sql= cannot read your mind and thus requires these variables to be held consistent through the lifetime of the org files in question. If not, entries will be missed.
 ** Installation
 Clone this repository into your config directory and add the package to =load-path=
 
@@ -61,7 +61,7 @@ git clone git@github.com:ndwarshuis/org-sql.git ~/config/path/org-sql/
 2. Run =org-sql-init-db=
 
 This will create a new database with the appropriate schema
-*** Updating and maintanence
+*** Updating and maintenance
 Run =org-sql-user-update=. This will synchronize the database with all files as indicated in =org-sql-files= by first checking if the file if in the database and inserting it if not. If the file is already present, it will check the md5 to assess if updates are needed. This function will insert the *entire* content of any org file that is either new or changed.
 
 Note that the database will take several seconds to minutes if inserting many files depending on the speed of your device (particularly IO) and the size/number of files. This operation will also block Emacs until complete.
@@ -91,7 +91,7 @@ Stores one row for each headline in a given org file as well as any atomic metad
 | time_deadlined    | date    | deadlined timestamp                                      |
 | keyword           | text    | the TODO state keyword                                   |
 | effort            | integer | the value of the Effort property in minutes              |
-| prority           | integer | integer value of the priority                            |
+| priority          | integer | integer value of the priority                            |
 | contents          | text    | unused                                                   |
 
 note: the =CREATED= timestamp is non-standard
