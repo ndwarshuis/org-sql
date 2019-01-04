@@ -168,7 +168,6 @@ Stores one row per logbook entry with planning changes as triggered by setting =
 | file_path (PF)  | text    | path to file containing the entry                     |
 | entry_offset (PF) | integer | offset of the clock's first character in the org file |
 | time_old         | date    | timestamp for the former planning entry               |
-| time_new         | date    | timestamp for the update planning entry               |
 | planning_type    | text    | either "s" (scheduled) or "d" (deadline)              |
 ** Contributions
 Pull requests welcome, especially those for other SQL implementations.
