@@ -49,7 +49,7 @@ to store them. This is in addition to any properties specifified by
     "CREATE TABLE clocking (file_path TEXT,headline_offset INTEGER,clock_offset INTEGER,time_start DATE,time_end DATE,clock_note TEXT,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset)ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, clock_offset ASC));"
     "CREATE TABLE logbook (file_path TEXT,headline_offset INTEGER,entry_offset INTEGER,time_logged DATE,header TEXT,note TEXT,FOREIGN KEY (file_path, headline_offset)REFERENCES headlines (file_path, headline_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, entry_offset ASC));"
     "CREATE TABLE state_changes (file_path TEXT,entry_offset INTEGER,state_old TEXT NOT NULL,state_new TEXT NOT NULL,FOREIGN KEY (file_path, entry_offset) REFERENCES logbook (file_path, entry_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, entry_offset ASC));"
-    "CREATE TABLE planning_changes (file_path TEXT,entry_offset INTEGER,time_old DATE NOT NULL,time_new DATE,planning_type TEXT CHECK (planning_type = \"d\" or (planning_type = \"s\")),FOREIGN KEY (file_path, entry_offset) REFERENCES logbook (file_path, entry_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, entry_offset ASC));"
+    "CREATE TABLE planning_changes (file_path TEXT,entry_offset INTEGER,time_old DATE NOT NULL,planning_type TEXT CHECK (planning_type = \"d\" or (planning_type = \"s\")),FOREIGN KEY (file_path, entry_offset) REFERENCES logbook (file_path, entry_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, entry_offset ASC));"
     "CREATE TABLE links (file_path TEXT,headline_offset INTEGER,link_offset INTEGER,link_path TEXT,link_text TEXT,link_type TEXT,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, link_offset ASC));")
   "Table schemas for the org database.")
 
@@ -635,12 +635,10 @@ nothing is added if a match is not found."
              (planning-kw (if (memq type '(reschedule delschedule))
                               :scheduled
                             :deadline))
-             (time-new (org-sql-element-ts-raw planning-kw hl t))
              (planning-type (if (eq :scheduled planning-kw) "s" "d"))
              (planning-data (list :file_path fp
                                   :entry_offset item-offset
                                   :time_old time-old
-                                  :time_new time-new
                                   :planning_type planning-type)))
         (org-sql-alist-put acc 'planning_changes planning-data)))
      ;; no action required for these
