@@ -43,14 +43,15 @@ to store them. This is in addition to any properties specifified by
 ;; TODO, make a formating function to convert a lisp obj to schema
 (defconst org-sql-schemas
   '("CREATE TABLE files (file_path TEXT PRIMARY KEY ASC,md5 TEXT NOT NULL,size INTEGER NOT NULL,time_modified DATE,time_created DATE,time_accessed DATE);"
-    "CREATE TABLE headlines (file_path TEXT,headline_offset INTEGER,tree_path TEXT,headline_text TEXT NOT NULL,time_closed DATE,time_scheduled DATE,time_deadlined DATE,keyword TEXT,effort INTEGER,priority INTEGER,content TEXT,PRIMARY KEY (file_path ASC, headline_offset ASC),FOREIGN KEY (file_path) REFERENCES files (file_path) ON UPDATE CASCADE ON DELETE CASCADE);"
+    "CREATE TABLE headlines (file_path TEXT,headline_offset INTEGER,tree_path TEXT,headline_text TEXT NOT NULL,keyword TEXT,effort INTEGER,priority INTEGER,content TEXT,PRIMARY KEY (file_path ASC, headline_offset ASC),FOREIGN KEY (file_path) REFERENCES files (file_path) ON UPDATE CASCADE ON DELETE CASCADE);"
     "CREATE TABLE tags (file_path TEXT,headline_offset INTEGER,tag TEXT,inherited BOOLEAN,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path, headline_offset, tag, inherited));"
     "CREATE TABLE properties (file_path TEXT,headline_offset INTEGER,property_offset INTEGER,key_text TEXT NOT NULL,val_text TEXT NOT NULL,inherited BOOLEAN,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, property_offset ASC));"
     "CREATE TABLE clocking (file_path TEXT,headline_offset INTEGER,clock_offset INTEGER,time_start DATE,time_end DATE,clock_note TEXT,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset)ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, clock_offset ASC));"
     "CREATE TABLE logbook (file_path TEXT,headline_offset INTEGER,entry_offset INTEGER,time_logged DATE,header TEXT,note TEXT,FOREIGN KEY (file_path, headline_offset)REFERENCES headlines (file_path, headline_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, entry_offset ASC));"
     "CREATE TABLE state_changes (file_path TEXT,entry_offset INTEGER,state_old TEXT NOT NULL,state_new TEXT NOT NULL,FOREIGN KEY (file_path, entry_offset) REFERENCES logbook (file_path, entry_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, entry_offset ASC));"
-    "CREATE TABLE planning_changes (file_path TEXT,entry_offset INTEGER,time_old DATE NOT NULL,planning_type TEXT CHECK (planning_type = \"d\" or (planning_type = \"s\")),FOREIGN KEY (file_path, entry_offset) REFERENCES logbook (file_path, entry_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, entry_offset ASC));"
-    "CREATE TABLE links (file_path TEXT,headline_offset INTEGER,link_offset INTEGER,link_path TEXT,link_text TEXT,link_type TEXT,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, link_offset ASC));")
+    "CREATE TABLE planning_changes (file_path TEXT, entry_offset INTEGER, timestamp_offset INTEGER NOT NULL, FOREIGN KEY (file_path, entry_offset) REFERENCES logbook (file_path, entry_offset) ON DELETE CASCADE ON UPDATE CASCADE, PRIMARY KEY (file_path ASC, entry_offset ASC), FOREIGN KEY (file_path, timestamp_offset) REFERENCES timestamp (file_path, timestamp_offset) ON DELETE CASCADE ON UPDATE CASCADE);"
+    "CREATE TABLE links (file_path TEXT,headline_offset INTEGER,link_offset INTEGER,link_path TEXT,link_text TEXT,link_type TEXT,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, link_offset ASC));"
+    "CREATE TABLE timestamp (file_path TEXT, headline_offset INTEGER, timestamp_offset INTEGER, raw_value TEXT NOT NULL, type TEXT, planning_type TEXT, warning_type TEXT, warning_value INTEGER, warning_unit TEXT, repeat_type TEXT, repeat_value INTEGER, repeat_unit TEXT, time DATE NOT NULL, time_end DATE, PRIMARY KEY (file_path, timestamp_offset), FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON DELETE CASCADE ON UPDATE CASCADE);")
   "Table schemas for the org database.")
 
 ;; TODO add better docs here...this is too thin
@@ -81,7 +82,7 @@ Mirrors behavior of `org-use-tag-inheritance'."
   :group 'org-sql)
   
 (defcustom org-sql-default-pragma
-  '(:foreign_keys on :defer_foreign_keys on)
+  '(:foreign_keys on)
   "Default pragmas used when opening a sql connection
 via `org-sql-cmd-open-connection'."
   :type '(plist :key-type symbol :value-type string)
@@ -170,7 +171,7 @@ Converts numbers to strings, flanks strings with '\"', and converts
 any other symbols to their symbol name."
   (cond ((stringp entry) (org-sql-escape-text entry))
         ((numberp entry) (number-to-string entry))
-        (entry (symbol-name entry))
+        (entry (-> entry symbol-name org-sql-escape-text))
         (t "NULL")))
 
 (defun org-sql-kw-to-colname (kw)
@@ -227,7 +228,9 @@ from a plist like '(:prop1 value1 :prop2 value2)."
   (-some->> sql-str
             (-flatten)
             (string-join)
-            (format "begin transaction; %s commit;")))
+            (format "begin transaction; %s commit;")
+            ;; turn on deferred keys for all transactions
+            (concat "pragma defer_foreign_keys=on;")))
 
 (defun org-sql-fmt-multi (tbl fun)
   (--map (funcall fun (car tbl) it) (cdr tbl)))
@@ -365,7 +368,7 @@ If TS is nil or TS cannot be understood, nil will be returned."
 
 (defun org-sql-parse-ts-range (ts)
   "Return start and end of timestamp TS depending on if it is a range.
-Return value will be a list of two elements if range and one if not."
+Return value will be (start . end) if range and (start) if not."
   (when ts
     (let ((split
            (lambda (ts &optional end)
@@ -610,7 +613,7 @@ ITEM-PART is a partitions logbook item as described in
 how they match those generated by `org-log-note-headings', and
 nothing is added if a match is not found."
   (let* ((hl-part (alist-get :hl-part item-part))
-         (hl (alist-get :headline hl-part))
+         ;; (hl (alist-get :headline hl-part))
          (fp (alist-get :filepath hl-part))
          (item (alist-get :item item-part))
          (item-offset (org-element-property :begin item))
@@ -629,18 +632,24 @@ nothing is added if a match is not found."
                                :state_new state-new)))
         (org-sql-alist-put acc 'state_changes state-data)))
      ((memq type '(reschedule delschedule redeadline deldeadline))
-      (let* ((time-old (->> header-text
-                            (match-string 1)
-                            org-sql-ts-fmt-iso))
-             (planning-kw (if (memq type '(reschedule delschedule))
-                              :scheduled
-                            :deadline))
-             (planning-type (if (eq :scheduled planning-kw) "s" "d"))
-             (planning-data (list :file_path fp
-                                  :entry_offset item-offset
-                                  :time_old time-old
-                                  :planning_type planning-type)))
-        (org-sql-alist-put acc 'planning_changes planning-data)))
+      (let* ((ts-old (->> item-part
+                          (alist-get :item)
+                          (assoc 'paragraph)
+                          (org-element-contents)
+                          ;; assume old timestamp is always the first
+                          (assoc 'timestamp)))
+             (planning-type (if (memq type '(reschedule delschedule))
+                                'scheduled
+                              'deadlined))
+             (pc-data
+              (list
+               :file_path fp
+               :entry_offset item-offset
+               :timestamp_offset (org-element-property :begin ts-old))))
+        (->
+         acc
+         (org-sql-alist-put 'planning_changes pc-data)
+         (org-sql-extract-ts ts-old hl-part planning-type))))
      ;; no action required for these
      ((memq type '(done refile note)) acc)
      ;; header type not determined, therefore do nothing
@@ -882,6 +891,38 @@ HL-PART is an object as returned by `org-sql-partition-headline'."
                 (org-sql-alist-put acc 'links ln-data)))))
     (org-sql-extract acc from links hl-part)))
 
+(defun org-sql-extract-ts (acc ts hl-part &optional pt)
+  "Add timestamp TS data from headline HL-PART to accumulator ACC.
+HL-PART is an object as returned by `org-sql-partition-headline'."
+  (let* ((ts-range (org-sql-parse-ts-range ts))
+         (fp (alist-get :filepath hl-part))
+         (ts-offset (org-element-property :begin ts))
+         (ts-data
+          (list
+           :file_path fp
+           :headline_offset (->> hl-part
+                                 (alist-get :headline)
+                                 (org-element-property :begin))
+           :timestamp_offset ts-offset
+           ;; don't care if they are ranges here, this is reflected in
+           ;; the time_end value
+           :type (--> ts
+                      (org-element-property :type it)
+                      (cond ((eq it 'inactive-range) 'inactive)
+                            ((eq it 'active-range) 'active)
+                            (t it)))
+           :planning_type pt
+           :warning_type (org-element-property :warning-type ts)
+           :warning_value (org-element-property :warning-value ts)
+           :warning_unit (org-element-property :warning-unit ts)
+           :repeat_type (org-element-property :repeater-type ts)
+           :repeat_value (org-element-property :repeater-value ts)
+           :repeat_unit (org-element-property :repeater-unit ts)
+           :time (car ts-range)
+           :time_end (cdr ts-range)
+           :raw_value (org-element-property :raw-value ts))))
+    (org-sql-alist-put acc 'timestamp ts-data)))
+
 (defun org-sql-extract-hl-meta (acc hl-part)
   "Add general data from headline HL-PART to accumulator ACC.
 HL-PART is an object as returned by `org-sql-partition-headline'."
@@ -890,12 +931,9 @@ HL-PART is an object as returned by `org-sql-partition-headline'."
          (offset (org-element-property :begin hl))
          (rxv-tp (org-sql-element-parent-tree-path hl))
          (hl-txt (org-element-property :raw-value hl))
-         ;; (t-created (->> hl
-         ;;                 (org-element-property :CREATED)
-         ;;                 org-sql-ts-fmt-iso))
-         (t-closed (org-sql-element-ts-raw :closed hl t))
-         (t-scheduled (org-sql-element-ts-raw :scheduled hl t))
-         (t-deadline (org-sql-element-ts-raw :deadline hl t))
+         (ts-cls (org-element-property :closed hl))
+         (ts-scd (org-element-property :scheduled hl))
+         (ts-dln (org-element-property :deadline hl))
          (kw (->> hl
                   (org-element-property :todo-keyword)
                   org-sql-strip-string))
@@ -913,15 +951,16 @@ HL-PART is an object as returned by `org-sql-partition-headline'."
                         :headline_offset offset
                         :tree_path rxv-tp
                         :headline_text hl-txt
-                        ;; :time_created t-created
-                        :time_closed t-closed
-                        :time_scheduled t-scheduled
-                        :time_deadlined t-deadline
                         :keyword kw
                         :effort effort
                         :priority priority
                         :content nil)))
-    (org-sql-alist-put acc 'headlines hl-data)))
+    (-->
+     acc
+     (org-sql-alist-put it 'headlines hl-data)
+     (if ts-cls (org-sql-extract-ts it ts-cls hl-part 'closed) it)
+     (if ts-scd (org-sql-extract-ts it ts-scd hl-part 'scheduled) it)
+     (if ts-dln (org-sql-extract-ts it ts-dln hl-part 'deadlined) it))))
 
 (defun org-sql-extract-hl (acc headlines fp)
   "Extract data from HEADLINES and add to accumulator ACC.

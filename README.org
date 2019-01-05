@@ -96,9 +96,6 @@ Stores one row for each headline in a given org file as well as any atomic metad
 | headline_offset (F) | integer | offset of the headline's first character in the org file |
 | tree_path (P)       | text    | outline tree path of the headline                        |
 | headline_text       | text    | raw text of the headline                                 |
-| time_closed         | date    | closed timestamp                                         |
-| time_scheduled      | date    | scheduled timestamp                                      |
-| time_deadlined      | date    | deadlined timestamp                                      |
 | keyword             | text    | the TODO state keyword                                   |
 | effort              | integer | the value of the Effort property in minutes              |
 | priority            | integer | integer value of the priority                            |
@@ -163,12 +160,31 @@ Stores one row per logbook entry with state change information (as triggered by 
 | state_new        | text    | updated todo state keyword                            |
 *** planning_changes
 Stores one row per logbook entry with planning changes as triggered by setting =org-log-reschedule= and =org-log-redeadline=.
-| column          | type    | description                                           |
-|------------------+---------+-------------------------------------------------------|
-| file_path (PF)  | text    | path to file containing the entry                     |
-| entry_offset (PF) | integer | offset of the clock's first character in the org file |
-| time_old         | date    | timestamp for the former planning entry               |
-| planning_type    | text    | either "s" (scheduled) or "d" (deadline)              |
+| column               | type    | description                                           |
+|----------------------+---------+-------------------------------------------------------|
+| file_path (PF)       | text    | path to file containing the entry                     |
+| entry_offset (PF)    | integer | offset of the entry' first character in the org file  |
+| timestamp_offset (F) | date    | offset of the timestamp for the former planning entry |
+*** timestamp
+In the future, this will have one row for each timestamp under a headline. For now it just refers to timestamps in the planning block (eg CLOSED, SCHEDULED, or DEADLINE) and timestamps in logbook headings for planning changes. It does not include the timestamp for the time a log entry was taken (this is stored in the /logging/ table above) nor does it store timestamps for clocks (stored in the /clocking/ table). Eventually this table will include timestamps in logbook notes as well as headline contents.
+| column              | type    | description                                                    |
+|---------------------+---------+----------------------------------------------------------------|
+| file_path (PF)      | text    | path to file containing the entry                              |
+| headline_offset (F) | integer | offset of the entry' first character in the org file           |
+| timestamp_offet (P) | date    | offset of the timestamp for the former planning entry          |
+| raw_value           | text    | the string of the timestamp as it appears in orgmode           |
+| type                | text    | either inactive or active                                      |
+| planning_type       | text    | either /closed/, /scheduled/, /deadlined/, or null             |
+| warning_type        | text    | the warning type (/all/ or /first/)                            |
+| warning_value       | integer | value of warning shift                                         |
+| warning_unit        | text    | unit for warning shift (/hour/, /day/, /week/, /month/, /year/ |
+| repeat_type         | text    | the repeater type (/catch-up/, restart, /cumulate/)            |
+| repeat_value        | integer | value of repeater shift                                        |
+| repeat_unit         | text    | unit for warning shift (/hour/, /day/, /week/, /month/, /year/ |
+| time                | date    | the time of the timestamp in ISO 8601 format                   |
+| time_end            | date    | like *time* but for the end if this is a range                 |
+
+NOTE: inactive-range and active-range will not appear in the *type* column. Use *time_end* instead to determine if the timestamp is a ranged timestamp
 ** Contributions
 Pull requests welcome, especially those for other SQL implementations.
 ** Acknowledgments
