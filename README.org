@@ -40,7 +40,7 @@ Firstly, one needs to set the relevant =org-mode= variables in order to capture 
 
 Obtaining the above information for the database assumes that =org-log-note-headings= is left at its default value. This limitation may be surpassed in the future.
 
-Additionally, for best results it is recommended that all logbook entries be contained in their own drawer. This means that =org-log-into-drawer= should be set to ="LOGBOOK"= and =org-clock-into-drawer= should be set to =t= (which means clocks go into a drawer with hardcoded name ="LOGBOOK"=). Without these settings, =org-sql= needs to guess where the logbook entries are based on location and pattern matching, which is not totally reliable.
+Additionally, for best results it is recommended that all logbook entries be contained in their own drawer. This means that =org-log-into-drawer= should be set to =LOGBOOK= and =org-clock-into-drawer= should be set to =t= (which means clocks go into a drawer with hardcoded name =LOGBOOK=). Without these settings, =org-sql= needs to guess where the logbook entries are based on location and pattern matching, which is not totally reliable.
 ** Installation
 Clone this repository into your config directory and add the package to =load-path=
 
