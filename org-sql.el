@@ -530,6 +530,57 @@ of the escapes."
   "Like `org-log-note-headings' but has regexp's instead of
 escape sequences.")
 
+(defun org-sql-flatten-lb-entries (lb-contents)
+  "Given LB-CONTENTS, return a flattened list of clocks and items.
+LB_CONTENTS is assumed to start with only org-elements clock and
+plain-list, although this is not enforced here."
+  (->> lb-contents
+       (--map (if (eq 'clock (org-element-type it)) (list it)
+                (org-element-map it 'item #'identity)))
+       (apply #'append)))
+
+(defun org-sql-split-lb-entries (lb-contents)
+  "Split logbook entry list LB-CONTENTS into lb and non-lb halves.
+LB-CONTENTS is assumes to have only clock and plain-list org elements
+objects. Non-logbook content is determined by trying to match each
+item with `org-log-note-headings'. Only the last string of items after
+a clock are considered, and the item immediately after the clock is
+not considered as it may be a clock note. Note that anything that
+is not in the last run of items that does not match will go into the
+database with parse errors, as these should not happen.
+
+Returns a cons cell where the car is a list lb-entries and the
+cdr is a list of the entries which are not found to be logbook entries.
+The lb-entries are flattened using `org-sql-flatten-lb-entries'."
+  ;; if last element is a plain list, check for non-logbook items
+  (if (eq 'plain-list (org-element-type (-last-item lb-contents)))
+      (let* ((clock-present? (assoc 'clock lb-contents))
+             (last-split (-->
+                          lb-contents
+                          (-last-item it)
+                          (list it)
+                          (org-sql-flatten-lb-entries it)))
+             (butlast-split (-->
+                             lb-contents
+                             (-butlast it)
+                             (org-sql-flatten-lb-entries it)
+                             (if (not clock-present?) it
+                               (append it `(,(-first-item last-split))))))
+             (last-split-part (-->
+                               last-split
+                               (if clock-present? (-drop 1 it) it)
+                               (--split-with
+                                (--> it
+                                     ;; use nil for hl-part here
+                                     ;; because we only care about
+                                     ;; the :type field
+                                     (org-sql-partition-item it nil)
+                                     (alist-get :type it))
+                                it))))
+        (cons (append butlast-split (car last-split-part))
+              (cdr last-split-part)))
+    (list (org-sql-flatten-lb-entries lb-contents))))
+
 ;;;; org-mode element partitioning functions
 
 (defun org-sql-partition-headline (headline fp)
@@ -750,55 +801,48 @@ and represents the headline surrounding the entry."
     (cond
      ((eq type 'clock)
       (org-sql-extract-lb-clock acc entry hl-part))
-     ((eq type 'plain-list)
+     ((eq type 'item)
       (--> entry
-           (org-element-contents it)
-           (org-sql-extract-lb-items acc it hl-part)))
+           (org-sql-partition-item it hl-part)
+           (org-sql-extract-lb-item acc it)))
      ;; TODO add an "UNKNOWN" logbook parser
      (t acc))))
 
-(defun org-sql-extract-lb-two (acc entry1 entry2 hl-part)
-  "Add data from logbook ENTRY1 and ENTRY2 to accumulator ACC.
+(defun org-sql-extract-lb-contents (acc lb-flat hl-part)
+  "Add list of logbook items LB-FLAT from HL-PART to accumulator ACC.
 HL-PART is an object as returned by `org-sql-partition-headline'
-and represents the headline surrounding the entries. This assumes the
-entries are org-element types clock and plain-list respectively, and
-will check if the first item in ENTRY2 is part of the clock."
-  (let* ((items (org-element-contents entry2))
-         (first-item (car items))
-         (rem-items (cdr items)))
-    (-> acc
-        (org-sql-extract-lb-clock entry1 hl-part first-item)
-        (org-sql-extract-lb-items rem-items hl-part))))
+and LB-FLAT is a flatted logbook entry list as given by
+`org-sql-flatten-lb-entries'."
+  (while lb-flat
+    ;; Need two of the next entries here because clocks may
+    ;; have notes associated with them, but the only
+    ;; distinguishing characteristic they have is that they
+    ;; don't match anything in org-log-note-headings. If we
+    ;; end up processing two entries at once, skip over two
+    ;; instead of one on the next iteration.
+    (let* ((cur1 (car lb-flat))
+           (cur2 (cadr lb-flat))
+           (type1 (org-element-type cur1))
+           (type2 (org-element-type cur2))
+           (try-clock-note (and (eq type1 'clock) (eq type2 'item))))
+      (if try-clock-note
+          (setq acc (org-sql-extract-lb-clock acc cur1 hl-part cur2)
+                lb-flat (cddr lb-flat))
+        (setq acc (org-sql-extract-lb-one acc cur1 hl-part)
+              lb-flat (cdr lb-flat)))))
+  acc)
 
-(defun org-sql-extract-lb (acc hl-part)
-  "Add logbook data from HL-PART and add to accumulator ACC.
+(defun org-sql-extract-lb-drawer (acc hl-part)
+  "Given HL-PART, find logbook drawer and add to accumulator ACC.
 HL-PART is an object as returned by `org-sql-partition-headline'."
-  (let* ((lb-contents
-          (->>
-           hl-part
-           (alist-get :section)
-           (--first (equal org-log-into-drawer
-                           (org-element-property :drawer-name it)))
-           org-element-contents)))
-    (while lb-contents
-      ;; Need two of the next entries here because clocks may
-      ;; have notes associated with them, but the only
-      ;; distinguishing characteristic they have is that they
-      ;; don't match anything in org-log-note-headings. If we
-      ;; end up processing two entries at once, skip over two
-      ;; instead of one on the next iteration.
-      (let* ((cur1 (car lb-contents))
-             (cur2 (cadr lb-contents))
-             (type1 (org-element-type cur1))
-             (type2 (org-element-type cur2))
-             (try-clock-note (and (eq 'clock type1)
-                                  (eq type2 'plain-list))))
-        (if try-clock-note
-            (setq acc (org-sql-extract-lb-two acc cur1 cur2 hl-part)
-                  lb-contents (cddr lb-contents))
-          (setq acc (org-sql-extract-lb-one acc cur1 hl-part)
-                lb-contents (cdr lb-contents)))))
-    acc))
+  (--> hl-part
+       (alist-get :section it)
+       (--first (equal org-log-into-drawer
+                       (org-element-property :drawer-name it))
+                it)
+       (org-element-contents it)
+       (org-sql-flatten-lb-entries it)
+       (org-sql-extract-lb-contents acc it hl-part)))
 
 (defun org-sql-extract-properties (acc hl-part)
    "Add properties data from HL-PART and add to accumulator ACC.
@@ -923,6 +967,30 @@ HL-PART is an object as returned by `org-sql-partition-headline'."
            :raw_value (org-element-property :raw-value ts))))
     (org-sql-alist-put acc 'timestamp ts-data)))
 
+(defun org-sql-extract-hl-contents (acc hl-part)
+  "Add contents from partitioned header HL-PART to accumulator ACC.
+HL-PART is an object as returned by `org-sql-partition-headline'."
+  ;; start by getting the 'section contents, which is everything
+  ;; except for the planning element, logbook drawer, and property
+  ;; drawer
+  (let* ((sec (->>
+               hl-part
+               (alist-get :section)
+               (--remove (eq 'planning (org-element-type it)))
+               (--remove (eq 'property-drawer (org-element-type it)))
+               (--remove (equal (org-element-property :drawer-name it)
+                                org-log-into-drawer))))
+         (sec-split (--split-with
+                     (or (eq 'clock (org-element-type it))
+                         (eq 'plain-list (org-element-type it)))
+                     sec))
+         (lb-split (-> sec-split car org-sql-split-lb-entries)))
+         ;; TODO actually use section contents for content insertion 
+         ;; (sec-rem (->> sec-split cdr (append (cdr lb-split)))))
+    (->
+     acc
+     (org-sql-extract-lb-contents (car lb-split) hl-part))))
+      
 (defun org-sql-extract-hl-meta (acc hl-part)
   "Add general data from headline HL-PART to accumulator ACC.
 HL-PART is an object as returned by `org-sql-partition-headline'."
@@ -941,12 +1009,6 @@ HL-PART is an object as returned by `org-sql-partition-headline'."
                       (org-element-property :EFFORT it)
                       (org-sql-effort-to-int it t)))
          (priority (org-element-property :priority hl))
-         ;; TODO, add contents somehow
-         ;; (hl-contents (plist-get hl-part :hl-contents))
-         ;; (hl-contents-text (org-element-interpret-data hl-contents))
-         ;; (hl-contents-text (when hl-contents-text
-         ;;                     (string-trim
-         ;;                      (substring-no-properties hl-contents-text))))
          (hl-data (list :file_path fp
                         :headline_offset offset
                         :tree_path rxv-tp
@@ -957,6 +1019,7 @@ HL-PART is an object as returned by `org-sql-partition-headline'."
                         :content nil)))
     (-->
      acc
+     (org-sql-extract-hl-contents it hl-part)
      (org-sql-alist-put it 'headlines hl-data)
      (if ts-cls (org-sql-extract-ts it ts-cls hl-part 'closed) it)
      (if ts-scd (org-sql-extract-ts it ts-scd hl-part 'scheduled) it)
@@ -974,7 +1037,7 @@ FP is the path to the file containing the headlines."
                  (org-sql-extract-links hl-part)
                  (org-sql-extract-tags hl-part)
                  (org-sql-extract-properties hl-part)
-                 (org-sql-extract-lb hl-part)
+                 (org-sql-extract-lb-drawer hl-part)
                  (org-sql-extract-hl hl-sub fp))))))
     (org-sql-extract acc from headlines fp)))
 
