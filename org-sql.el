@@ -43,7 +43,7 @@ to store them. This is in addition to any properties specifified by
 ;; TODO, make a formating function to convert a lisp obj to schema
 (defconst org-sql-schemas
   '("CREATE TABLE files (file_path TEXT PRIMARY KEY ASC,md5 TEXT NOT NULL,size INTEGER NOT NULL,time_modified DATE,time_created DATE,time_accessed DATE);"
-    "CREATE TABLE headlines (file_path TEXT,headline_offset INTEGER,tree_path TEXT,headline_text TEXT NOT NULL,keyword TEXT,effort INTEGER,priority INTEGER,content TEXT,PRIMARY KEY (file_path ASC, headline_offset ASC),FOREIGN KEY (file_path) REFERENCES files (file_path) ON UPDATE CASCADE ON DELETE CASCADE);"
+    "CREATE TABLE headlines (file_path TEXT, headline_offset INTEGER, tree_path TEXT, headline_text TEXT NOT NULL, keyword TEXT, effort INTEGER, priority CHAR, archived BOOLEAN, commented BOOLEAN, content TEXT, PRIMARY KEY (file_path ASC, headline_offset ASC), FOREIGN KEY (file_path) REFERENCES files (file_path) ON UPDATE CASCADE ON DELETE CASCADE);"
     "CREATE TABLE tags (file_path TEXT,headline_offset INTEGER,tag TEXT,inherited BOOLEAN,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path, headline_offset, tag, inherited));"
     "CREATE TABLE properties (file_path TEXT,headline_offset INTEGER,property_offset INTEGER,key_text TEXT NOT NULL,val_text TEXT NOT NULL,inherited BOOLEAN,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, property_offset ASC));"
     "CREATE TABLE clocking (file_path TEXT,headline_offset INTEGER,clock_offset INTEGER,time_start DATE,time_end DATE,clock_note TEXT,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset)ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, clock_offset ASC));"
@@ -994,29 +994,28 @@ HL-PART is an object as returned by `org-sql-partition-headline'."
 (defun org-sql-extract-hl-meta (acc hl-part)
   "Add general data from headline HL-PART to accumulator ACC.
 HL-PART is an object as returned by `org-sql-partition-headline'."
-  (let* ((fp (alist-get :filepath hl-part))
-         (hl (alist-get :headline hl-part))
-         (offset (org-element-property :begin hl))
-         (rxv-tp (org-sql-element-parent-tree-path hl))
-         (hl-txt (org-element-property :raw-value hl))
+  (let* ((hl (alist-get :headline hl-part))
          (ts-cls (org-element-property :closed hl))
          (ts-scd (org-element-property :scheduled hl))
          (ts-dln (org-element-property :deadline hl))
-         (kw (->> hl
-                  (org-element-property :todo-keyword)
-                  org-sql-strip-string))
-         (effort (--> hl
-                      (org-element-property :EFFORT it)
-                      (org-sql-effort-to-int it t)))
-         (priority (org-element-property :priority hl))
-         (hl-data (list :file_path fp
-                        :headline_offset offset
-                        :tree_path rxv-tp
-                        :headline_text hl-txt
-                        :keyword kw
-                        :effort effort
-                        :priority priority
-                        :content nil)))
+         (hl-data
+          (list
+           :file_path (alist-get :filepath hl-part)
+           :headline_offset (org-element-property :begin hl)
+           :tree_path (org-sql-element-parent-tree-path hl)
+           :headline_text (org-element-property :raw-value hl)
+           :keyword (->> hl
+                         (org-element-property :todo-keyword)
+                         org-sql-strip-string)
+           :effort (--> hl
+                        (org-element-property :EFFORT it)
+                        (org-sql-effort-to-int it t))
+           :priority (-some->> hl
+                               (org-element-property :priority)
+                               byte-to-string)
+           :archived (if (org-element-property :archivedp hl) 1 0)
+           :commented (if (org-element-property :commentedp hl) 1 0)
+           :content nil)))
     (-->
      acc
      (org-sql-extract-hl-contents it hl-part)

@@ -98,7 +98,9 @@ Stores one row for each headline in a given org file as well as any atomic metad
 | headline_text       | text    | raw text of the headline                                 |
 | keyword             | text    | the TODO state keyword                                   |
 | effort              | integer | the value of the Effort property in minutes              |
-| priority            | integer | integer value of the priority                            |
+| priority            | char    | character value of the priority                          |
+| archived            | bool    | true if the headline has an archive tag                  |
+| commented           | bool    | true if the headline has a comment keyword               |
 | contents            | text    | unused                                                   |
 *** links
 Stores one row for each link in a given org file and headline
