@@ -27,11 +27,9 @@ The following options are useful to customize:
 | org-sql-files               | nil            | list of org files to insert into database        |
 | org-sql-buffer              | =*SQL: Org*=   | the name of the buffer for the SQLite connection |
 *** logbooks
-In addition to the options above, the parsing functions rely on built-in =org-mode= variables for processing logbook entries (the part underneath headlines which stores reschedule events, clocking, notes, etc). Critically, logbooks can only be reliably parsed if they are in their own drawer, which means =org-log-into-drawer= must be non-nil. This is a limitation of =org-mode= itself as the org-element API has no way of knowing if a logging entry is part of the log or just a regular list without a defined drawer (in theory clocks could still be detected but this is not implemented yet).
+Much of the extracted data from =org-sql= pertains to logbook entries, and there are a number of settings that effect how this data is generated in org files and how it may be parsed reliably.
 
-Additionally, =org-log-note-headings= is expected to be left at its default setting in order to accurately parse timestamps and todo-stats on notes. This will hopefully be expanded in the future.
-
-In order to actually produce logbook entries, one needs to set the relevant =org-mode= variables. Please refer to their documentation in =org-mode= itself for their meaning:
+Firstly, one needs to set the relevant =org-mode= variables in order to capture logging information. Please refer to the documentation in =org-mode= itself for their meaning:
 - =org-log-done=
 - =org-log-reschedule=
 - =org-log-redeadline=
@@ -40,7 +38,9 @@ In order to actually produce logbook entries, one needs to set the relevant =org
 - =org-log-repeat=
 - =org-todo-keywords= (in this one can set which todo keywords changes are logged)
 
-Obviously, =org-sql= cannot read your mind and thus requires these variables to be held consistent through the lifetime of the org files in question. If not, entries will be missed.
+Obtaining the above information for the database assumes that =org-log-note-headings= is left at its default value. This limitation may be surpassed in the future.
+
+Additionally, for best results it is recommended that all logbook entries be contained in their own drawer. This means that =org-log-into-drawer= should be set to ="LOGBOOK"= and =org-clock-into-drawer= should be set to =t= (which means clocks go into a drawer with hardcoded name ="LOGBOOK"=). Without these settings, =org-sql= needs to guess where the logbook entries are based on location and pattern matching, which is not totally reliable.
 ** Installation
 Clone this repository into your config directory and add the package to =load-path=
 
