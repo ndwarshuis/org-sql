@@ -937,7 +937,10 @@ HL-PART is an object as returned by `org-sql-partition-headline'."
 
 (defun org-sql-extract-ts (acc ts hl-part &optional pt)
   "Add timestamp TS data from headline HL-PART to accumulator ACC.
-HL-PART is an object as returned by `org-sql-partition-headline'."
+HL-PART is an object as returned by `org-sql-partition-headline'.
+PT is a string representing the planning type and is one of 'closed,'
+'scheduled,' or 'deadlined' although these values are not enforced by
+this function."
   (let* ((ts-range (org-sql-parse-ts-range ts))
          (fp (alist-get :filepath hl-part))
          (ts-offset (org-element-property :begin ts))
@@ -984,12 +987,14 @@ HL-PART is an object as returned by `org-sql-partition-headline'."
                      (or (eq 'clock (org-element-type it))
                          (eq 'plain-list (org-element-type it)))
                      sec))
-         (lb-split (-> sec-split car org-sql-split-lb-entries)))
-         ;; TODO actually use section contents for content insertion 
-         ;; (sec-rem (->> sec-split cdr (append (cdr lb-split)))))
+         (lb-split (-> sec-split car org-sql-split-lb-entries))
+         (sec-rem (->> sec-split cdr (append (cdr lb-split))))
+         (hl-ts (org-element-map sec-rem 'timestamp #'identity)))
+    (print hl-ts)
     (->
      acc
-     (org-sql-extract-lb-contents (car lb-split) hl-part))))
+     (org-sql-extract-lb-contents (car lb-split) hl-part)
+     (org-sql-extract #'org-sql-extract-ts hl-ts hl-part))))
       
 (defun org-sql-extract-hl-meta (acc hl-part)
   "Add general data from headline HL-PART to accumulator ACC.

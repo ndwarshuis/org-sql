@@ -186,7 +186,9 @@ In the future, this will have one row for each timestamp under a headline. For n
 | time                | date    | the time of the timestamp in ISO 8601 format               |
 | time_end            | date    | like *time* but for the end if this is a range             |
 
-NOTE: inactive-range and active-range will not appear in the *type* column. Use *time_end* instead to determine if the timestamp is a ranged timestamp
+NOTES: 
+- inactive-range and active-range will not appear in the *type* column. Use *time_end* instead to determine if the timestamp is a ranged timestamp
+- there is no distinction in this table alone between planning timestamps that are part of the planning section (eg =CLOSED: [whatever]=) and those from logbook entries that pertain to planning changes (eg =Removed deadline, was "[whatever]"=). This distinction requires the =planning_changes= table, which will reference logbook planning change timestamps but not in the planning section.
 ** Contributions
 Pull requests welcome, especially those for other SQL implementations.
 ** Acknowledgments
