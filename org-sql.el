@@ -217,11 +217,19 @@ from a plist like '(:prop1 value1 :prop2 value2)."
     (format "update %s set %s where %s;" (symbol-name tbl-name)
             upd-str conds-str)))
 
-(defun org-sql-fmt-delete (tbl-name conds)
-  "Format SQL update command from TBL-NAME and CONDS."
-  (--> conds
-       (org-sql-plist-concat it " and ")
-       (format "delete from %s where %s;" (symbol-name tbl-name) it)))
+(defun org-sql-fmt-delete (tbl-name conds &optional delete-all)
+  "Format SQL update command from TBL-NAME and CONDS.
+To delete everything in TBL-NAME, supply nil for CONDS and set
+DELETE-ALL to t (the latter is a safety mechanism as this could be
+very destructive)."
+  (let ((tbl-name-str (symbol-name tbl-name)))
+    (cond
+     (conds
+      (--> conds
+           (org-sql-plist-concat it " and ")
+           (format "delete from %s where %s;" tbl-name-str it)))
+     (delete-all
+      (format "delete from %s;" tbl-name-str)))))
 
 (defun org-sql-fmt-trans (sql-str)
   "Format SQL transaction from list of SQL commands as strings SQL-STR."
@@ -1242,6 +1250,14 @@ This assumes an active connection is open."
       ,(-> trans (plist-get 'update) (org-sql-cmd))
       ,(-> trans (plist-get 'insert) (org-sql-cmd)))))
 
+(defun org-sql-clear-db ()
+  "Clear the database. This assumes an active connections is open."
+  ;; only delete from files as we assume actions here cascade down
+  (-> (org-sql-fmt-delete 'files nil t)
+      list
+      (org-sql-fmt-trans)
+      (org-sql-cmd)))
+
 ;;;; interactive user functions
 
 (defun org-sql-user-update ()
@@ -1255,6 +1271,16 @@ This assumes an active connection is open."
   (message "Updating Org SQL database")
   (org-sql-update-db)
   (message "Org SQL update complete"))
+
+(defun org-sql-user-clear-all ()
+  "Remove all entries in the database."
+  (interactive)
+  (unless (get-buffer-process org-sql-buffer)
+    (message "Opening SQLi Buffer")
+    (org-sql-cmd-open-connection))
+  (message "Clearing Org SQL database")
+  (org-sql-clear-db)
+  (message "Org SQL clear completed"))
 
 (provide 'org-sql)
 ;;; test.el ends here
