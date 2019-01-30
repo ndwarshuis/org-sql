@@ -149,7 +149,7 @@ suitable for passing to `advice-add'.  The BODY is wrapped in an
 event of an error or nonlocal exit."
   (declare (debug ((&rest (&rest form)) body)) (indent 1))
   `(progn
-     ,@(--map (cons 'advice-add it) adlist)
+     ,@(--map (cons #'advice-add it) adlist)
      (unwind-protect (progn ,@body)
        ,@(--map `(advice-remove ,(car it) ,(nth 2 it)) adlist))))
 
