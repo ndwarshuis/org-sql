@@ -1,4 +1,4 @@
-;;; org-sql.el --- Org-Mode SQL backend -*- lexical-binding: t; -*-
+;;; org-sql.el --- Org-Mode SQL converter -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2019  Nathan Dwarshuis
 
