@@ -5,7 +5,7 @@
 ;; Author: Nathan Dwarshuis <natedwarshuis@gmail.com>
 ;; Keywords: org-mode, data
 ;; Homepage: https://github.com/ndwarshuis/org-sql
-;; Package-Requires: ((emacs "24") (dash "2.15"))
+;; Package-Requires: ((emacs "25") (dash "2.15"))
 ;; Version: 0.0.1
 
 ;; This program is free software; you can redistribute it and/or modify
@@ -40,6 +40,8 @@
 
 ;;; Code:
 
+(require 'cl-lib)
+(require 'subr-x)
 (require 'dash)
 (require 'sql)
 (require 'org)
@@ -78,7 +80,7 @@ Mirrors behavior of `org-use-tag-inheritance'."
   :type 'boolean
   :group 'org-sql)
 
-(defcustom org-sqlite-db-path (expand-file-name "org.db" org-directory)
+(defcustom org-sql-sqlite-path (expand-file-name "org.db" org-directory)
   "Path for the sqlite database where org data will be stored."
   :type 'file
   :group 'org-sql)
@@ -151,6 +153,10 @@ event of an error or nonlocal exit."
      (unwind-protect (progn ,@body)
        ,@(--map `(advice-remove ,(car it) ,(nth 2 it)) adlist))))
 
+(defun org-sql--plist-get-keys (plist)
+  "Return all the keys in PLIST."
+  (-slice plist 0 nil 2))
+
 (defun org-sql--plist-get-vals (plist)
   "Return all the values in PLIST."
   (-slice plist 1 nil 2))
@@ -198,7 +204,7 @@ Returns a string formatted like 'prop1 = value1 SEP prop2 = value2'
 from a plist like '(:prop1 value1 :prop2 value2)."
   (let ((sep (or sep ","))
         (keys (->> plist
-                   plist-get-keys
+                   org-sql--plist-get-keys
                    (mapcar #'org-sql--kw-to-colname)))
         (vals (->> plist
                    org-sql--plist-get-vals
@@ -213,7 +219,7 @@ from a plist like '(:prop1 value1 :prop2 value2)."
   "Format SQL insert command from TBL-NAME and TBL-DATA."
   (let ((col-names (-->
                     tbl-data
-                    (plist-get-keys it)
+                    (org-sql--plist-get-keys it)
                     (mapcar #'org-sql--kw-to-colname it)
                     (string-join it ",")))
         (col-values (-->
@@ -280,11 +286,11 @@ Returns a list of formatted strings."
   (org-sql--fmt-multi tbl #'org-sql--fmt-delete))
 
 (defun org-sql--fmt-pragma (plist)
-  "Creates a SQL statement for setting pragmas in PLIST.
+  "Create a SQL statement for setting pragmas in PLIST.
 PLIST contains the pragmas as the properties and their intended
 values as the property values."
   (let ((pragmas (->> plist
-                      plist-get-keys
+                      org-sql--plist-get-keys
                       (mapcar #'org-sql--kw-to-colname))))
     (->> plist
          org-sql--plist-get-vals
@@ -294,14 +300,14 @@ values as the property values."
 ;;; SQL command abstractions
 
 (defun org-sql-cmd-open-connection ()
-  "Open a new SQL connection to `org-sqlite-db-path'.
+  "Open a new SQL connection to `org-sql-sqlite-path'.
 This also sets the pragma according to `org-sql-default-pragma'.
 Opens a new process buffer for the connection with name
 `org-sql-buffer'."
   (org-sql--with-advice
       ((#'sql-get-login :override #'ignore)
        (#'pop-to-buffer :override #'ignore))
-    (let ((sql-database org-sqlite-db-path))
+    (let ((sql-database org-sql-sqlite-path))
       (sql-sqlite org-sql-buffer)
       (org-sql--cmd-set-pragma))))
 
@@ -317,8 +323,8 @@ exist) to or instead of (if they already exist) those in
     (let ((all-props
            (->>
             org-sql-default-pragma
-            plist-get-keys
-            (append (plist-get-keys pragma))
+            org-sql--plist-get-keys
+            (append (org-sql--plist-get-keys pragma))
             delete-dups))
           (getv
            (lambda (p)
@@ -514,8 +520,8 @@ constant for further details."
            (org-sql--todo-keywords)
            (mapconcat #'regexp-quote it "\\|")
            (format "\"\\(%s\\|%s\\)\"" org-ts-regexp-inactive it)))
-         (ts-regexp (format "\\(%s\\)" org-ts-regexp)) 
-         (ts-ia-regexp (format "\\(%s\\)" org-ts-regexp-inactive)) 
+         (ts-regexp (format "\\(%s\\)" org-ts-regexp))
+         (ts-ia-regexp (format "\\(%s\\)" org-ts-regexp-inactive))
          (re-no-pad-alist (-zip-pair escapes escapes))
          (re-match-alist
           (->>
@@ -595,9 +601,9 @@ non-logbook content at the end if LB-CONTENTS end with a plain-list
 element.
 
 Non-logbook content is determined by trying to match each item in the
-last plain-list element `org-log-note-headings'. If this last 
+last plain-list element `org-log-note-headings'. If this last
 plain-list element is preceded by a clock, the first item is ignored
-as it may be a clock note. Note that anything that is not in the last 
+as it may be a clock note. Note that anything that is not in the last
 run of items that does not match will go into the database with parse
  errors, as these should not happen.
 
@@ -658,7 +664,7 @@ The alist will be structured as such:
 (defun org-sql--partition-item (item hl-part)
   "Partition org-element ITEM into alist.
 
-ITEM is assumed to be part of a logbook. Return a alist with the 
+ITEM is assumed to be part of a logbook. Return a alist with the
 following structure:
 
 :hl-part - the partitioned headline HL-PART surrounding the item,
@@ -722,8 +728,8 @@ and ARGS. FUN adds OBJ to ACC and returns new ACC."
 (defun org-sql--extract-lb-header (acc item-part)
   "Add logging data from ITEM-PART to accumulator ACC.
 ITEM-PART is a partitioned logbook item as given by
-`org-sql--partition-item'. Headings are parsed according to how they 
-match those generated by `org-log-note-headings', and nothing is 
+`org-sql--partition-item'. Headings are parsed according to how they
+match those generated by `org-log-note-headings', and nothing is
 added to ACC if no match is found."
   (let* ((hl-part (alist-get :hl-part item-part))
          ;; (hl (alist-get :headline hl-part))
@@ -1168,13 +1174,13 @@ db for the file represented by CELL. These scenarios can occur:
 - neither match: assume file is new and untracked; insert filepath
   from CELL into db
 
-Returns a cons cell of the new accumulator ACC and the remaining 
+Returns a cons cell of the new accumulator ACC and the remaining
 FP-QRY. If a match is found is it removed fro FP-QRY before returning.
 
 Note that this does not test if there are entries in the db that
 have no files on disk. This is dealt with in `org-sql-sync'."
   ;; if perfect match, do nothing
-  (if (find cell fp-qry :test #'equal)
+  (if (cl-find cell fp-qry :test #'equal)
       (cons acc (remove cell fp-qry))
     (let* ((match-cells
             (lambda (a b fun)
@@ -1195,16 +1201,16 @@ have no files on disk. This is dealt with in `org-sql-sync'."
            (match-md5*
             (lambda (b)
               (funcall match-cells cell b match-md5)))
-           (found-fp (find-if (lambda (q) (funcall match-fp* q)) fp-qry)))
+           (found-fp (cl-find-if (lambda (q) (funcall match-fp* q)) fp-qry)))
       (cond
        ;; if fp matches, delete qry in db and insert cell
        (found-fp
         (cons (org-sql-sync-insert cell (org-sql-sync-delete found-fp acc))
               (remove found-fp fp-qry)))
        ;; if md5 matches, update fp in db
-       ((find-if (lambda (q) (funcall match-md5* q)) fp-qry)
+       ((cl-find-if (lambda (q) (funcall match-md5* q)) fp-qry)
         (cons (org-sql-sync-update cell acc)
-              (remove-if (lambda (q) (funcall match-md5* q)) fp-qry)))
+              (cl-remove-if (lambda (q) (funcall match-md5* q)) fp-qry)))
        ;; if none match, insert cell
        (t
         (cons (org-sql-sync-insert cell acc) fp-qry))))))
@@ -1213,11 +1219,11 @@ have no files on disk. This is dealt with in `org-sql-sync'."
 (defun org-sql-sync-all (fp-dsk fp-qry)
   "Synchronize state between disk and db.
 
-FP-DSK and FP-QRY are lists of cons cells as returned via 
-`org-sql-files-in-disk' and `org-sql-files-in-db' respectively. 
-This function iterates through all cells in FP-QRY, interrogating 
-their sync state via `org-sql-sync-one' (this takes care of any 
-insertion and update operations for cells in FP-DSK). Anything in 
+FP-DSK and FP-QRY are lists of cons cells as returned via
+`org-sql-files-in-disk' and `org-sql-files-in-db' respectively.
+This function iterates through all cells in FP-QRY, interrogating
+their sync state via `org-sql-sync-one' (this takes care of any
+insertion and update operations for cells in FP-DSK). Anything in
 FP-QRY that is not matched with anything in FP-DSK is assumed to be
 deleted and is removed at the end of this function.
 
@@ -1262,7 +1268,7 @@ Returns an alist where the each car is the file_path column value
 and each cdr is the plist of metadata."
   ;; TODO should probably make the table recreate itself if it is
   ;; corrupted or missing
-  (when (file-exists-p org-sqlite-db-path)
+  (when (file-exists-p org-sql-sqlite-path)
     (->> '(:file_path :md5)
          (org-sql-cmd-select 'files)
          (mapcar #'org-sql--plist-get-vals)
