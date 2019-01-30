@@ -1334,12 +1334,15 @@ This assumes an active connection is open."
 (defun org-sql-user-clear-all ()
   "Remove all entries in the database."
   (interactive)
-  (unless (get-buffer-process org-sql-buffer)
-    (message "Opening SQLi Buffer")
-    (org-sql-cmd-open-connection))
-  (message "Clearing Org SQL database")
-  (org-sql-clear-db)
-  (message "Org SQL clear completed"))
+  (if (y-or-n-p "Really clear all? ")
+      (progn
+        (unless (get-buffer-process org-sql-buffer)
+          (message "Opening SQLi Buffer")
+          (org-sql-cmd-open-connection))
+        (message "Clearing Org SQL database")
+        (org-sql-clear-db)
+        (message "Org SQL clear completed"))
+    (message "Aborted")))
 
 (provide 'org-sql)
 ;;; org-sql.el ends here
