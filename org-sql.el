@@ -3,8 +3,9 @@
 ;; Copyright (C) 2019  Nathan Dwarshuis
 
 ;; Author: Nathan Dwarshuis <natedwarshuis@gmail.com>
-;; Keywords: calendar, data, outlines
+;; Keywords: org-mode, data
 ;; Homepage: https://github.com/ndwarshuis/org-sql
+;; Package-Requires: ((emacs "24") (dash "2.15"))
 ;; Version: 0.0.1
 
 ;; This program is free software; you can redistribute it and/or modify
