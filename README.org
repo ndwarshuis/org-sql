@@ -56,16 +56,13 @@ git clone git@github.com:ndwarshuis/org-sql.git ~/config/path/org-sql/
 - Org-mode
 - dash
 ** Usage
-*** Initialize database
-1. Run =org-sql-cmd-open-connection=
-2. Run =org-sql-init-db=
-
-This will create a new database with the appropriate schema
-*** Updating and maintenance
+*** Initializing
+Run =org-sql-user-reset=. This will create a new database and initialize it with the default schema. It will also delete an existing database before creating the new one if it exists in =org-sql-sqlite-path=.
+*** Updating
 Run =org-sql-user-update=. This will synchronize the database with all files as indicated in =org-sql-files= by first checking if the file is in the database and inserting it if not. If the file is already present, it will check the md5 to assess if updates are needed. This function will insert the *entire* content of any org file that is either new or changed.
 
 Note that the database will take several seconds to minutes if inserting many files depending on the speed of your device (particularly IO) and the size/number of files. This operation will also block Emacs until complete.
-*** Clear the database
+*** Clearing all data
 Run =org-sql-user-clear-all=. This will clear all data but leave the schema.
 ** Database Layout
 The database is arranged by files at the top level and by =org-mode= features moving down to child tables. Primary keys are foreign keys are marked with P and F in parens respecively. All dates are converted into ISO 8601 format before entering into the database.

@@ -302,14 +302,25 @@ values as the property values."
 (defun org-sql-cmd-open-connection ()
   "Open a new SQL connection to `org-sql-sqlite-path'.
 This also sets the pragma according to `org-sql-default-pragma'.
-Opens a new process buffer for the connection with name
-`org-sql-buffer'."
-  (org-sql--with-advice
-      ((#'sql-get-login :override #'ignore)
-       (#'pop-to-buffer :override #'ignore))
-    (let ((sql-database org-sql-sqlite-path))
-      (sql-sqlite org-sql-buffer)
-      (org-sql--cmd-set-pragma))))
+The process buffer is named `org-sql-buffer'."
+  (unless (get-buffer-process org-sql-buffer)
+    (org-sql--with-advice
+        ((#'sql-get-login :override #'ignore)
+         (#'pop-to-buffer :override #'ignore))
+      (let ((sql-database org-sql-sqlite-path))
+        (sql-sqlite org-sql-buffer)
+        (org-sql--cmd-set-pragma)))))
+
+(defun org-sql-cmd-kill-connection ()
+  "Close the SQL connections to `org-sql-sqlite-path' if it exists."
+  (let ((proc (get-buffer-process org-sql-buffer)))
+    (when proc
+      (set-process-query-on-exit-flag proc nil)
+      (kill-process proc)
+      (while (eq 'run (process-status proc))
+        (sleep-for 0 1))))
+  (when (get-buffer org-sql-buffer)
+    (kill-buffer org-sql-buffer)))
 
 ;; TODO this can be put in terms of a better data struct
 (defun org-sql--pragma-merge-default (&optional pragma)
@@ -1299,6 +1310,11 @@ This assumes an active connection is open."
   ;; assume that the db will be created when a new connection is opened
   (->> org-sql--schemas (mapcar #'org-sql-cmd)))
 
+(defun org-sql-delete-db ()
+  "Deletes the database from disk."
+  (when (file-exists-p org-sql-sqlite-path)
+    (delete-file org-sql-sqlite-path)))
+
 (defun org-sql-update-db ()
   "Update the database. This assumes an active connection is open."
   (let ((trans (org-sql-get-transactions)))
@@ -1324,9 +1340,7 @@ This assumes an active connection is open."
   (interactive)
   ;; TODO need to see if schema is correct?
   ;; for now this assumes the db exists and has a valid schema
-  (unless (get-buffer-process org-sql-buffer)
-    (message "Opening SQLi Buffer")
-    (org-sql-cmd-open-connection))
+  (org-sql-cmd-open-connection)
   (message "Updating Org SQL database")
   (org-sql-update-db)
   (message "Org SQL update complete"))
@@ -1336,12 +1350,24 @@ This assumes an active connection is open."
   (interactive)
   (if (y-or-n-p "Really clear all? ")
       (progn
-        (unless (get-buffer-process org-sql-buffer)
-          (message "Opening SQLi Buffer")
-          (org-sql-cmd-open-connection))
+        (org-sql-cmd-open-connection)
         (message "Clearing Org SQL database")
         (org-sql-clear-db)
         (message "Org SQL clear completed"))
+    (message "Aborted")))
+
+(defun org-sql-user-reset ()
+  "Reset the database with default schema."
+  (interactive)
+  (if (or (not (file-exists-p org-sql-sqlite-path))
+          (y-or-n-p "Really reset database? "))
+      (progn
+        (org-sql-cmd-kill-connection)
+        (org-sql-delete-db)
+        (org-sql-cmd-open-connection)
+        (message "Resetting Org SQL database")
+        (org-sql-init-db)
+        (message "Org SQL reset completed"))
     (message "Aborted")))
 
 (provide 'org-sql)
