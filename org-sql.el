@@ -457,22 +457,13 @@ Returns formatted string or TXT if it is not a timestamp."
 ;;             (org-element-property :raw-value it)
 ;;             (if iso (org-sql--ts-fmt-iso it) it)))
             
-;; TODO there is an easier way to write this with dash
-;; eg take-while and drop while
 (defun org-sql--element-split-by-type (type contents &optional right)
   "Split sequence of org-elements by first instance of TYPE.
 CONTENTS is a list of org-element objects. If RIGHT is t, return the
 list to the right of first-encountered TYPE rather than the left."
-  (letrec ((scan
-            (lambda (c &optional acc)
-              (if c
-                  (let ((cur (car c))
-                        (rem (cdr c)))
-                    (if (equal type (org-element-type cur))
-                        (if right rem acc)
-                      (funcall scan rem (append acc (list cur)))))
-                (unless right acc)))))
-    (funcall scan contents)))
+  (if right
+      (cdr (--drop-while (not (eq type (org-element-type it))) contents))
+    (--take-while (not (eq type (org-element-type it))) contents)))
         
 (defun org-sql--element-parent-headline (obj)
   "Return parent headline element (if any) of org-element OBJ."
