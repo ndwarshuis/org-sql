@@ -1270,7 +1270,11 @@ database."
 In each cell, the car is the file path and cdr is the file's MD5."
   (let ((cons-md5
          (lambda (fp)
-           (--> fp (find-file-noselect it t) (md5 it) (cons fp it)))))
+           (->> fp
+                (format "md5sum %s | awk '{print $1}'")
+                shell-command-to-string
+                string-trim
+                (cons fp)))))
     (->> (org-sql-files) (--map (funcall cons-md5 it)))))
 
 (defun org-sql-files-in-db ()
