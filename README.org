@@ -17,6 +17,41 @@ A common use case for org-mode is a daily planner. Within this use case, some qu
 There are other uses for an Org-mode SQL database. If one has many org files scattered throughout their filesystem, a database is an easy way to aggregate key information such as links or timestamps. Or if one primary uses org-mode for taking notes, it could be a way to aggregate and analyze meeting minutes.
 
 Of course, these could all be done directly in Org-mode with Lisp code (indeed there are already built-in functions for reporting aggregated effort and clock-time). But why do that when one could analyze *all* org files by making a descriptive dashboard with a relatively few lines of R or Python code?
+** Installation
+Download the package from MELPA
+
+#+BEGIN_SRC sh
+M-x package-install RET org-sql RET
+#+END_SRC
+
+Alternatively, clone this repository into your config directory
+
+#+BEGIN_SRC sh
+git clone git@github.com:ndwarshuis/org-sql.git ~/config/path/org-sql/
+#+END_SRC
+
+Once obtained, add the package to =load-path= and require it
+
+#+BEGIN_SRC emacs-lisp
+(add-to-list 'load-path "~/config/path/org-sql/")
+(require 'org-sql)
+#+END_SRC
+
+One can also use =use-package= to automate this entire process
+
+#+BEGIN_SRC emacs-lisp
+(use-package org-sql
+  :ensure t
+  ;; add config options here...
+  :config)
+#+END_SRC
+*** Dependencies
+Lisp packages
+- Org-mode (tested with 9.x)
+- dash (tested with 2.x)
+
+Installed programs
+- sqlite (tested with 3.x)
 ** Configuration
 The following options are useful to customize:
 | variable                    | default                                 | description                                      |
@@ -42,20 +77,6 @@ Firstly, one needs to set the relevant =org-mode= variables in order to capture 
 Obtaining the above information for the database assumes that =org-log-note-headings= is left at its default value. This limitation may be surpassed in the future.
 
 Additionally, for best results it is recommended that all logbook entries be contained in their own drawer. This means that =org-log-into-drawer= should be set to =LOGBOOK= and =org-clock-into-drawer= should be set to =t= (which means clocks go into a drawer with hardcoded name =LOGBOOK=). Without these settings, =org-sql= needs to guess where the logbook entries are based on location and pattern matching, which is not totally reliable.
-** Installation
-Clone this repository into your config directory and add the package to =load-path=
-
-#+BEGIN_SRC sh
-git clone git@github.com:ndwarshuis/org-sql.git ~/config/path/org-sql/
-#+END_SRC
-
-#+BEGIN_SRC emacs-lisp
-(add-to-list 'load-path "~/config/path/org-sql/")
-(require 'org-sql)
-#+END_SRC
-*** Dependencies
-- Org-mode
-- dash
 ** Usage
 *** Initializing
 Run =org-sql-user-reset=. This will create a new database and initialize it with the default schema. It will also delete an existing database before creating the new one if it exists in =org-sql-sqlite-path=.
