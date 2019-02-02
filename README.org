@@ -46,7 +46,7 @@ One can also use =use-package= to automate this entire process
   :config)
 #+END_SRC
 *** Dependencies
-Lisp packages
+Emacs-Lisp packages
 - Org-mode (tested with 9.x)
 - dash (tested with 2.x)
 
