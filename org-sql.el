@@ -69,6 +69,10 @@ to store them. This is in addition to any properties specifified by
     "CREATE TABLE timestamp (file_path TEXT, headline_offset INTEGER, timestamp_offset INTEGER, raw_value TEXT NOT NULL, type TEXT, planning_type TEXT, warning_type TEXT, warning_value INTEGER, warning_unit TEXT, repeat_type TEXT, repeat_value INTEGER, repeat_unit TEXT, time DATE NOT NULL, time_end DATE, PRIMARY KEY (file_path, timestamp_offset), FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON DELETE CASCADE ON UPDATE CASCADE);")
   "Table schemas for the org database.")
 
+(defconst org-sql--default-pragma
+  '(:foreign_keys on)
+  "Pragma activated upon opening a new SQLite connection.")
+
 (defgroup org-sql nil
   "Org mode SQL backend options."
   :tag "Org SQL"
@@ -98,9 +102,10 @@ considered. See function `org-sql-files'."
   :type '(repeat :tag "List of files and directories" file)
   :group 'org-sql)
   
-(defcustom org-sql-default-pragma
-  '(:foreign_keys on)
-  "Default pragmas used when executing a sql command."
+(defcustom org-sql-pragma
+  '(:synchronous off :journal_mode memory)
+  "User-defined pragmas used when opening a new SQLite connection.
+These cannot override pragma in `org-sql--default-pragma'."
   :type '(plist :key-type symbol :value-type string)
   :group 'org-sql)
 
@@ -301,15 +306,15 @@ values as the property values."
 
 (defun org-sql-cmd-open-connection ()
   "Open a new SQL connection to `org-sql-sqlite-path'.
-This also sets the pragma according to `org-sql-default-pragma'.
-The process buffer is named `org-sql-buffer'."
+This also sets the pragma according to `org-sql--default-pragma'
+and `org-sql-pragma'. The process buffer is named `org-sql-buffer'."
   (unless (get-buffer-process org-sql-buffer)
     (org-sql--with-advice
         ((#'sql-get-login :override #'ignore)
          (#'pop-to-buffer :override #'ignore))
       (let ((sql-database org-sql-sqlite-path))
         (sql-sqlite org-sql-buffer)
-        (org-sql--cmd-set-pragma)))))
+        (org-sql--cmd-set-pragma org-sql-pragma)))))
 
 (defun org-sql-cmd-kill-connection ()
   "Close the SQL connections to `org-sql-sqlite-path' if it exists."
@@ -322,26 +327,22 @@ The process buffer is named `org-sql-buffer'."
   (when (get-buffer org-sql-buffer)
     (kill-buffer org-sql-buffer)))
 
-;; TODO this can be put in terms of a better data struct
 (defun org-sql--pragma-merge-default (&optional pragma)
-  "Override values in `org-sql-default-pragma' with PRAGMA.
+  "Add PRAGMA to `org-sql--default-pragma'.
 PRAGMA is a plist as described in `org-sql--fmt-pragma'. Return a
-new plist with values from PRAGMA either added (if they don't already
-exist) to or instead of (if they already exist) those in
-`org-sql-default-pragma'."
-  (if (not pragma)
-      org-sql-default-pragma
-    (let ((all-props
-           (->>
-            org-sql-default-pragma
-            org-sql--plist-get-keys
-            (append (org-sql--plist-get-keys pragma))
-            delete-dups))
-          (getv
+new plist with values from PRAGMA added, except for pragma already in
+`org-sql--default-pragma'."
+  (if (not pragma) org-sql--default-pragma
+    (let ((getv
            (lambda (p)
-             (or (plist-get pragma p)
-                 (plist-get org-sql-default-pragma p)))))
-      (mapcan (lambda (p) `(,p ,(funcall getv p))) all-props))))
+             (or (plist-get org-sql--default-pragma p)
+                 (plist-get pragma p)))))
+      (->>
+       org-sql--default-pragma
+       org-sql--plist-get-keys
+       (append (org-sql--plist-get-keys pragma))
+       delete-dups
+       (mapcan (lambda (p) `(,p ,(funcall getv p))))))))
 
 (defun org-sql--cmd-set-pragma (&optional pragma)
   "Set the pragma of the running SQL connection.
@@ -1217,7 +1218,6 @@ have no files on disk. This is dealt with in `org-sql-sync'."
        (t
         (cons (org-sql-sync-insert cell acc) fp-qry))))))
 
-;; TODO, need to document the accumulator somewhere
 (defun org-sql-sync-all (fp-dsk fp-qry)
   "Synchronize state between disk and db.
 
@@ -1272,8 +1272,6 @@ In each cell, the car is the file path and cdr is the file's MD5."
   "Get all files and their metadata from the database.
 Returns an alist where the each car is the file_path column value
 and each cdr is the plist of metadata."
-  ;; TODO should probably make the table recreate itself if it is
-  ;; corrupted or missing
   (when (file-exists-p org-sql-sqlite-path)
     (->> '(:file_path :md5)
          (org-sql-cmd-select 'files)
