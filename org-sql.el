@@ -89,11 +89,6 @@ Mirrors behavior of `org-use-tag-inheritance'."
   :type 'file
   :group 'org-sql)
 
-(defcustom org-sql-ignored-properties nil
-  "List of properties to ignore when building the properties table."
-  :type '(repeat :tag "List of properties to ignore." string)
-  :group 'org-sql)
-
 (defcustom org-sql-files nil
   "A list of org files or directories to put into sql database.
 Any directories in this list imply that all files within the
@@ -114,9 +109,34 @@ These cannot override pragma in `org-sql--default-pragma'."
   :type 'string
   :group 'org-sql)
 
-(defcustom org-sql-store-links t
-  "Set to t to store links in the database."
-  :type 'boolean
+(defcustom org-sql-ignored-properties nil
+  "List of properties to ignore when building the properties table."
+  :type '(choice
+          (const "Ignore All" 'all)
+          (repeat :tag "List of properties to ignore" string))
+  :group 'org-sql)
+
+(defcustom org-sql-ignored-tags nil
+  "List of tags to ignore when building the tags table."
+  :type '(choice
+          (const "Ignore All" 'all)
+          (repeat :tag "List of tags to ignore" string))
+  :group 'org-sql)
+
+(defcustom org-sql-ignored-link-types nil
+  "List of link types to ignore when building the links table.
+Each member should be a string and one of `org-link-types' or
+\"file\", \"coderef\", \"custom-id\", \"fuzzy\", or \"id\". See
+org-element API documentation or`org-element-link-parser' for details."
+  :type '(choice
+          (set :tag "List of types to ignore"
+               (const :tag "File paths" "file")
+               (const :tag "Source code references" "coderef")
+               (const :tag "Headline custom IDs" "custom-id")
+               (const :tag "Fuzzy target in parse trees" "fuzzy")
+               (const :tag "Headline IDs" "id")
+               (repeat :tag "Other types to ignore" string))
+          (const "Ignore all" 'all))
   :group 'org-sql)
 
 (defcustom org-sql-store-timestamp-contents t
@@ -977,74 +997,79 @@ HL-PART is an object as returned by `org-sql--partition-headline'."
 (defun org-sql--extract-properties (acc hl-part)
    "Add properties data from HL-PART and add to accumulator ACC.
 HL-PART is an object as returned by `org-sql--partition-headline'."
-  (let ((node-props (->> hl-part
-                         (alist-get :section)
-                         (assoc 'property-drawer)
-                         org-element-contents))
-        (from
-         (lambda (acc np hl-part)
-           (let ((key (org-element-property :key np)))
-             ;; TODO this can be better, make a list somewhere else
-             ;; and concat once
-             (if (member key (-distinct
-                              (append
-                               org-sql--ignored-properties-default
-                               org-sql-ignored-properties)))
-                 acc
-               (let* ((hl (alist-get :headline hl-part))
-                      (fp (alist-get :filepath hl-part))
-                      (hl-offset (org-element-property :begin hl))
-                      (np-offset (org-element-property :begin np))
-                      (val (->> np
+   (if (eq 'all org-sql-ignored-properties) acc
+     (let ((node-props
+            (->> hl-part
+                 (alist-get :section)
+                 (assoc 'property-drawer)
+                 (org-element-contents)
+                 (--remove (member (org-element-property :key it)
+                                   org-sql--ignored-properties-default))
+                 (--remove (member (org-element-property :key it)
+                                   org-sql-ignored-properties))))
+           (from
+            (lambda (acc np hl-part)
+              (->>
+               (list :file_path (alist-get :filepath hl-part)
+                     :headline_offset (->>
+                                       hl-part
+                                       (alist-get :headline)
+                                       (org-element-property :begin))
+                     :property_offset (org-element-property :begin np)
+                     :key_text (org-element-property :key np)
+                     :val_text (->>
+                                np
                                 (org-element-property :value)
-                                org-sql--parse-ts-maybe))
-                      (prop-data (list :file_path fp
-                                       :headline_offset hl-offset
-                                       :property_offset np-offset
-                                       :key_text key
-                                       :val_text val
-                                       ;; TODO add inherited flag
-                                       :inherited nil)))
-                 (org-sql--alist-put acc 'properties prop-data)))))))
-    (org-sql--extract acc from node-props hl-part)))
+                                org-sql--parse-ts-maybe)
+                     ;; TODO add inherited flag
+                     :inherited nil)
+               (org-sql--alist-put acc 'properties)))))
+       (org-sql--extract acc from node-props hl-part))))
 
 (defun org-sql--extract-tags (acc hl-part)
   "Extract tags data from HL-PART and add to accumulator ACC.
 HL-PART is an object as returned by `org-sql--partition-headline'."
-  (let* ((hl (alist-get :headline hl-part))
-         ;; first retrieve tags and strip text props and whitespace
-         (tags (->> hl
-                    (org-element-property :tags)
-                    (mapcar #'org-sql--strip-string)))
-         ;; split-string returns nil if it gets ""
-         (i-tags (->
-                  (org-element-property :ARCHIVE_ITAGS hl)
-                  (or "")
-                  split-string))
-         ;; then retrieve i-tags, optionally going up to parents
-         (i-tags (when org-sql-use-tag-inheritance
+  (if (eq 'all org-sql-ignored-tags) acc
+    (let* ((hl (alist-get :headline hl-part))
+           ;; first retrieve tags and strip text props and whitespace
+           (tags (--> hl
+                      (org-element-property :tags it)
+                      (mapcar #'org-sql--strip-string it)
+                      (-difference it org-sql-ignored-tags)))
+           ;; split-string returns nil if it gets ""
+           (i-tags (->
+                    (org-element-property :ARCHIVE_ITAGS hl)
+                    (or "")
+                    split-string
+                    (-difference org-sql-ignored-tags)))
+           ;; then retrieve i-tags, optionally going up to parents
+           (i-tags (when org-sql-use-tag-inheritance
                      (org-sql--element-parent-tags hl i-tags)))
-         (from
-          (lambda (acc tag hl-part &optional inherited)
-            (let* ((hl (alist-get :headline hl-part))
-                   (fp (alist-get :filepath hl-part))
-                   (offset (org-element-property :begin hl))
-                   (i (if inherited 1 0))
-                   (tags-data (list :file_path fp
-                                    :headline_offset offset
-                                    :tag tag
-                                    :inherited i)))
-              (org-sql--alist-put acc 'tags tags-data)))))
-    (-> acc
-        (org-sql--extract from tags hl-part)
-        (org-sql--extract from i-tags hl-part t))))
+           (from
+            (lambda (acc tag hl-part &optional inherited)
+              (->>
+               (list :file_path (alist-get :filepath hl-part)
+                     :headline_offset (->>
+                                       hl-part
+                                       (alist-get :headline)
+                                       (org-element-property :begin))
+                     :tag tag
+                     :inherited (if inherited 1 0))
+                (org-sql--alist-put acc 'tags)))))
+      (-> acc
+          (org-sql--extract from tags hl-part)
+          (org-sql--extract from i-tags hl-part t)))))
 
 (defun org-sql--extract-links (acc hl-part)
   "Add link data from headline HL-PART to accumulator ACC.
 HL-PART is an object as returned by `org-sql--partition-headline'."
-  (if (not org-sql-store-links) acc
-    (let* ((links (-> (alist-get :section hl-part)
-                      (org-element-map 'link #'identity)))
+  (if (eq 'all org-sql-ignored-link-types) acc
+    (let* ((links (--> (alist-get :section hl-part)
+                       (org-element-map it 'link #'identity)
+                       (--remove
+                        (member (org-element-property :type it)
+                                org-sql-ignored-link-types)
+                        it)))
            (from
             (lambda (acc ln hl-part)
               (let ((hl (alist-get :headline hl-part)))
