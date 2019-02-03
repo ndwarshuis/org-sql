@@ -1103,7 +1103,8 @@ HL-PART is an object as returned by `org-sql--partition-headline'."
                      sec))
          (lb-split (-> sec-split car org-sql--split-lb-entries))
          (sec-rem (->> sec-split cdr (append (cdr lb-split))))
-         (hl-ts (org-element-map sec-rem 'timestamp #'identity)))
+         (hl-ts (when org-sql-store-contents-timestamps
+                  (org-element-map sec-rem 'timestamp #'identity))))
     (->
      acc
      (org-sql--extract-lb-contents (car lb-split) hl-part)
