@@ -140,7 +140,7 @@ These cannot override pragma in `org-sql--default-pragma'."
   :group 'org-sql)
 
 (defcustom org-sql-store-logbook-state-changes t
-  "Set to t to store planning changes from the logbook in the database."
+  "Set to t to store state changes from the logbook in the database."
   :type 'boolean
   :group 'org-sql)
 
@@ -1055,34 +1055,35 @@ HL-PART is an object as returned by `org-sql--partition-headline'.
 PT is a string representing the planning type and is one of 'closed,'
 'scheduled,' or 'deadlined' although these values are not enforced by
 this function."
-  (let* ((ts-range (org-sql--parse-ts-range ts))
-         (fp (alist-get :filepath hl-part))
-         (ts-offset (org-element-property :begin ts))
-         (ts-data
-          (list
-           :file_path fp
-           :headline_offset (->> hl-part
-                                 (alist-get :headline)
-                                 (org-element-property :begin))
-           :timestamp_offset ts-offset
-           ;; don't care if they are ranges here, this is reflected in
-           ;; the time_end value
-           :type (--> ts
-                      (org-element-property :type it)
-                      (cond ((eq it 'inactive-range) 'inactive)
-                            ((eq it 'active-range) 'active)
-                            (t it)))
-           :planning_type pt
-           :warning_type (org-element-property :warning-type ts)
-           :warning_value (org-element-property :warning-value ts)
-           :warning_unit (org-element-property :warning-unit ts)
-           :repeat_type (org-element-property :repeater-type ts)
-           :repeat_value (org-element-property :repeater-value ts)
-           :repeat_unit (org-element-property :repeater-unit ts)
-           :time (car ts-range)
-           :time_end (cdr ts-range)
-           :raw_value (org-element-property :raw-value ts))))
-    (org-sql--alist-put acc 'timestamp ts-data)))
+  (if (and pt (not org-sql-store-planning-timestamps)) acc
+    (let* ((ts-range (org-sql--parse-ts-range ts))
+           (fp (alist-get :filepath hl-part))
+           (ts-offset (org-element-property :begin ts))
+           (ts-data
+            (list
+             :file_path fp
+             :headline_offset (->> hl-part
+                                   (alist-get :headline)
+                                   (org-element-property :begin))
+             :timestamp_offset ts-offset
+             ;; don't care if they are ranges here, this is reflected in
+             ;; the time_end value
+             :type (--> ts
+                        (org-element-property :type it)
+                        (cond ((eq it 'inactive-range) 'inactive)
+                              ((eq it 'active-range) 'active)
+                              (t it)))
+             :planning_type pt
+             :warning_type (org-element-property :warning-type ts)
+             :warning_value (org-element-property :warning-value ts)
+             :warning_unit (org-element-property :warning-unit ts)
+             :repeat_type (org-element-property :repeater-type ts)
+             :repeat_value (org-element-property :repeater-value ts)
+             :repeat_unit (org-element-property :repeater-unit ts)
+             :time (car ts-range)
+             :time_end (cdr ts-range)
+             :raw_value (org-element-property :raw-value ts))))
+      (org-sql--alist-put acc 'timestamp ts-data))))
 
 (defun org-sql--extract-hl-contents (acc hl-part)
   "Add contents from partitioned header HL-PART to accumulator ACC.
@@ -1103,12 +1104,12 @@ HL-PART is an object as returned by `org-sql--partition-headline'."
                      sec))
          (lb-split (-> sec-split car org-sql--split-lb-entries))
          (sec-rem (->> sec-split cdr (append (cdr lb-split))))
-         (hl-ts (when org-sql-store-contents-timestamps
-                  (org-element-map sec-rem 'timestamp #'identity))))
-    (->
+         (hl-ts (org-element-map sec-rem 'timestamp #'identity)))
+    (-->
      acc
-     (org-sql--extract-lb-contents (car lb-split) hl-part)
-     (org-sql--extract #'org-sql--extract-ts hl-ts hl-part))))
+     (org-sql--extract-lb-contents it (car lb-split) hl-part)
+     (if (not org-sql-store-contents-timestamps) it
+       (org-sql--extract it #'org-sql--extract-ts hl-ts hl-part)))))
       
 (defun org-sql--extract-hl-meta (acc hl-part)
   "Add general data from headline HL-PART to accumulator ACC.
@@ -1139,9 +1140,15 @@ HL-PART is an object as returned by `org-sql--partition-headline'."
      acc
      (org-sql--extract-hl-contents it hl-part)
      (org-sql--alist-put it 'headlines hl-data)
-     (if ts-cls (org-sql--extract-ts it ts-cls hl-part 'closed) it)
-     (if ts-scd (org-sql--extract-ts it ts-scd hl-part 'scheduled) it)
-     (if ts-dln (org-sql--extract-ts it ts-dln hl-part 'deadlined) it))))
+     (if (and ts-cls org-sql-store-planning-timestamps)
+         (org-sql--extract-ts it ts-cls hl-part 'closed)
+       it)
+     (if (and ts-scd org-sql-store-planning-timestamps)
+         (org-sql--extract-ts it ts-scd hl-part 'scheduled)
+       it)
+     (if (and ts-dln org-sql-store-planning-timestamps)
+         (org-sql--extract-ts it ts-dln hl-part 'deadlined)
+       it))))
 
 (defun org-sql--extract-hl (acc headlines fp)
   "Extract data from HEADLINES and add to accumulator ACC.
