@@ -53,15 +53,28 @@ Emacs-Lisp packages
 Installed programs
 - sqlite (tested with 3.x)
 ** Configuration
-The following options are useful to customize:
-| variable                    | default                                 | description                                      |
-|-----------------------------+-----------------------------------------+--------------------------------------------------|
-| org-sql-use-tag-inheritance | t                                       | use tag inheritance when populating the database |
-| org-sqlite-db-path          | ~/Org/org.db                            | the path to the sqlite database                  |
-| org-sql-pragma              | (:synchronous off :journal_mode memory) | pragma to use for new connections                |
-| org-sql-ignored-properties  | nil                                     | list of properties to ignore when populating     |
-| org-sql-files               | nil                                     | list of org files to insert into database        |
-| org-sql-buffer              | =*SQL: Org*=                            | the name of the buffer for the SQLite connection |
+*** General behavior
+| variable           | description                                                       |
+|--------------------+-------------------------------------------------------------------|
+| org-sqlite-db-path | the path to the sqlite database to be created                     |
+| org-sql-pragma     | pragma to use for new connections (useful for performance tuning) |
+| org-sql-files      | list of org files to insert into database                         |
+| org-sql-buffer     | the name of the buffer for the SQLite connection                  |
+*** Database storage
+These control what data gets stored in the database
+| variable                                  | description                                                                                      |
+|-------------------------------------------+--------------------------------------------------------------------------------------------------|
+| org-sql-use-tag-inheritance               | use tag inheritance when populating the database                                                 |
+| org-sql-ignored-properties                | properties to ignore                                                                             |
+| org-sql-ignored-tags                      | tags to ignore                                                                                   |
+| org-sql-ignored-link-types                | link types to ignore (eg mu4e, file)                                                             |
+| org-sql-included-healine-planning-types   | planning types (eg closed, scheduled) to include                                                 |
+| org-sql-included-contents-timestamp-types | type of timestamps (eg active, inactive) to include                                              |
+| org-sql-store-logbook-planning-changes    | whether to include logbook planning changes (eg changed deadline from x to y)                    |
+| org-sql-store-logbook-state-changes       | whether to include logbook state changes (eg todo change from TODO to WAIT)                      |
+| org-sql-store-logbook-other               | whether to include generic logbook entries that are not covered by other customization variables |
+| org-sql-store-clocks                      | whether to include clocks                                                                        |
+| org-sql-store-clock-notes                 | whether to include clock notes                                                                   |
 *** logbooks
 Much of the extracted data from =org-sql= pertains to logbook entries, and there are a number of settings that effect how this data is generated in org files and how it may be parsed reliably.
 
