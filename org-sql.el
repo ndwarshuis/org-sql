@@ -1030,28 +1030,24 @@ HL-PART is an object as returned by `org-sql--partition-headline'."
 (defun org-sql--extract-links (acc hl-part)
   "Add link data from headline HL-PART to accumulator ACC.
 HL-PART is an object as returned by `org-sql--partition-headline'."
-  (let* ((sec (alist-get :section hl-part))
-         (links (org-element-map sec 'link #'identity))
-         (from
-          (lambda (acc ln hl-part)
-              (let* ((fp (alist-get :filepath hl-part))
-                     (hl (alist-get :headline hl-part))
-                     (hl-offset (org-element-property :begin hl))
-                     (ln-offset (org-element-property :begin ln))
-                     (ln-path (org-element-property :path ln))
-                     (ln-text (->> ln
-                                   org-element-contents
-                                   org-element-interpret-data
-                                   org-sql--strip-string))
-                     (ln-type (org-element-property :type ln))
-                     (ln-data (list :file_path fp
-                                    :headline_offset hl-offset
-                                    :link_offset ln-offset
-                                    :link_path ln-path
-                                    :link_text ln-text
-                                    :link_type ln-type)))
-                (org-sql--alist-put acc 'links ln-data)))))
-    (org-sql--extract acc from links hl-part)))
+  (if (not org-sql-store-links) acc
+    (let* ((links (-> (alist-get :section hl-part)
+                      (org-element-map 'link #'identity)))
+           (from
+            (lambda (acc ln hl-part)
+              (let ((hl (alist-get :headline hl-part)))
+                (->>
+                 (list :file_path (alist-get :filepath hl-part)
+                       :headline_offset (org-element-property :begin hl)
+                       :link_offset (org-element-property :begin ln)
+                       :link_path (org-element-property :path ln)
+                       :link_text (->> ln
+                                       org-element-contents
+                                       org-element-interpret-data
+                                       org-sql--strip-string)
+                       :link_type (org-element-property :type ln))
+                 (org-sql--alist-put acc 'links))))))
+      (org-sql--extract acc from links hl-part))))
 
 (defun org-sql--extract-ts (acc ts hl-part &optional pt)
   "Add timestamp TS data from headline HL-PART to accumulator ACC.
