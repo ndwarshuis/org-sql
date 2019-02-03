@@ -110,14 +110,16 @@ These cannot override pragma in `org-sql--default-pragma'."
   :group 'org-sql)
 
 (defcustom org-sql-ignored-properties nil
-  "List of properties to ignore when building the properties table."
+  "List of properties to ignore when building the properties table.
+To ignore all set to 'all' instead of a list of strings."
   :type '(choice
           (const "Ignore All" 'all)
           (repeat :tag "List of properties to ignore" string))
   :group 'org-sql)
 
 (defcustom org-sql-ignored-tags nil
-  "List of tags to ignore when building the tags table."
+  "List of tags to ignore when building the tags table.
+To ignore all set to 'all' instead of a list of strings."
   :type '(choice
           (const "Ignore All" 'all)
           (repeat :tag "List of tags to ignore" string))
@@ -126,8 +128,9 @@ These cannot override pragma in `org-sql--default-pragma'."
 (defcustom org-sql-ignored-link-types nil
   "List of link types to ignore when building the links table.
 Each member should be a string and one of `org-link-types' or
-\"file\", \"coderef\", \"custom-id\", \"fuzzy\", or \"id\". See
-org-element API documentation or`org-element-link-parser' for details."
+\"file\", \"coderef\", \"custom-id\", \"fuzzy\", or \"id\". See org-element
+API documentation or`org-element-link-parser' for details.
+To ignore all set to 'all' instead of a list of strings."
   :type '(choice
           (set :tag "List of types to ignore"
                (const :tag "File paths" "file")
@@ -139,15 +142,27 @@ org-element API documentation or`org-element-link-parser' for details."
           (const "Ignore all" 'all))
   :group 'org-sql)
 
+(defcustom org-sql-included-headline-planning-types
+  '(:deadline :scheduled :closed)
+  "List of headline planning timestamps to include in the database.
+Must be symbols that are one of ':deadline', ':scheduled', or
+':closed'. To include none set to nil."
+  :type '(choice
+          (set :tag "List of types to include"
+               (const :tag "Deadline Timestamps" :deadline)
+               (const :tag "Scheduled Timestamps" :scheduled)
+               (const :tag "Closed Timestamps" :closed)))
+  :group 'org-sql)
+
 (defcustom org-sql-store-timestamp-contents t
   "Set to t to store timestamps from headline contents in the database."
   :type 'boolean
   :group 'org-sql)
 
-(defcustom org-sql-store-timestamps-planning t
-  "Set to t to store headline planning timestamps in the database."
-  :type 'boolean
-  :group 'org-sql)
+;; (defcustom org-sql-store-timestamps-planning t
+;;   "Set to t to store headline planning timestamps in the database."
+;;   :type 'boolean
+;;   :group 'org-sql)
 
 (defcustom org-sql-store-logbook-planning-changes t
   "Set to t to store planning changes from the logbook in the database."
@@ -264,6 +279,7 @@ any other symbols to their symbol name."
         (entry (-> entry symbol-name org-sql--escape-text))
         (t "NULL")))
 
+;; TODO this name is too specific
 (defun org-sql--kw-to-colname (kw)
   "Return string representation of KW for column in sql database."
   (--> kw (symbol-name it) (substring it 1)))
@@ -871,7 +887,7 @@ ITEM-PART is a partitioned logbook item as described in
 
      ((memq type '(redeadline deldeadline))
       (org-sql--extract-lb-planning-change acc logbook-data item-part
-                                           'deadlined))
+                                           'deadline))
 
      ((memq type '(reschedule delschedule))
       (org-sql--extract-lb-planning-change acc logbook-data item-part
@@ -1090,37 +1106,36 @@ HL-PART is an object as returned by `org-sql--partition-headline'."
   "Add timestamp TS data from headline HL-PART to accumulator ACC.
 HL-PART is an object as returned by `org-sql--partition-headline'.
 PT is a string representing the planning type and is one of 'closed,'
-'scheduled,' or 'deadlined' although these values are not enforced by
+'scheduled,' or 'deadline' although these values are not enforced by
 this function."
-  (if (and pt (not org-sql-store-timestamps-planning)) acc
-    (let* ((ts-range (org-sql--parse-ts-range ts))
-           (fp (alist-get :filepath hl-part))
-           (ts-offset (org-element-property :begin ts))
-           (ts-data
-            (list
-             :file_path fp
-             :headline_offset (->> hl-part
-                                   (alist-get :headline)
-                                   (org-element-property :begin))
-             :timestamp_offset ts-offset
-             ;; don't care if they are ranges here, this is reflected in
-             ;; the time_end value
-             :type (--> ts
-                        (org-element-property :type it)
-                        (cond ((eq it 'inactive-range) 'inactive)
-                              ((eq it 'active-range) 'active)
-                              (t it)))
-             :planning_type pt
-             :warning_type (org-element-property :warning-type ts)
-             :warning_value (org-element-property :warning-value ts)
-             :warning_unit (org-element-property :warning-unit ts)
-             :repeat_type (org-element-property :repeater-type ts)
-             :repeat_value (org-element-property :repeater-value ts)
-             :repeat_unit (org-element-property :repeater-unit ts)
-             :time (car ts-range)
-             :time_end (cdr ts-range)
-             :raw_value (org-element-property :raw-value ts))))
-      (org-sql--alist-put acc 'timestamp ts-data))))
+  (let* ((ts-range (org-sql--parse-ts-range ts))
+         (fp (alist-get :filepath hl-part))
+         (ts-offset (org-element-property :begin ts))
+         (ts-data
+          (list
+           :file_path fp
+           :headline_offset (->> hl-part
+                                 (alist-get :headline)
+                                 (org-element-property :begin))
+           :timestamp_offset ts-offset
+           ;; don't care if they are ranges here, this is reflected in
+           ;; the time_end value
+           :type (--> ts
+                      (org-element-property :type it)
+                      (cond ((eq it 'inactive-range) 'inactive)
+                            ((eq it 'active-range) 'active)
+                            (t it)))
+           :planning_type pt
+           :warning_type (org-element-property :warning-type ts)
+           :warning_value (org-element-property :warning-value ts)
+           :warning_unit (org-element-property :warning-unit ts)
+           :repeat_type (org-element-property :repeater-type ts)
+           :repeat_value (org-element-property :repeater-value ts)
+           :repeat_unit (org-element-property :repeater-unit ts)
+           :time (car ts-range)
+           :time_end (cdr ts-range)
+           :raw_value (org-element-property :raw-value ts))))
+    (org-sql--alist-put acc 'timestamp ts-data)))
 
 (defun org-sql--extract-hl-contents (acc hl-part)
   "Add contents from partitioned header HL-PART to accumulator ACC.
@@ -1147,14 +1162,24 @@ HL-PART is an object as returned by `org-sql--partition-headline'."
      (org-sql--extract-lb-contents it (car lb-split) hl-part)
      (if (not org-sql-store-timestamp-contents) it
        (org-sql--extract it #'org-sql--extract-ts hl-ts hl-part)))))
-      
+
+(defun org-sql--extract-hl-planning (acc hl-part)
+  "Add planning timestamps from HL-PART to accumulator ACC.
+HL-PART is an object as returned by `org-sql--partition-headline'.
+This will include planning timestamps according to
+`org-sql-included-headline-planning-types'."
+  (let ((hl (alist-get :headline hl-part)))
+    (dolist (type org-sql-included-headline-planning-types)
+      (let* ((ts (org-element-property type hl))
+             (pt (org-sql--kw-to-colname type)))
+        (when ts
+          (setq acc (org-sql--extract-ts acc ts hl-part pt)))))
+    acc))
+
 (defun org-sql--extract-hl-meta (acc hl-part)
   "Add general data from headline HL-PART to accumulator ACC.
 HL-PART is an object as returned by `org-sql--partition-headline'."
   (let* ((hl (alist-get :headline hl-part))
-         (ts-cls (org-element-property :closed hl))
-         (ts-scd (org-element-property :scheduled hl))
-         (ts-dln (org-element-property :deadline hl))
          (hl-data
           (list
            :file_path (alist-get :filepath hl-part)
@@ -1173,19 +1198,11 @@ HL-PART is an object as returned by `org-sql--partition-headline'."
            :archived (if (org-element-property :archivedp hl) 1 0)
            :commented (if (org-element-property :commentedp hl) 1 0)
            :content nil)))
-    (-->
+    (->
      acc
-     (org-sql--extract-hl-contents it hl-part)
-     (org-sql--alist-put it 'headlines hl-data)
-     (if (and ts-cls org-sql-store-timestamps-planning)
-         (org-sql--extract-ts it ts-cls hl-part 'closed)
-       it)
-     (if (and ts-scd org-sql-store-timestamps-planning)
-         (org-sql--extract-ts it ts-scd hl-part 'scheduled)
-       it)
-     (if (and ts-dln org-sql-store-timestamps-planning)
-         (org-sql--extract-ts it ts-dln hl-part 'deadlined)
-       it))))
+     (org-sql--alist-put 'headlines hl-data)
+     (org-sql--extract-hl-contents hl-part)
+     (org-sql--extract-hl-planning hl-part))))
 
 (defun org-sql--extract-hl (acc headlines fp)
   "Extract data from HEADLINES and add to accumulator ACC.
