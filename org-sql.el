@@ -814,6 +814,11 @@ and ARGS. FUN adds OBJ to ACC and returns new ACC."
 
 (defun org-sql--extract-lb-planning-change (acc logbook-data item-part
                                                 planning-type)
+  "Add data from planning-change logbook entry to accumulator ACC.
+ITEM-PART is a partitioned logbook item as described in
+`org-sql--partition-item'. LOGBOOK-DATA is a plist as passed from
+`org-sql--extract-lb-item' PLANNING-TYPE is the type of the timestamp
+that was changed (either 'deadline' or 'scheduled')."
   (if (not org-sql-store-logbook-planning-changes) acc
     (let* ((hl-part (alist-get :hl-part item-part))
            (ts-old (->> item-part
@@ -834,6 +839,10 @@ and ARGS. FUN adds OBJ to ACC and returns new ACC."
        (org-sql--extract-ts ts-old hl-part planning-type)))))
 
 (defun org-sql--extract-lb-state-change (acc logbook-data item-part)
+  "Add data from state-change logbook entry to accumulator ACC.
+ITEM-PART is a partitioned logbook item as described in
+`org-sql--partition-item'. LOGBOOK-DATA is a plist as passed from
+`org-sql--extract-lb-item'"
   (if (not org-sql-store-logbook-state-changes) acc
     (save-match-data
       (set-match-data (alist-get :match-data item-part))
@@ -848,6 +857,8 @@ and ARGS. FUN adds OBJ to ACC and returns new ACC."
             (org-sql--alist-put 'state_changes state-data))))))
 
 (defun org-sql--extract-lb-other (acc logbook-data)
+  "Add data from generic logbook entry to accumulator ACC.
+LOGBOOK-DATA is a plist as passed from `org-sql--extract-lb-item'"
   (if (not org-sql-store-logbook-other) acc
     (org-sql--alist-put acc 'logbook logbook-data)))
 
