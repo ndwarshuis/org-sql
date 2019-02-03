@@ -154,15 +154,18 @@ Must be symbols that are one of ':deadline', ':scheduled', or
                (const :tag "Closed Timestamps" :closed)))
   :group 'org-sql)
 
-(defcustom org-sql-store-timestamp-contents t
-  "Set to t to store timestamps from headline contents in the database."
-  :type 'boolean
+(defcustom org-sql-included-contents-timestamp-types
+  '(active active-range inactive inactive-range)
+  "List of timestamp types to includes from headline content sections.
+List members are symbols of any 'active', 'active-range', 'inactive',
+or 'inactive-range'. To include none set to nil."
+  :type '(choice
+          (set :tag "List of types to include"
+               (const :tag "Active Timestamps" 'active)
+               (const :tag "Active Timestamp Ranges" 'active-range)
+               (const :tag "Inactive Timestamps" 'inactive)
+               (const :tag "Inactive Timestamp Ranges" 'inactive-range)))
   :group 'org-sql)
-
-;; (defcustom org-sql-store-timestamps-planning t
-;;   "Set to t to store headline planning timestamps in the database."
-;;   :type 'boolean
-;;   :group 'org-sql)
 
 (defcustom org-sql-store-logbook-planning-changes t
   "Set to t to store planning changes from the logbook in the database."
@@ -1156,12 +1159,15 @@ HL-PART is an object as returned by `org-sql--partition-headline'."
                      sec))
          (lb-split (-> sec-split car org-sql--split-lb-entries))
          (sec-rem (->> sec-split cdr (append (cdr lb-split))))
-         (hl-ts (org-element-map sec-rem 'timestamp #'identity)))
-    (-->
+         (hl-ts
+          (->>
+           (org-element-map sec-rem 'timestamp #'identity)
+           (--filter (memq (org-element-property :type it)
+                           org-sql-included-contents-timestamp-types)))))
+    (->
      acc
-     (org-sql--extract-lb-contents it (car lb-split) hl-part)
-     (if (not org-sql-store-timestamp-contents) it
-       (org-sql--extract it #'org-sql--extract-ts hl-ts hl-part)))))
+     (org-sql--extract-lb-contents (car lb-split) hl-part)
+     (org-sql--extract #'org-sql--extract-ts hl-ts hl-part))))
 
 (defun org-sql--extract-hl-planning (acc hl-part)
   "Add planning timestamps from HL-PART to accumulator ACC.
