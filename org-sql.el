@@ -114,6 +114,46 @@ These cannot override pragma in `org-sql--default-pragma'."
   :type 'string
   :group 'org-sql)
 
+(defcustom org-sql-store-links t
+  "Set to t to store links in the database."
+  :type 'boolean
+  :group 'org-sql)
+
+(defcustom org-sql-store-contents-timestamps t
+  "Set to t to store timestamps from headline contents in the database."
+  :type 'boolean
+  :group 'org-sql)
+
+(defcustom org-sql-store-planning-timestamps t
+  "Set to t to store planning timestamps in the database."
+  :type 'boolean
+  :group 'org-sql)
+
+(defcustom org-sql-store-logbook t
+  "Set to t to store generic logbook entries in the database."
+  :type 'boolean
+  :group 'org-sql)
+
+(defcustom org-sql-store-logbook-planning-changes t
+  "Set to t to store planning changes from the logbook in the database."
+  :type 'boolean
+  :group 'org-sql)
+
+(defcustom org-sql-store-logbook-state-changes t
+  "Set to t to store planning changes from the logbook in the database."
+  :type 'boolean
+  :group 'org-sql)
+
+(defcustom org-sql-store-clock-notes t
+  "Set to t to store clock notes in the database."
+  :type 'boolean
+  :group 'org-sql)
+
+(defcustom org-sql-store-clocks t
+  "Set to t to store clocks in the database."
+  :type 'boolean
+  :group 'org-sql)
+
 ;; TODO add a debug buffer
 ;; (defconst org-sql-debug-buffer "*SQL: Org-Debug*"
 ;;   "Name of the SQLi buffer connected to the database.")
@@ -822,35 +862,43 @@ HL-PART is an object as returned by `org-sql--partition-headline'
 and represents the headline surrounding the clock.
 If ITEM is provided, check that this is a valid note that can be
 added to the clock, else add it as a normal logbook entry."
-  (let* ((hl (alist-get :headline hl-part))
-         (fp (alist-get :filepath hl-part))
-         (hl-offset (org-element-property :begin hl))
-         (cl-offset (org-element-property :begin clock))
-         (ts-range (->> clock
-                        (org-element-property :value)
-                        org-sql--parse-ts-range))
-         (start (car ts-range))
-         (end (cdr ts-range))
-         (clock-data (list :file_path fp
-                           :headline_offset hl-offset
-                           :clock_offset cl-offset
-                           :time_start start
-                           :time_end end)))
-    (if (not item)
-        (org-sql--alist-put acc 'clocking clock-data)
-      (let* ((item-part (org-sql--partition-item item hl-part))
-             (item-type (alist-get :type item-part)))
-        (if item-type
-            ;; if we know the type, add the clock and note separately
-            (-> acc
-                (org-sql--alist-put 'clocking clock-data)
-                (org-sql--extract-lb-item item-part))
-          ;; else add it with the clocking table
-          (->> item-part
-               (alist-get :header-text)
-               (list :clock_note)
-               (append clock-data)
-               (org-sql--alist-put acc 'clocking)))))))
+  (let* ((item-part (org-sql--partition-item item hl-part))
+         (item-type (alist-get :type item-part))
+         (clock-data
+          (lambda ()
+            (let* ((hl (alist-get :headline hl-part))
+                   (ts-range (->> clock
+                                  (org-element-property :value)
+                                  org-sql--parse-ts-range)))
+              (list :file_path (alist-get :filepath hl-part)
+                    :headline_offset (org-element-property :begin hl)
+                    :clock_offset (org-element-property :begin clock)
+                    :time_start (car ts-range)
+                    :time_end (cdr ts-range))))))
+    (cond
+     ;; if item doesn't have type assume it is a clock note
+     ((and org-sql-store-clocks item-part (not item-type)
+           org-sql-store-clock-notes)
+      (->> (list :clock_note (alist-get :header-text item-part))
+           (append (funcall clock-data))
+           (org-sql--alist-put acc 'clocking (funcall clock-data))))
+     ;; but don't add a clock note if we don't want it
+     ((and org-sql-store-clocks item-part (not item-type))
+      (org-sql--alist-put acc 'clocking (funcall clock-data)))
+     ;; if item has type then add it as a separate item with clock
+     ((and org-sql-store-clocks item-part item-type)
+      (-> acc
+          (org-sql--alist-put 'clocking clock-data)
+          (org-sql--extract-lb-item item-part)))
+     ;; if no item just add the clock
+     ((and org-sql-store-clocks (not item-part))
+      (org-sql--alist-put acc 'clocking (funcall clock-data)))
+     ;; if we don't want clocks but there is still an item,
+     ;; add it as a logbook entry if it has a type
+     ((and (not org-sql-store-clocks) item-part item-type)
+      (org-sql--extract-lb-item acc item-part))
+     ;; else return acc unaltered
+     (t acc))))
 
 (defun org-sql--extract-lb-items (acc items hl-part)
   "Add data from logbook ITEMS to accumulator ACC.
