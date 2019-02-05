@@ -938,7 +938,7 @@ added to the clock, else add it as a normal logbook entry."
            org-sql-store-clock-notes)
       (->> (list :clock_note (alist-get :header-text item-part))
            (append (funcall clock-data))
-           (org-sql--alist-put acc 'clocking (funcall clock-data))))
+           (org-sql--alist-put acc 'clocking)))
 
      ;; but don't add a clock note if we don't want it
      ((and org-sql-store-clocks item-part (not item-type))
@@ -947,7 +947,7 @@ added to the clock, else add it as a normal logbook entry."
      ;; if item has type then add it as a separate item with clock
      ((and org-sql-store-clocks item-part item-type)
       (-> acc
-          (org-sql--alist-put 'clocking clock-data)
+          (org-sql--alist-put 'clocking (funcall clock-data))
           (org-sql--extract-lb-item item-part)))
 
      ;; if no item just add the clock
