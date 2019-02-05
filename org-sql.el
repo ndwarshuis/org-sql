@@ -113,7 +113,7 @@ These cannot override pragma in `org-sql--default-pragma'."
   "List of properties to ignore when building the properties table.
 To ignore all set to 'all' instead of a list of strings."
   :type '(choice
-          (const "Ignore All" 'all)
+          (const "Ignore All" all)
           (repeat :tag "List of properties to ignore" string))
   :group 'org-sql)
 
@@ -121,7 +121,7 @@ To ignore all set to 'all' instead of a list of strings."
   "List of tags to ignore when building the tags table.
 To ignore all set to 'all' instead of a list of strings."
   :type '(choice
-          (const "Ignore All" 'all)
+          (const "Ignore All" all)
           (repeat :tag "List of tags to ignore" string))
   :group 'org-sql)
 
@@ -139,7 +139,7 @@ To ignore all set to 'all' instead of a list of strings."
                (const :tag "Fuzzy target in parse trees" "fuzzy")
                (const :tag "Headline IDs" "id")
                (repeat :tag "Other types to ignore" string))
-          (const "Ignore all" 'all))
+          (const "Ignore all" all))
   :group 'org-sql)
 
 (defcustom org-sql-included-headline-planning-types
@@ -147,42 +147,40 @@ To ignore all set to 'all' instead of a list of strings."
   "List of headline planning timestamps to include in the database.
 Must be symbols that are one of ':deadline', ':scheduled', or
 ':closed'. To include none set to nil."
-  :type '(choice
-          (set :tag "List of types to include"
-               (const :tag "Deadline Timestamps" :deadline)
-               (const :tag "Scheduled Timestamps" :scheduled)
-               (const :tag "Closed Timestamps" :closed)))
+  :type '(set :tag "List of types to include"
+              (const :tag "Deadline Timestamps" :deadline)
+              (const :tag "Scheduled Timestamps" :scheduled)
+              (const :tag "Closed Timestamps" :closed))
   :group 'org-sql)
 
 (defcustom org-sql-included-contents-timestamp-types
   '(active active-range inactive inactive-range)
-  "List of timestamp types to includes from headline content sections.
+  "List of timestamp types to include from headline content sections.
 List members are symbols of any 'active', 'active-range', 'inactive',
 or 'inactive-range'. To include none set to nil."
-  :type '(choice
-          (set :tag "List of types to include"
-               (const :tag "Active Timestamps" 'active)
-               (const :tag "Active Timestamp Ranges" 'active-range)
-               (const :tag "Inactive Timestamps" 'inactive)
-               (const :tag "Inactive Timestamp Ranges" 'inactive-range)))
+  :type '(set :tag "List of types to include"
+              (const :tag "Active Timestamps" active)
+              (const :tag "Active Timestamp Ranges" active-range)
+              (const :tag "Inactive Timestamps" inactive)
+              (const :tag "Inactive Timestamp Ranges" inactive-range))
   :group 'org-sql)
 
-(defcustom org-sql-store-logbook-planning-changes t
-  "Set to t to store planning changes from the logbook in the database."
-  :type 'boolean
-  :group 'org-sql)
-
-(defcustom org-sql-store-logbook-state-changes t
-  "Set to t to store state changes from the logbook in the database."
-  :type 'boolean
-  :group 'org-sql)
-
-(defcustom org-sql-store-logbook-other t
-  "Set to t to store generic logbook entries in the database.
-This pertains to all logbook entries not covered under
-`org-sql-store-logbook-planning-changes' and
-`org-sql-store-logbook-state-changes'."
-  :type 'boolean
+(defcustom org-sql-included-logbook-types
+  '(done state note reschedule delschedule redeadline deldeadline
+         refile)
+  "List of logbook entry types to include in the database.
+List members are any of the keys from `org-log-note-headings' with the
+exception of 'clock-out' as these are treated as clock-notes (see
+`org-sql-store-clock-notes'). To include none set to nil."
+  :type '(set :tag "List of types to include"
+              (const :tag "Closing notes" done)
+              (const :tag "State changes" state)
+              (const :tag "Notes taken" note)
+              (const :tag "Rescheduled tasks" reschedule)
+              (const :tag "Unscheduled tasks" delschedule)
+              (const :tag "Redeadlined tasks" redeadline)
+              (const :tag "Undeadlined tasks" deldeadline)
+              (const :tag "Refiled tasks" refile))
   :group 'org-sql)
 
 (defcustom org-sql-store-clocks t
@@ -819,48 +817,40 @@ ITEM-PART is a partitioned logbook item as described in
 `org-sql--partition-item'. LOGBOOK-DATA is a plist as passed from
 `org-sql--extract-lb-item' PLANNING-TYPE is the type of the timestamp
 that was changed (either 'deadline' or 'scheduled')."
-  (if (not org-sql-store-logbook-planning-changes) acc
-    (let* ((hl-part (alist-get :hl-part item-part))
-           (ts-old (->> item-part
-                        (alist-get :item)
-                        (assoc 'paragraph)
-                        (org-element-contents)
-                        ;; assume old timestamp is always the first
-                        (assoc 'timestamp)))
-           (pc-data
-            (list
-             :file_path (plist-get logbook-data :file_path)
-             :entry_offset (plist-get logbook-data :entry_offset)
-             :timestamp_offset (org-element-property :begin ts-old))))
-      (->
-       acc
-       (org-sql--alist-put 'logbook logbook-data)
-       (org-sql--alist-put 'planning_changes pc-data)
-       (org-sql--extract-ts ts-old hl-part planning-type)))))
+  (let* ((hl-part (alist-get :hl-part item-part))
+         (ts-old (->> item-part
+                      (alist-get :item)
+                      (assoc 'paragraph)
+                      (org-element-contents)
+                      ;; assume old timestamp is always the first
+                      (assoc 'timestamp)))
+         (pc-data
+          (list
+           :file_path (plist-get logbook-data :file_path)
+           :entry_offset (plist-get logbook-data :entry_offset)
+           :timestamp_offset (org-element-property :begin ts-old))))
+    (->
+     acc
+     (org-sql--alist-put 'logbook logbook-data)
+     (org-sql--alist-put 'planning_changes pc-data)
+     (org-sql--extract-ts ts-old hl-part planning-type))))
 
 (defun org-sql--extract-lb-state-change (acc logbook-data item-part)
   "Add data from state-change logbook entry to accumulator ACC.
 ITEM-PART is a partitioned logbook item as described in
 `org-sql--partition-item'. LOGBOOK-DATA is a plist as passed from
 `org-sql--extract-lb-item'"
-  (if (not org-sql-store-logbook-state-changes) acc
-    (save-match-data
-      (set-match-data (alist-get :match-data item-part))
-      (let* ((header-text (alist-get :header-text item-part))
-             (state-data
-              (list :file_path (plist-get logbook-data :file_path)
-                    :entry_offset (plist-get logbook-data :entry_offset)
-                    :state_old (match-string 3 header-text)
-                    :state_new (match-string 1 header-text))))
-        (-> acc
-            (org-sql--alist-put 'logbook logbook-data)
-            (org-sql--alist-put 'state_changes state-data))))))
-
-(defun org-sql--extract-lb-other (acc logbook-data)
-  "Add data from generic logbook entry to accumulator ACC.
-LOGBOOK-DATA is a plist as passed from `org-sql--extract-lb-item'"
-  (if (not org-sql-store-logbook-other) acc
-    (org-sql--alist-put acc 'logbook logbook-data)))
+  (save-match-data
+    (set-match-data (alist-get :match-data item-part))
+    (let* ((header-text (alist-get :header-text item-part))
+           (state-data
+            (list :file_path (plist-get logbook-data :file_path)
+                  :entry_offset (plist-get logbook-data :entry_offset)
+                  :state_old (match-string 3 header-text)
+                  :state_new (match-string 1 header-text))))
+      (-> acc
+          (org-sql--alist-put 'logbook logbook-data)
+          (org-sql--alist-put 'state_changes state-data)))))
 
 (defun org-sql--item-time-logged (item-part)
   "Return time-logged of ITEM-PART or nil if it cannot be determined.
@@ -896,23 +886,24 @@ ITEM-PART is a partitioned logbook item as described in
                 :time_logged (org-sql--item-time-logged item-part)
                 :header (alist-get :header-text item-part)
                 :note (alist-get :note-text item-part))))
-    (cond
-     ((eq type 'state)
-      (org-sql--extract-lb-state-change acc logbook-data item-part))
+    (if (not (memq type org-sql-included-logbook-types)) acc
+      (cond
+       ((eq type 'state)
+        (org-sql--extract-lb-state-change acc logbook-data item-part))
 
-     ((memq type '(redeadline deldeadline))
-      (org-sql--extract-lb-planning-change acc logbook-data item-part
-                                           'deadline))
+       ((memq type '(redeadline deldeadline))
+        (org-sql--extract-lb-planning-change acc logbook-data item-part
+                                             'deadline))
 
-     ((memq type '(reschedule delschedule))
-      (org-sql--extract-lb-planning-change acc logbook-data item-part
-                                           'scheduled))
+       ((memq type '(reschedule delschedule))
+        (org-sql--extract-lb-planning-change acc logbook-data item-part
+                                             'scheduled))
 
-     ;; ((memq type '(done refile note))
-     ;;  (org-sql--extract-lb-other acc logbook-data))
+       ;; ((memq type '(done refile note))
+       ;;  (org-sql--extract-lb-other acc logbook-data))
 
-     ;; TODO, need a better way to handle unrecognized logbook items
-     (t (org-sql--extract-lb-other acc logbook-data)))))
+       ;; TODO, need a better way to handle unrecognized logbook items
+       (t (org-sql--alist-put acc 'logbook logbook-data))))))
 
 (defun org-sql--extract-lb-clock (acc clock hl-part &optional item)
   "Add data from logbook CLOCK to accumulator ACC.
