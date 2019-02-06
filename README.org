@@ -54,28 +54,22 @@ Installed programs
 - sqlite (tested with 3.x)
 ** Configuration
 *** General behavior
-| variable           | description                                                       |
-|--------------------+-------------------------------------------------------------------|
-| org-sqlite-db-path | the path to the sqlite database to be created                     |
-| org-sql-pragma     | pragma to use for new connections (useful for performance tuning) |
-| org-sql-files      | list of org files to insert into database                         |
-| org-sql-buffer     | the name of the buffer for the SQLite connection                  |
+- =org-sqlite-db-path=: the path to the sqlite database to be created
+- =org-sql-files=: list of org files to insert into database
+- =org-sql-pragma=: pragma to use for new connections (useful for performance tuning)
+- =org-sql-buffer=: the name of the buffer for the SQLite connection
 *** Database storage
-These control what data gets stored in the database
-| variable                                  | description                                                                                      |
-|-------------------------------------------+--------------------------------------------------------------------------------------------------|
-| org-sql-use-tag-inheritance               | use tag inheritance when populating the database                                                 |
-| org-sql-ignored-properties                | properties to ignore                                                                             |
-| org-sql-ignored-tags                      | tags to ignore                                                                                   |
-| org-sql-ignored-link-types                | link types to ignore (eg mu4e, file)                                                             |
-| org-sql-included-healine-planning-types   | planning types (eg closed, scheduled) to include                                                 |
-| org-sql-included-contents-timestamp-types | type of timestamps (eg active, inactive) to include                                              |
-| org-sql-store-logbook-planning-changes    | whether to include logbook planning changes (eg changed deadline from x to y)                    |
-| org-sql-store-logbook-state-changes       | whether to include logbook state changes (eg todo change from TODO to WAIT)                      |
-| org-sql-store-logbook-other               | whether to include generic logbook entries that are not covered by other customization variables |
-| org-sql-store-clocks                      | whether to include clocks                                                                        |
-| org-sql-store-clock-notes                 | whether to include clock notes                                                                   |
-*** logbooks
+These options control what data gets stored in the database, and are useful to minimize the size of the database as well as the time it takes to update:
+- =org-sql-ignored-properties=: list of properties to ignore
+- =org-sql-ignored-tags=: list of tags to ignore
+- =org-sql-ignored-link-types=: list link types to ignore (eg mu4e, file)
+- =org-sql-included-healine-planning-types=: planning types (eg =:closed=, =:scheduled=) to include
+- =org-sql-included-contents-timestamp-types=: type of timestamps (eg =active=, =inactive=) to include
+- =org-sql-included-logbook-types=: types of logbook entries to include (eg =note=, =reschedule=, etc)
+- =org-sql-use-tag-inheritance=: add inherited tags to the database
+- =org-sql-store-clocks=: whether to include clocks (nil implies no clock notes are desired either)
+- =org-sql-store-clock-notes=: whether to include clock notes
+*** Logbooks
 Much of the extracted data from =org-sql= pertains to logbook entries, and there are a number of settings that effect how this data is generated in org files and how it may be parsed reliably.
 
 Firstly, one needs to set the relevant =org-mode= variables in order to capture logging information. Please refer to the documentation in =org-mode= itself for their meaning:
@@ -222,7 +216,7 @@ In the future, this will have one row for each timestamp under a headline. For n
 
 NOTES: 
 - inactive-range and active-range will not appear in the *type* column. Use *time_end* instead to determine if the timestamp is a ranged timestamp
-- there is no distinction in this table alone between planning timestamps that are part of the planning section (eg =CLOSED: [whatever]=) and those from logbook entries that pertain to planning changes (eg =Removed deadline, was "[whatever]"=). This distinction requires the =planning_changes= table, which will reference logbook planning change timestamps but not in the planning section.
+- there is no distinction in this table alone between planning timestamps that are part of the planning section (eg =CLOSED: [whatever]=) and those from logbook entries that pertain to planning changes (eg =Removed deadline, was [whatever]=). This distinction requires the =planning_changes= table, which will reference logbook planning change timestamps but not in the planning section.
 ** Contributions
 Pull requests welcome, especially those for other SQL implementations.
 ** Acknowledgments
