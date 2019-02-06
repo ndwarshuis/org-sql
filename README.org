@@ -175,6 +175,7 @@ Stores one row for each entry in the logbook underneath a headline (excluding cl
 | file_path (PF)      | text    | path to file containing the entry                        |
 | headline_offset (F) | integer | offset of the headline's first character in the org file |
 | entry_offset (P)    | integer | offset of the entry's first character in the org file    |
+| entry_type          | text    | type of the logbook entry (see =org-log-note=headines=)  |
 | time_logged         | date    | timestamp for when the entry was taken                   |
 | header              | text    | the first line of the note, usually standardized         |
 | note                | note    | the text underneath the entry header                     |
