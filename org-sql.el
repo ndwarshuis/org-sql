@@ -57,16 +57,16 @@ to store them. This is in addition to any properties specifified by
 
 ;; TODO, make a formating function to convert a lisp obj to schema
 (defconst org-sql--schemas
-  '("CREATE TABLE files (file_path TEXT PRIMARY KEY ASC,md5 TEXT NOT NULL,size INTEGER NOT NULL,time_modified DATE,time_created DATE,time_accessed DATE);"
+  '("CREATE TABLE files (file_path TEXT PRIMARY KEY ASC,md5 TEXT NOT NULL,size INTEGER NOT NULL,time_modified INTEGER,time_created INTEGER,time_accessed INTEGER);"
     "CREATE TABLE headlines (file_path TEXT, headline_offset INTEGER, tree_path TEXT, headline_text TEXT NOT NULL, keyword TEXT, effort INTEGER, priority CHAR, archived BOOLEAN, commented BOOLEAN, content TEXT, PRIMARY KEY (file_path ASC, headline_offset ASC), FOREIGN KEY (file_path) REFERENCES files (file_path) ON UPDATE CASCADE ON DELETE CASCADE);"
     "CREATE TABLE tags (file_path TEXT,headline_offset INTEGER,tag TEXT,inherited BOOLEAN,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path, headline_offset, tag, inherited));"
     "CREATE TABLE properties (file_path TEXT,headline_offset INTEGER,property_offset INTEGER,key_text TEXT NOT NULL,val_text TEXT NOT NULL,inherited BOOLEAN,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, property_offset ASC));"
-    "CREATE TABLE clocking (file_path TEXT,headline_offset INTEGER,clock_offset INTEGER,time_start DATE,time_end DATE,clock_note TEXT,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset)ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, clock_offset ASC));"
-    "CREATE TABLE logbook (file_path TEXT,headline_offset INTEGER,entry_offset INTEGER,entry_type TEXT,time_logged DATE,header TEXT,note TEXT,FOREIGN KEY (file_path, headline_offset)REFERENCES headlines (file_path, headline_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, entry_offset ASC));"
+    "CREATE TABLE clocking (file_path TEXT,headline_offset INTEGER,clock_offset INTEGER,time_start INTEGER,time_end INTEGER,clock_note TEXT,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset)ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, clock_offset ASC));"
+    "CREATE TABLE logbook (file_path TEXT,headline_offset INTEGER,entry_offset INTEGER,entry_type TEXT,time_logged INTEGER,header TEXT,note TEXT,FOREIGN KEY (file_path, headline_offset)REFERENCES headlines (file_path, headline_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, entry_offset ASC));"
     "CREATE TABLE state_changes (file_path TEXT,entry_offset INTEGER,state_old TEXT NOT NULL,state_new TEXT NOT NULL,FOREIGN KEY (file_path, entry_offset) REFERENCES logbook (file_path, entry_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, entry_offset ASC));"
     "CREATE TABLE planning_changes (file_path TEXT, entry_offset INTEGER, timestamp_offset INTEGER NOT NULL, FOREIGN KEY (file_path, entry_offset) REFERENCES logbook (file_path, entry_offset) ON DELETE CASCADE ON UPDATE CASCADE, PRIMARY KEY (file_path ASC, entry_offset ASC), FOREIGN KEY (file_path, timestamp_offset) REFERENCES timestamp (file_path, timestamp_offset) ON DELETE CASCADE ON UPDATE CASCADE);"
     "CREATE TABLE links (file_path TEXT,headline_offset INTEGER,link_offset INTEGER,link_path TEXT,link_text TEXT,link_type TEXT,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, link_offset ASC));"
-    "CREATE TABLE timestamp (file_path TEXT, headline_offset INTEGER, timestamp_offset INTEGER, raw_value TEXT NOT NULL, type TEXT, planning_type TEXT, warning_type TEXT, warning_value INTEGER, warning_unit TEXT, repeat_type TEXT, repeat_value INTEGER, repeat_unit TEXT, time DATE NOT NULL, time_end DATE, PRIMARY KEY (file_path, timestamp_offset), FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON DELETE CASCADE ON UPDATE CASCADE);")
+    "CREATE TABLE timestamp (file_path TEXT, headline_offset INTEGER, timestamp_offset INTEGER, raw_value TEXT NOT NULL, type TEXT, planning_type TEXT, warning_type TEXT, warning_value INTEGER, warning_unit TEXT, repeat_type TEXT, repeat_value INTEGER, repeat_unit TEXT, time INTEGER NOT NULL, time_end INTEGER, PRIMARY KEY (file_path, timestamp_offset), FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON DELETE CASCADE ON UPDATE CASCADE);")
   "Table schemas for the org database.")
 
 (defconst org-sql--default-pragma
@@ -498,13 +498,13 @@ throw an error if the string is not recognized."
          (t (when throw-err
               (error (concat "Unknown effort format: '" effort-str "'")))))))))
 
-(defun org-sql--ts-fmt-iso (ts)
-  "Return org timestamp TS as string in ISO 8601 format.
+(defun org-sql--ts-fmt-unix-time (ts)
+  "Return org timestamp TS as unix time integer.
 Return nil if TS is nil or if TS cannot be understood."
   (-some-->
    ts
    (save-match-data (org-2ft it))
-   (when (> it 0) (format-time-string "%Y-%m-%dT%H:%M:00" it))))
+   (when (> it 0) (+ (round it)))))
 
 (defun org-sql--parse-ts-range (ts)
   "Return start or end of timestamp TS.
@@ -517,7 +517,7 @@ exist."
              (--> ts
                   (org-timestamp-split-range it end)
                   (org-element-property :raw-value it)
-                  (org-sql--ts-fmt-iso it)))))
+                  (org-sql--ts-fmt-unix-time it)))))
       (if (eq (org-element-property :type ts) 'inactive-range)
           (let ((start (funcall split ts))
                 (end (funcall split ts t)))
@@ -528,7 +528,7 @@ exist."
   "Convert TXT to ISO 8601 format if possible.
 Returns formatted string or TXT if it is not a timestamp."
   ;; assume the iso parser to return nil on failure
-  (-> txt org-sql--ts-fmt-iso (or txt)))
+  (-> txt org-sql--ts-fmt-unix-time (or txt)))
 
 ;;; org-mode element helper functions
 
@@ -538,7 +538,7 @@ Returns formatted string or TXT if it is not a timestamp."
 ;;   (-some--> obj
 ;;             (org-element-property prop it)
 ;;             (org-element-property :raw-value it)
-;;             (if iso (org-sql--ts-fmt-iso it) it)))
+;;             (if iso (org-sql--ts-fmt-unix-time it) it)))
             
 (defun org-sql--element-split-by-type (type contents &optional right)
   "Split sequence of org-elements by first instance of TYPE.
@@ -866,7 +866,7 @@ ITEM-PART is a partitioned item given by `org-sql--partition-item'."
       (->> item-part
            (alist-get :header-text)
            (match-string time-index)
-           org-sql--ts-fmt-iso))))
+           org-sql--ts-fmt-unix-time))))
 
 (defun org-sql--extract-lb-item (acc item-part)
   "Add data from logbook entry ITEM-PART to accumulator ACC.

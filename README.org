@@ -94,7 +94,7 @@ Note that the database will take several seconds to minutes if inserting many fi
 *** Clearing all data
 Run =org-sql-user-clear-all=. This will clear all data but leave the schema.
 ** Database Layout
-The database is arranged by files at the top level and by =org-mode= features moving down to child tables. Primary keys are foreign keys are marked with P and F in parens respecively. All dates are converted into ISO 8601 format before entering into the database.
+The database is arranged by files at the top level and by =org-mode= features moving down to child tables. Primary keys are foreign keys are marked with P and F in parens respecively. All dates are converted into unix time integers before entering into the database.
 *** hierarchy
 The databases are arranged as follows according to their foreign key contraints:
 
@@ -113,9 +113,9 @@ Stores one row per org file
 | file_path (P) | text    | path to an org file       |
 | md5           | text    | md5 sum of the org file   |
 | size          | integer | size of the file in bytes |
-| time_modified | date    | unused                    |
-| time_created  | date    | unused                    |
-| time_accessed | date    | unused                    |
+| time_modified | integer | unused                    |
+| time_created  | integer | unused                    |
+| time_accessed | integer | unused                    |
 *** headlines
 Stores one row for each headline in a given org file as well as any atomic metadata attached to that headline
 | column              | type    | description                                              |
@@ -165,20 +165,20 @@ Stores one row for each clock entry identified in an org file and its given head
 | file_path (PF)      | text    | path to file containing the clock                        |
 | headline_offset (F) | integer | offset of the headline's first character in the org file |
 | clock_offset (P)    | integer | offset of the clock's first character in the org file    |
-| time_start          | date    | timestamp for the start of the clock                     |
-| time_end            | date    | timestamp for the end of the clock                       |
-| clock_note          | date    | the note text beneath the clock if available             |
+| time_start          | integer | timestamp for the start of the clock                     |
+| time_end            | integer | timestamp for the end of the clock                       |
+| clock_note          | text    | the note text beneath the clock if available             |
 *** logbook
 Stores one row for each entry in the logbook underneath a headline (excluding clocks). Some entries may have additional information associated with them for planning and state changes as given in the child tables below.
-| column              | type    | description                                              |
-|---------------------+---------+----------------------------------------------------------|
-| file_path (PF)      | text    | path to file containing the entry                        |
-| headline_offset (F) | integer | offset of the headline's first character in the org file |
-| entry_offset (P)    | integer | offset of the entry's first character in the org file    |
-| entry_type          | text    | type of the logbook entry (see =org-log-note=headines=)  |
-| time_logged         | date    | timestamp for when the entry was taken                   |
-| header              | text    | the first line of the note, usually standardized         |
-| note                | note    | the text underneath the entry header                     |
+| column              | type     | description                                              |
+|---------------------+----------+----------------------------------------------------------|
+| file_path (PF)      | text     | path to file containing the entry                        |
+| headline_offset (F) | integer  | offset of the headline's first character in the org file |
+| entry_offset (P)    | integer  | offset of the entry's first character in the org file    |
+| entry_type          | text     | type of the logbook entry (see =org-log-note=headines=)  |
+| time_logged         | integere | timestamp for when the entry was taken                   |
+| header              | text     | the first line of the note, usually standardized         |
+| note                | note     | the text underneath the entry header                     |
 
 note: the header should match =org-log-note-headings= unless it is a clock note
 *** state_changes
@@ -195,14 +195,14 @@ Stores one row per logbook entry with planning changes as triggered by setting =
 |----------------------+---------+-------------------------------------------------------|
 | file_path (PF)       | text    | path to file containing the entry                     |
 | entry_offset (PF)    | integer | offset of the entry's first character in the org file |
-| timestamp_offset (F) | date    | offset of the timestamp for the former planning entry |
+| timestamp_offset (F) | integer | offset of the timestamp for the former planning entry |
 *** timestamp
 In the future, this will have one row for each timestamp under a headline. For now it just refers to timestamps in the planning block (eg CLOSED, SCHEDULED, or DEADLINE) and timestamps in logbook headings for planning changes. It does not include the timestamp for the time a log entry was taken (this is stored in the /logging/ table above) nor does it store timestamps for clocks (stored in the /clocking/ table). Eventually this table will include timestamps in logbook notes as well as headline contents.
 | column              | type    | description                                                |
 |---------------------+---------+------------------------------------------------------------|
 | file_path (PF)      | text    | path to file containing the entry                          |
 | headline_offset (F) | integer | offset of the entry's first character in the org file      |
-| timestamp_offet (P) | date    | offset of the timestamp for the former planning entry      |
+| timestamp_offet (P) | integer | offset of the timestamp for the former planning entry      |
 | raw_value           | text    | the string of the timestamp as it appears in org buffers   |
 | type                | text    | either inactive or active                                  |
 | planning_type       | text    | either /closed/, /scheduled/, /deadline/, or null          |
@@ -212,8 +212,8 @@ In the future, this will have one row for each timestamp under a headline. For n
 | repeat_type         | text    | the repeater type (/catch-up/, /restart/, /cumulate/)      |
 | repeat_value        | integer | value of repeater shift                                    |
 | repeat_unit         | text    | unit for repeater (/hour/, /day/, /week/, /month/, /year/) |
-| time                | date    | the time of the timestamp in ISO 8601 format               |
-| time_end            | date    | like *time* but for the end if this is a range             |
+| time                | integer | the time of the timestamp in unix time                     |
+| time_end            | integer | like *time* but for the end if this is a range             |
 
 NOTES: 
 - Inactive-range and active-range will not appear in the *type* column. Use *time_end* instead to determine if the timestamp is a ranged timestamp
