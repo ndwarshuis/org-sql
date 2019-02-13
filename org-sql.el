@@ -886,7 +886,8 @@ ITEM-PART is a partitioned logbook item as described in
                 :time_logged (org-sql--item-time-logged item-part)
                 :header (alist-get :header-text item-part)
                 :note (alist-get :note-text item-part))))
-    (if (not (memq type org-sql-included-logbook-types)) acc
+    (if (not (or (null type) (memq type org-sql-included-logbook-types)))
+        acc
       (cond
        ((eq type 'state)
         (org-sql--extract-lb-state-change acc logbook-data item-part))
