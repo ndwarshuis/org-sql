@@ -66,7 +66,7 @@ to store them. This is in addition to any properties specifified by
     "CREATE TABLE state_changes (file_path TEXT,entry_offset INTEGER,state_old TEXT NOT NULL,state_new TEXT NOT NULL,FOREIGN KEY (file_path, entry_offset) REFERENCES logbook (file_path, entry_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, entry_offset ASC));"
     "CREATE TABLE planning_changes (file_path TEXT, entry_offset INTEGER, timestamp_offset INTEGER NOT NULL, FOREIGN KEY (file_path, entry_offset) REFERENCES logbook (file_path, entry_offset) ON DELETE CASCADE ON UPDATE CASCADE, PRIMARY KEY (file_path ASC, entry_offset ASC), FOREIGN KEY (file_path, timestamp_offset) REFERENCES timestamp (file_path, timestamp_offset) ON DELETE CASCADE ON UPDATE CASCADE);"
     "CREATE TABLE links (file_path TEXT,headline_offset INTEGER,link_offset INTEGER,link_path TEXT,link_text TEXT,link_type TEXT,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, link_offset ASC));"
-    "CREATE TABLE timestamp (file_path TEXT, headline_offset INTEGER, timestamp_offset INTEGER, raw_value TEXT NOT NULL, type TEXT, planning_type TEXT, warning_type TEXT, warning_value INTEGER, warning_unit TEXT, repeat_type TEXT, repeat_value INTEGER, repeat_unit TEXT, time INTEGER NOT NULL, time_end INTEGER, PRIMARY KEY (file_path, timestamp_offset), FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON DELETE CASCADE ON UPDATE CASCADE);")
+    "CREATE TABLE timestamp (file_path TEXT, headline_offset INTEGER, timestamp_offset INTEGER, raw_value TEXT NOT NULL, type TEXT, planning_type TEXT, warning_type TEXT, warning_value INTEGER, warning_unit TEXT, repeat_type TEXT, repeat_value INTEGER, repeat_unit TEXT, time INTEGER NOT NULL, time_end INTEGER, resolution TEXT, resolution_end TEXT, PRIMARY KEY (file_path, timestamp_offset), FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON DELETE CASCADE ON UPDATE CASCADE);")
   "Table schemas for the org database.")
 
 (defconst org-sql--default-pragma
@@ -506,18 +506,28 @@ Return nil if TS is nil or if TS cannot be understood."
    (save-match-data (org-2ft it))
    (when (> it 0) (+ (round it)))))
 
-(defun org-sql--parse-ts-range (ts)
-  "Return start or end of timestamp TS.
+(defun org-sql--parse-ts-range (ts &optional fun)
+  "Return 'start' or 'end' of timestamp TS.
 Return value will be a cons cell like (START . END) where START is
 the first half of TS and END is the ending half or nil if it does not
-exist."
+exist.
+
+By default, 'start' and 'end' are returned as integers in epoch time.
+If different return values, are desired, supply function FUN which
+takes a timestamp element (from either the start or end if a range) as
+its sole argument."
   (when ts
-    (let ((split
-           (lambda (ts &optional end)
-             (--> ts
-                  (org-timestamp-split-range it end)
-                  (org-element-property :raw-value it)
-                  (org-sql--ts-fmt-unix-time it)))))
+    (let* ((get-epoch-time
+            (lambda (ts)
+              (->> ts
+                   (org-element-property :raw-value)
+                   (org-sql--ts-fmt-unix-time))))
+           (fun (or fun get-epoch-time))
+           (split
+            (lambda (ts &optional end)
+              (--> ts
+                   (org-timestamp-split-range it end)
+                   (funcall fun it)))))
       (if (eq (org-element-property :type ts) 'inactive-range)
           (let ((start (funcall split ts))
                 (end (funcall split ts t)))
@@ -1116,6 +1126,13 @@ PT is a string representing the planning type and is one of 'closed,'
 'scheduled,' or 'deadline' although these values are not enforced by
 this function."
   (let* ((ts-range (org-sql--parse-ts-range ts))
+         (get-resolution
+          (lambda (ts)
+            (when ts
+              (if (org-element-property :hour-start ts)
+                  'minute
+                'day))))
+         (ts-range-res (org-sql--parse-ts-range ts get-resolution))
          (fp (alist-get :filepath hl-part))
          (ts-offset (org-element-property :begin ts))
          (ts-data
@@ -1140,7 +1157,9 @@ this function."
            :repeat_value (org-element-property :repeater-value ts)
            :repeat_unit (org-element-property :repeater-unit ts)
            :time (car ts-range)
+           :resolution (car ts-range-res)
            :time_end (cdr ts-range)
+           :resolution_end (cdr ts-range-res)
            :raw_value (org-element-property :raw-value ts))))
     (org-sql--alist-put acc 'timestamp ts-data)))
 

@@ -214,6 +214,8 @@ In the future, this will have one row for each timestamp under a headline. For n
 | repeat_unit         | text    | unit for repeater (/hour/, /day/, /week/, /month/, /year/) |
 | time                | integer | the time of the timestamp in unix time                     |
 | time_end            | integer | like *time* but for the end if this is a range             |
+| resolution          | text    | /minute/ if timestamp specifies hours/minutes, else /day/ |
+| resolution_end      | text    | like *resolution* but for the end if this is a range       |
 
 NOTES: 
 - Inactive-range and active-range will not appear in the *type* column. Use *time_end* instead to determine if the timestamp is a ranged timestamp
