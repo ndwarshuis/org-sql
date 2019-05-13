@@ -434,6 +434,10 @@ PRAGMA is a plist of pragma to set. This is merged with
        org-sql--pragma-merge-default
        org-sql--fmt-pragma
        org-sql-cmd))
+
+;; new sql-redirect function with windows prompt fixed
+;; use advice and system-type = 'windows-nt' varable to wrap the
+;; advice
   
 (defun org-sql-cmd (cmd)
   "Execute SQL string CMD in SQLi buffer named as `org-sql-buffer'.
