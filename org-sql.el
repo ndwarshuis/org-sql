@@ -1395,7 +1395,8 @@ database."
    (--map (if (file-directory-p it)
               (directory-files it t "\\`.*\\.org\\(_archive\\)?\\'")
             (list it)))
-   (apply #'append)))
+   (apply #'append)
+   (-filter #'file-exists-p)))
 
 (defun org-sql-files-on-disk ()
   "Return alist for file paths in `org-sql-files'.
