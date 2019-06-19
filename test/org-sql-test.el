@@ -13,13 +13,8 @@
                                "test1.org"
                                "error.org")
                              (--map (f-join org-directory it))))
-         (real-files (->> '("arch1.org_archive"
-                            "subdir/arch2.org_archive"
-                            "subdir/test2.org"
-                            "test1.org"
-                            "error.org")
-                             (--map (f-join org-directory it)))))
-     (should (equal (org-sql-files) real-files)))))
+         (real-files (f-files org-directory nil t)))
+     (should (eq '() (-difference (org-sql-files) real-files))))))
 
 (ert-deftest org-sql/files-exist ()
   "Should return all files from `org-sql-files' but only those that
@@ -30,13 +25,8 @@ exist."
                                 "test1.org"
                                 "error.org")
                               (--map (f-join org-directory it))))
-          (real-files (->> '("arch1.org_archive"
-                             "subdir/arch2.org_archive"
-                             "subdir/test2.org"
-                             "test1.org"
-                             "error.org")
-                           (--map (f-join org-directory it))))
+          (real-files (f-files org-directory nil t))
           (fake-files (->> '("fake.org" "fake.org")
                            (--map (f-join org-directory it))))
           (org-sql-files (append real-files fake-files)))
-     (should (equal (org-sql-files) real-files)))))
+     (should (eq '() (-difference (org-sql-files) real-files))))))
