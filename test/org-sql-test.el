@@ -23,10 +23,35 @@ exist."
    (let* ((org-sql-files (->> '("arch1.org_archive"
                                 "subdir"
                                 "test1.org"
-                                "error.org")
+                                "error.org"
+                                "fake.org")
                               (--map (f-join org-directory it))))
-          (real-files (f-files org-directory nil t))
-          (fake-files (->> '("fake.org" "fake.org")
-                           (--map (f-join org-directory it))))
-          (org-sql-files (append real-files fake-files)))
+          (real-files (f-files org-directory nil t)))
      (should (eq '() (-difference (org-sql-files) real-files))))))
+
+;; TODO ...there's a better way to do this, right?
+(ert-deftest org-sql/extract-files ()
+  "Should return a valid accumulator."
+  (with-sandbox
+   (let* ((test-file (f-join org-directory "test1.org"))
+          (test-file-size (f-size test-file))
+          (test-md5-sum "some-md5")
+          (test-cell (cons test-file test-md5-sum)))
+     (should (equal
+              `((files
+                 ,(list :file_path test-file
+                        :md5 test-md5-sum
+                        :size test-file-size))
+                (headlines
+                 ,(list :file_path test-file
+                        :headline_offset 1
+                        :tree_path nil
+                        :headline_text "small test headline"
+                        :keyword nil
+                        :effort nil
+                        :priority nil
+                        :archived 0
+                        :commented 0
+                        :content nil)))
+              (org-sql--extract-file test-cell nil))))))
+  
