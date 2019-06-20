@@ -658,7 +658,7 @@ constant for further details."
      ;; the data to be inserted via the escape sequences
      (--map (funcall replace-esc it re-match-alist))
      ;; filter out anything that is blank (eg default clock-in)
-     (seq-filter (lambda (s) (not (equal (cdr s) "")))))))
+     (--remove (equal (cdr it) "")))))
 
 (defconst org-sql--log-note-headings-regexp
   (org-sql--log-note-headings-convert)
