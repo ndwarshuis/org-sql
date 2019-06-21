@@ -123,3 +123,17 @@ Input might be multiple lines."
   (should (equal (org-sql--escape-text "abc")
                  (org-sql--to-string 'abc))))
 
+(ert-deftest org-sql/kw-to-colname-nil ()
+  "Should return error when given nil."
+  (should-error (org-sql--kw-to-colname nil)))
+
+(ert-deftest org-sql/kw-to-colname-non-keyword ()
+  "Should return error when not given a keyword."
+  (should-error (org-sql--kw-to-colname 1))
+  (should-error (org-sql--kw-to-colname "1"))
+  (should-error (org-sql--kw-to-colname 'a))
+  (should-error (org-sql--kw-to-colname '())))
+
+(ert-deftest org-sql/kw-to-colname-keyword ()
+  "Should return error when given nil."
+  (should (equal "yeah-boi" (org-sql--kw-to-colname :yeah-boi))))
