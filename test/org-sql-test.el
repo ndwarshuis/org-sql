@@ -209,12 +209,37 @@ Input might be multiple lines."
 
 (ert-deftest org-sql/effort-to-int-invalid ()
   "Invalid strings should return nil."
+  (should-not (org-sql--effort-to-int "" nil))
   (should-not (org-sql--effort-to-int ":30" nil))
   (should-not (org-sql--effort-to-int "-0:30" nil))
   (should-not (org-sql--effort-to-int "0:" nil)))
 
 (ert-deftest org-sql/effort-to-int-invalid-throw ()
   "Invalid strings should throw error if we want it."
+  (should-error (org-sql--effort-to-int "" nil t))
   (should-error (org-sql--effort-to-int ":30" nil t))
   (should-error (org-sql--effort-to-int "-0:30" nil t))
   (should-error (org-sql--effort-to-int "0:" nil t)))
+
+(ert-deftest org-sql/ts-fmt-unix-time-nil ()
+  "Should return nil if given nil."
+  (should-not (org-sql--ts-fmt-unix-time nil)))
+
+(ert-deftest org-sql/ts-fmt-unix-time-valid ()
+  "Should return a unixtime integer if given valid timestamp."
+  (cl-flet ((date-local-time
+             (d m y)
+             (-> (encode-time 0 0 0 d m y (current-time-zone))
+                 (float-time)
+                 (round))))
+    (should (= (date-local-time 8 6 2012)
+               (org-sql--ts-fmt-unix-time "[2012-06-08]")))
+    (should (= (date-local-time 29 7 2016)
+               (org-sql--ts-fmt-unix-time "[2016-07-29]")))
+    (should (= (date-local-time 14 6 2019)
+               (org-sql--ts-fmt-unix-time "[2019-06-14]")))))
+
+(ert-deftest org-sql/ts-fmt-unix-time-invalid ()
+  "Should return nil if given an invalid timestamp."
+  (should-not (org-sql--ts-fmt-unix-time ""))
+  (should-not (org-sql--ts-fmt-unix-time "201-06-14")))
