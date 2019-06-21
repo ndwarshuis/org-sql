@@ -72,3 +72,54 @@ exist."
 (ert-deftest org-sql/plist-get-vals-nil ()
   "Should return nil if no plist given."
   (should-not (org-sql--plist-get-vals nil)))
+
+(ert-deftest org-sql/to-plist-blank ()
+  "Should return nothing if given an empty string or nil."
+  (should-not (org-sql--to-plist "" '())))
+
+(ert-deftest org-sql/to-plist-nil ()
+  "Should given an error if given nil."
+  (should-error (org-sql--to-plist nil '())))
+
+(ert-deftest org-sql/to-plist-valid ()
+  "Should give a list of plists for a given SQL-formatted input.
+Input might be multiple lines."
+  (should (equal '((:one "1" :two "2" :three "3")
+                   (:one "4" :two "5" :three "6"))
+                   (org-sql--to-plist "1|2|3\n4|5|6"
+                                    '(:one :two :three)))))
+
+(ert-deftest org-sql/escape-text-nil ()
+  "Should give an error if given nil"
+  (should-error (org-sql--escape-text nil)))
+
+(ert-deftest org-sql/escape-text-blank ()
+  "Should return a single-quoted blank if given a blank."
+  (should (equal "''" (org-sql--escape-text ""))))
+
+(ert-deftest org-sql/escape-text-newline ()
+  "Should insert a '||char(10)||' for every \n character."
+  (should (equal "''||char(10)||''" (org-sql--escape-text "\n"))))
+
+(ert-deftest org-sql/escape-text-single-quote ()
+  "Should insert two single quotes for every quote."
+  (should (equal "''''" (org-sql--escape-text "'"))))
+
+(ert-deftest org-sql/to-string-nil ()
+  "Should return \"NULL\" when given nil."
+  (should (equal "NULL" (org-sql--to-string nil))))
+
+(ert-deftest org-sql/to-string-string ()
+  "Should return an escaped string when given a string."
+  (let ((s "'a'\n'b'"))
+    (should (equal (org-sql--escape-text s) (org-sql--to-string s)))))
+
+(ert-deftest org-sql/to-string-number ()
+  "Should return a stringified number when given a number."
+  (should (equal "1" (org-sql--to-string 1))))
+
+(ert-deftest org-sql/to-string-symbol ()
+  "Should return the symbol's escaped name when given a symbol."
+  (should (equal (org-sql--escape-text "abc")
+                 (org-sql--to-string 'abc))))
+
