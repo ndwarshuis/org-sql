@@ -253,3 +253,25 @@ Input might be multiple lines."
 ;;   "Should return a length-1 list with a time."
 ;;   (let ((s (string-to-org-element "[2019-06-14 00:00]"))
 ;;   (should-not (org-sql--parse-ts-range nil)))
+
+(ert-deftest org-sql/todo-keywords-default ()
+  "Should return a list of TODO keyword strings."
+  (let ((org-todo-keywords '((sequence "TODO" "DONE"))))
+    (should (equal '("TODO" "DONE") (org-sql--todo-keywords)))))
+
+(ert-deftest org-sql/todo-keywords-default-selectors ()
+  "Should return a list of TODO keyword strings without selectors."
+  (let ((org-todo-keywords '((sequence "TODO(t/!)" "DONE(d/!)"))))
+    (should (equal '("TODO" "DONE") (org-sql--todo-keywords)))))
+
+(ert-deftest org-sql/todo-keywords-default-two ()
+  "Should return a list of flattened TODO keyword strings."
+  (let ((org-todo-keywords '((sequence "TODO" "DONE")
+                             (sequence "WAIT" "CANC"))))
+    (should (equal '("TODO" "DONE" "WAIT" "CANC")
+                   (org-sql--todo-keywords)))))
+
+(ert-deftest org-sql/todo-keywords-default-pipe ()
+  "Should return a list of TODO keyword strings without pipes."
+  (let ((org-todo-keywords '((sequence "TODO" "DONE" "|" "CANC"))))
+    (should (equal '("TODO" "DONE" "CANC") (org-sql--todo-keywords)))))
