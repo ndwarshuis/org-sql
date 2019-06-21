@@ -55,3 +55,12 @@ exist."
                         :content nil)))
               (org-sql--extract-file test-cell nil))))))
   
+(ert-deftest org-sql/plist-get-keys-valid ()
+  "Should return the keys of a plist or nil if no plist given."
+  (should (equal '(:one two "three")
+                 (org-sql--plist-get-keys
+                  '(:one 1 two 2 "three" 3)))))
+
+(ert-deftest org-sql/plist-get-keys-nil ()
+  "Should return the keys of a plist or nil if no plist given."
+  (should-not (org-sql--plist-get-keys nil)))
