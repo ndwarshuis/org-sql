@@ -284,7 +284,8 @@ any other symbols to their symbol name."
 ;; TODO this name is too specific
 (defun org-sql--kw-to-colname (kw)
   "Return string representation of KW for column in sql database."
-  (--> kw (symbol-name it) (substring it 1)))
+  (if (keywordp kw) (--> kw (symbol-name it) (substring it 1))
+    (error "Not a keyword: %s" kw)))
 
 (defun org-sql--plist-concat (plist &optional sep)
   "Concatenate a PLIST to string to be used in a SQL statement.
