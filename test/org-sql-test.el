@@ -67,6 +67,29 @@ exist."
   "Should return a string with text properties removed."
   (should (equal "test" (org-sql--strip-string
                          (propertize "test" :one 1)))))
+
+(ert-deftest org-sql/alist-put-nil ()
+  "Should return a new alist if none is supplied."
+  (should (equal '((:one 1)) (org-sql--alist-put nil :one 1))))
+
+(ert-deftest org-sql/alist-put-add ()
+  "Should add new value to existing slot in alist if it exists.
+Will be added to the front of the slot."
+  (let ((res '((:one 1 2))))
+    (should (equal res (org-sql--alist-put '((:one 2)) :one 1)))
+    (should-not (equal res (org-sql--alist-put '((:one 1)) :one 2)))))
+
+(ert-deftest rg-sql/alist-put-new ()
+  "Should make a new slot with new value if slot does not exist.
+New cell goes in the back of the alist."
+  (let ((res '((:one 1) (:two 2))))
+    (should (equal res (org-sql--alist-put '((:one 1)) :two 2)))
+    (should-not (equal res (org-sql--alist-put '((:two 2)) :one 1)))))
+
+(ert-deftest rg-sql/alist-put-current ()
+  "Should add new value into current cell if it has no cdr."
+    (should (equal '((:one 1)) (org-sql--alist-put '((:one)) :one 1))))
+
   
 (ert-deftest org-sql/plist-get-keys-valid ()
   "Should return the keys of a plist."
