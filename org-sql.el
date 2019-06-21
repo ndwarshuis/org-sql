@@ -276,12 +276,15 @@ sql command string is in double quotes."
   "Convert ENTRY to a string suitable for insertion into SQLite db.
 Converts numbers to strings, flanks strings with '\"', and converts
 any other symbols to their symbol name."
-  (cond ((stringp entry) (org-sql--escape-text entry))
+  (cond ((null entry) "NULL")
+        ((stringp entry) (org-sql--escape-text entry))
         ((numberp entry) (number-to-string entry))
-        (entry (-> entry symbol-name org-sql--escape-text))
-        (t "NULL")))
+        ((keywordp entry) (org-sql--kw-to-colname entry))
+        ((symbolp entry) (-> entry symbol-name org-sql--escape-text))
+        (t (error "Cannot convert to string: %s" entry))))
 
 ;; TODO this name is too specific
+;; TODO this now seems redundant
 (defun org-sql--kw-to-colname (kw)
   "Return string representation of KW for column in sql database."
   (if (keywordp kw) (--> kw (symbol-name it) (substring it 1))
