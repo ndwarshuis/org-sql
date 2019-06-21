@@ -54,6 +54,19 @@ exist."
                         :commented 0
                         :content nil)))
               (org-sql--extract-file test-cell nil))))))
+
+(ert-deftest org-sql/string-string-nil ()
+  "Should return nil when given nil."
+  (should-not (org-sql--strip-string nil)))
+
+(ert-deftest org-sql/string-string-extra-spaces ()
+  "Should return a string with all extra whitespace trimmed."
+  (should (equal "fxmldr" (org-sql--strip-string " \t   fxmldr \n "))))
+
+(ert-deftest org-sql/string-string-extra-properties ()
+  "Should return a string with text properties removed."
+  (should (equal "test" (org-sql--strip-string
+                         (propertize "test" :one 1)))))
   
 (ert-deftest org-sql/plist-get-keys-valid ()
   "Should return the keys of a plist."
