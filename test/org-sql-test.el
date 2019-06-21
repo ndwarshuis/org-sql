@@ -243,3 +243,13 @@ Input might be multiple lines."
   "Should return nil if given an invalid timestamp."
   (should-not (org-sql--ts-fmt-unix-time ""))
   (should-not (org-sql--ts-fmt-unix-time "201-06-14")))
+
+(ert-deftest org-sql/parse-ts-range-nil ()
+  "Should return nil if given nil."
+  (should-not (org-sql--parse-ts-range nil)))
+
+;; TODO this should be refactored to make the resolution separate
+;; (ert-deftest org-sql/parse-ts-range-single ()
+;;   "Should return a length-1 list with a time."
+;;   (let ((s (string-to-org-element "[2019-06-14 00:00]"))
+;;   (should-not (org-sql--parse-ts-range nil)))
