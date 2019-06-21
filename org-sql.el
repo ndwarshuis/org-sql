@@ -489,6 +489,7 @@ joined by AND)"
 
 ;;; org-mode string parsing functions
 
+;; TODO this can be refactored with s.el
 (defun org-sql--effort-to-int (effort-str &optional to-string throw-err)
   "Convert EFFORT-STR into an integer from HH:MM format.
 If it is already an integer, nothing is changed. If TO-STRING is t,

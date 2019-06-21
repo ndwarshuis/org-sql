@@ -192,3 +192,29 @@ Input might be multiple lines."
   (should (equal "one=1,two='2',three=3,four=4"
                  (org-sql--plist-concat
                   (list :one 1 :two "2" :three '3 :four :4)))))
+
+(ert-deftest org-sql/effort-to-int-nil ()
+  "Should return nil if given nil."
+  (should-not (org-sql--effort-to-int nil)))
+
+(ert-deftest org-sql/effort-to-int-valid ()
+  "Should return minutes as int of converted time."
+  (should (eq 30 (org-sql--effort-to-int "0:30")))
+  (should (eq 90 (org-sql--effort-to-int "1:30"))))
+
+(ert-deftest org-sql/effort-to-int-valid-string ()
+  "Should return minutes as string of converted time."
+  (should (equal "30" (org-sql--effort-to-int "0:30" t)))
+  (should (equal "90" (org-sql--effort-to-int "1:30" t))))
+
+(ert-deftest org-sql/effort-to-int-invalid ()
+  "Invalid strings should return nil."
+  (should-not (org-sql--effort-to-int ":30" nil))
+  (should-not (org-sql--effort-to-int "-0:30" nil))
+  (should-not (org-sql--effort-to-int "0:" nil)))
+
+(ert-deftest org-sql/effort-to-int-invalid-throw ()
+  "Invalid strings should throw error if we want it."
+  (should-error (org-sql--effort-to-int ":30" nil t))
+  (should-error (org-sql--effort-to-int "-0:30" nil t))
+  (should-error (org-sql--effort-to-int "0:" nil t)))
