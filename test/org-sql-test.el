@@ -109,6 +109,10 @@ Input might be multiple lines."
   "Should return \"NULL\" when given nil."
   (should (equal "NULL" (org-sql--to-string nil))))
 
+(ert-deftest org-sql/to-string-keyword ()
+  "Should return a stringified keyword without the leading ':'."
+  (should (equal "terrordome" (org-sql--to-string :terrordome))))
+
 (ert-deftest org-sql/to-string-string ()
   "Should return an escaped string when given a string."
   (let ((s "'a'\n'b'"))
@@ -117,6 +121,10 @@ Input might be multiple lines."
 (ert-deftest org-sql/to-string-number ()
   "Should return a stringified number when given a number."
   (should (equal "1" (org-sql--to-string 1))))
+
+(ert-deftest org-sql/to-string-list ()
+  "Should return an error if given a list."
+  (should-error (org-sql--to-string '(1 2 3))))
 
 (ert-deftest org-sql/to-string-symbol ()
   "Should return the symbol's escaped name when given a symbol."
@@ -137,3 +145,14 @@ Input might be multiple lines."
 (ert-deftest org-sql/kw-to-colname-keyword ()
   "Should return error when given nil."
   (should (equal "yeah-boi" (org-sql--kw-to-colname :yeah-boi))))
+
+(ert-deftest org-sql/plist-concat-nil ()
+  "Should return nil if not given anything, with or without a sep."
+  (should-not (org-sql--plist-concat nil))
+  (should-not (org-sql--plist-concat nil ", ")))
+
+(ert-deftest org-sql/plist-concat-valid ()
+  "Should return concatenated plist when given one with "
+  (should (equal "one=1,two='2',three=3,four=4"
+                 (org-sql--plist-concat
+                  (list :one 1 :two "2" :three '3 :four :4)))))
