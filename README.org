@@ -54,7 +54,7 @@ Installed programs
 - sqlite (tested with 3.x)
 ** Configuration
 *** General behavior
-- =org-sqlite-db-path=: the path to the sqlite database to be created
+- =org-sql-sqlite-path=: the path to the sqlite database to be created
 - =org-sql-files=: list of org files to insert into database
 - =org-sql-pragma=: pragma to use for new connections (useful for performance tuning)
 - =org-sql-buffer=: the name of the buffer for the SQLite connection
