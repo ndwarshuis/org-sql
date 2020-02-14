@@ -58,6 +58,7 @@ Installed programs
 - =org-sql-files=: list of org files to insert into database
 - =org-sql-pragma=: pragma to use for new connections (useful for performance tuning)
 - =org-sql-buffer=: the name of the buffer for the SQLite connection
+- =org-sql-debug=: turn on SQL transaction debug output in the message buffer
 *** Database storage
 These options control what data gets stored in the database, and are useful to minimize the size of the database as well as the time it takes to update:
 - =org-sql-ignored-properties=: list of properties to ignore

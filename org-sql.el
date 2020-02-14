@@ -195,6 +195,10 @@ ignored."
   :type 'boolean
   :group 'org-sql)
 
+(defcustom org-sql-debug nil
+  "Set to t to enable high-level debugging of SQL transactions."
+  :type 'boolean)
+
 ;; TODO add a debug buffer
 ;; (defconst org-sql-debug-buffer "*SQL: Org-Debug*"
 ;;   "Name of the SQLi buffer connected to the database.")
@@ -1484,8 +1488,19 @@ This assumes an active connection is open."
   ;; for now this assumes the db exists and has a valid schema
   (org-sql-cmd-open-connection)
   (message "Updating Org SQL database")
-  ;; TODO add debug output here
-  (org-sql-update-db)
+  (let ((out (org-sql-update-db)))
+    (when org-sql-debug
+      (message "Debug output for org-sql update")
+      ;; assume `OUT' is a list of the output for the three
+      ;; transactions used in the update (delete, update, insert)
+      (--> (--map (cond
+                   ((null it) "Not run")
+                   ((equal it "") "Run successfully")
+                   (t it))
+                  out)
+           (-zip-pair '("DELETE" "UPDATE" "INSERT") it)
+           (--map (format "%s transactions: %s" (car it) (cdr it)) it)
+           (-each it #'message))))
   (message "Org SQL update complete"))
 
 (defun org-sql-user-clear-all ()
@@ -1495,7 +1510,13 @@ This assumes an active connection is open."
       (progn
         (org-sql-cmd-open-connection)
         (message "Clearing Org SQL database")
-        (org-sql-clear-db)
+        (let ((out (org-sql-clear-db)))
+          (when org-sql-debug
+            (message "Debug output for org-sql clear-all")
+            ;; assume `OUT' is a blank string (success) or the error
+            ;; message
+            (let ((msg (if (equal out "") "Run Successfully" out)))
+              (message "DELETE transaction: %s" msg))))
         (message "Org SQL clear completed"))
     (message "Aborted")))
 
@@ -1509,7 +1530,14 @@ This assumes an active connection is open."
         (org-sql-delete-db)
         (org-sql-cmd-open-connection)
         (message "Resetting Org SQL database")
-        (org-sql-init-db)
+        (let ((out (org-sql-init-db)))
+          (when org-sql-debug
+            ;; assume `OUT' is a list of the output of all the
+            ;; CREATE TABLE transactions when making the schema
+            (message "Debug output for org-sql reset")
+            (--> (--map (if (equal it "") "Run successfully" it) out)
+                 (--map (format "CREATE TABLE transaction: %s" it) it)
+                 (-each it #'message))))
         (message "Org SQL reset completed"))
     (message "Aborted")))
 
