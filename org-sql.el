@@ -1461,8 +1461,8 @@ for dumping to buffers."
 (defun org-sql-dump-update-transactions ()
   "Dump the transactions to be committed the database during an update.
 
-It will have three sections denoted \"### INSERT ###\", \" ###
-UPDATE ###\", and \"### DELETE ###\". Note this function is only
+It will have three sections denoted \"### DELETE ###\", \" ###
+UPDATE ###\", and \"### INSERT ###\". Note this function is only
 useful for debugging where one wants to see the exact
 transactions to be committed and/or save a file to run the SQL
 commands outside of this package."
@@ -1474,7 +1474,8 @@ commands outside of this package."
                                 (symbol-name header)
                                 (upcase header)
                                 (format "### %s ###\n\n%s"
-                                        header (cadr it)))))))
+                                        header (cadr it))))
+                  (reverse))))
     (switch-to-buffer "SQL: Org-update-dump")
     (insert (string-join out "\n\n"))))
 
