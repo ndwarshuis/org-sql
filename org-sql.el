@@ -349,17 +349,23 @@ very destructive)."
      (delete-all
       (format "delete from %s;" tbl-name-str)))))
 
-(defun org-sql--fmt-trans (sql-str)
+(defun org-sql--fmt-trans (sql-str &optional newlines)
   "Format SQL transactions string.
 SQL-STR is a list of individual SQL commands to be included in the
-transaction."
-  (-some->> sql-str
-            (-flatten)
-            (reverse)
-            (string-join)
-            (format "begin transaction; %s commit;")
-            ;; turn on deferred keys for all transactions
-            (concat "pragma defer_foreign_keys=on;")))
+transaction. If NEWLINES is non-nil, add newlines between all SQL
+commands."
+  (let ((sep (and newlines "\n"))
+        (fmt (if newlines "begin transaction;\n%s\ncommit;"
+               "begin transaction; %s commit;"))
+        (pragma (concat "pragma defer_foreign_keys=on;"
+                        (when newlines "\n"))))
+             
+    (-some--> (-flatten sql-str)
+              (reverse it)
+              (string-join it sep)
+              (format fmt it)
+              ;; turn on deferred keys for all transactions
+              (concat pragma it))))
 
 (defun org-sql--fmt-multi (tbl fun)
   "Format multiple SQL command strings.
@@ -1431,24 +1437,46 @@ and each cdr is the plist of metadata."
          (mapcar #'org-sql--plist-get-vals)
          (--map (cons (car it) (cadr it))))))
 
-(defun org-sql-get-transactions ()
+(defun org-sql-get-transactions (&optional newlines)
   "Return plist of the transactions to be performed on the db.
 The plist has three properties (delete, insert, update) for the three
-type of commands that are performed on the database during an update."
+type of commands that are performed on the database during an update.
+If NEWLINES is t, add newlines between SQL commands; this is useful
+for dumping to buffers."
   (let ((fp-dsk (org-sql-files-on-disk))
         (map-trns
          (lambda (op fun trans)
-           (->>
+           (-->
             (plist-get trans op)
-            (--map (funcall fun it))
-            org-sql--fmt-trans
-            (plist-put trans op)))))
+            (--map (funcall fun it) it)
+            (org-sql--fmt-trans it newlines)
+            (plist-put trans op it)))))
     (->>
      (org-sql-files-in-db)
      (org-sql-sync-all fp-dsk)
      (funcall map-trns 'insert #'org-sql--fmt-inserts)
      (funcall map-trns 'update #'org-sql--fmt-updates)
      (funcall map-trns 'delete #'org-sql--fmt-deletes))))
+
+(defun org-sql-dump-update-transactions ()
+  "Dump the transactions to be committed the database during an update.
+
+It will have three sections denoted \"### INSERT ###\", \" ###
+UPDATE ###\", and \"### DELETE ###\". Note this function is only
+useful for debugging where one wants to see the exact
+transactions to be committed and/or save a file to run the SQL
+commands outside of this package."
+  (interactive)
+  (let ((out (->> (org-sql-get-transactions t)
+                  (-partition 2)
+                  (--map (-as-> (car it)
+                                header
+                                (symbol-name header)
+                                (upcase header)
+                                (format "### %s ###\n\n%s"
+                                        header (cadr it)))))))
+    (switch-to-buffer "SQL: Org-update-dump")
+    (insert (string-join out "\n\n"))))
 
 (defun org-sql-init-db ()
   "Add schemas to database if they do not exist already.
@@ -1465,8 +1493,7 @@ This assumes an active connection is open."
   "Update the database. This assumes an active connection is open."
   (let ((trans (org-sql-get-transactions)))
     ;; the order below likely doesn't matter if the pragma is set
-    ;; to defer foreign key constraints, but it is easy to debug now
-    ;; so whatever
+    ;; to defer foreign key constraints
     `(,(-> trans (plist-get 'delete) (org-sql-cmd))
       ,(-> trans (plist-get 'update) (org-sql-cmd))
       ,(-> trans (plist-get 'insert) (org-sql-cmd)))))
