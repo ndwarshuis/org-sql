@@ -1088,6 +1088,8 @@ HL-PART is an object as returned by `org-sql--partition-headline'."
   (if (eq 'all org-sql-ignored-tags) acc
     (let* ((hl (alist-get :headline hl-part))
            ;; first retrieve tags and strip text props and whitespace
+           ;; TODO add unique filter here and warn user if non-unique
+           ;; tags are found
            (tags (--> hl
                       (org-element-property :tags it)
                       (mapcar #'org-sql--strip-string it)
