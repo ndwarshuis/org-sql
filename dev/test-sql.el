@@ -24,6 +24,20 @@ If IN is a string, return IN. If IN is a list starting with
      (let ((res (org-sql--extract-buffer nil testing-filepath)))
        (expect res :to-equal ,tbl)))))
 
+(defmacro expect-sql-tbl (name in tbl)
+  (declare (indent 2))
+  (let ((in (list-to-lines in)))
+  `(progn
+     (insert ,in)
+     (let ((res (->> (org-sql--extract-buffer nil testing-filepath)
+                     (alist-get ,name))))
+       (expect res :to-equal ,tbl)))))
+
+;; (defmacro expect-sql-tbls (in names tbl)
+;;   (declare (indent 2))
+;;   `(let ((tbls* (--filter (member (car it) ,names) ,tbl)))
+;;     (expect-sql ,in tbl*)))
+
 (describe "SQL metalangage spec"
   (before-all
     (org-mode))
@@ -113,24 +127,6 @@ If IN is a string, return IN. If IN is a list starting with
                 :commented 0
                 :content nil)))))
 
-  (it "tagged headline"
-    (expect-sql "* headline :sometag:"
-      `((headlines
-         ,(list :file_path testing-filepath
-                :headline_offset 1
-                :tree_path nil
-                :headline_text "headline"
-                :keyword nil
-                :effort nil
-                :priority nil
-                :archived 0
-                :commented 0
-                :content nil))
-        (tags
-         ,(list :file_path testing-filepath
-                :headline_offset 1
-                :tag "sometag"
-                :inherited 0)))))
 
   (it "archived headline"
     (expect-sql "* headline :ARCHIVE:"
@@ -149,4 +145,58 @@ If IN is a string, return IN. If IN is a list starting with
          ,(list :file_path testing-filepath
                 :headline_offset 1
                 :tag "ARCHIVE"
-                :inherited 0))))))
+                :inherited 0)))))
+
+  (it "single tag"
+    (expect-sql-tbl 'tags "* headline :sometag:"
+      `(,(list :file_path testing-filepath
+               :headline_offset 1
+               :tag "sometag"
+               :inherited 0))))
+
+  (it "multiple tags"
+    (expect-sql-tbl 'tags (:lines "* headline :onetag:"
+                                  "* headline :twotag:")
+      `(,(list :file_path testing-filepath
+               :headline_offset 21
+               :tag "twotag"
+               :inherited 0)
+        ,(list :file_path testing-filepath
+               :headline_offset 1
+               :tag "onetag"
+               :inherited 0))))
+
+  (it "inherited tag"
+    (setq org-sql-use-tag-inheritance t)
+    (expect-sql-tbl 'tags (:lines "* parent :onetag:"
+                                  "** nested")
+      `(,(list :file_path testing-filepath
+               :headline_offset 19
+               :tag "onetag"
+               :inherited 1)
+        ,(list :file_path testing-filepath
+               :headline_offset 1
+               :tag "onetag"
+               :inherited 0))))
+
+  (it "inherited tag (ARCHIVE_ITAGS)"
+    ;; TODO clean up the variable settings elsewhere
+    (expect-sql-tbl 'tags (:lines "* parent"
+                                  ":PROPERTIES:"
+                                  ":ARCHIVE_ITAGS: sometag"
+                                  ":END:")
+      `(,(list :file_path testing-filepath
+               :headline_offset 1
+               :tag "sometag"
+               :inherited 1))))
+
+  (it "inherited tag (option off)"
+    ;; TODO clean up the variable settings elsewhere
+    (setq org-sql-use-tag-inheritance nil)
+    (expect-sql-tbl 'tags (:lines "* parent :onetag:"
+                                  "** nested")
+      `(,(list :file_path testing-filepath
+               :headline_offset 1
+               :tag "onetag"
+               :inherited 0)))))
+
