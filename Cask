@@ -5,4 +5,5 @@
 
 (development
  (depends-on "dash")
+ (depends-on "s")
  (depends-on "buttercup"))

@@ -1274,24 +1274,25 @@ FP is the path to the file containing the headlines."
                  (org-sql--extract-hl hl-sub fp))))))
     (org-sql--extract acc from headlines fp)))
 
+(defun org-sql--extract-buffer (acc fp)
+  "Extracts all headlines from the current buffer to ACC.
+FP is the filepath where the buffer lives."
+  (let ((headlines (--> (org-element-parse-buffer)
+                        (org-element-contents it)
+                        (if (assoc 'section it) (cdr it) it))))
+    (org-sql--extract-hl acc headlines fp)))
+
 (defun org-sql--extract-file (cell acc)
   "Extract the file in the car of CELL for a sql insertion.
 The results are accumulated in ACC which is returned on exit."
   (let* ((fp (car cell))
          (md5sum (cdr cell))
          (fsize (->> fp file-attributes file-attribute-size))
-         (headlines (-->
-                     fp
-                     (find-file-noselect it t)
-                     (with-current-buffer it (org-element-parse-buffer))
-                     (org-element-contents it)
-                     (if (assoc 'section it) (cdr it) it)))
-         (file-data (list :file_path fp
-                          :md5 md5sum
-                          :size fsize)))
-    (-> acc
-        (org-sql--alist-put 'files file-data)
-        (org-sql--extract-hl headlines fp))))
+         (file-data (list :file_path fp :md5 md5sum :size fsize)))
+    (with-current-buffer (find-file-noselect fp t)
+      (-> acc
+          (org-sql--alist-put 'files file-data)
+          (org-sql--extract-buffer fp)))))
 
 ;;; database syncing functions
 
