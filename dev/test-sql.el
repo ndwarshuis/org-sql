@@ -170,6 +170,110 @@ list then join the cdr of IN with newlines."
                 :commented nil
                 :content nil)))))
 
+  (it "closed headline"
+    (let* ((ts "[2112-01-01 Thu]")
+           (planning (format "CLOSED: %s" ts)))
+      (expect-sql (list "* headline"
+                        planning)
+        `((timestamp
+           ,(list :file_path testing-filepath
+                  :headline_offset 1
+                  :timestamp_offset 20
+                  :type 'inactive
+                  :warning_type nil
+                  :warning_value nil
+                  :warning_unit nil
+                  :repeat_type nil
+                  :repeat_value nil
+                  :repeat_unit nil
+                  :time (org-ts-to-unixtime ts)
+                  :resolution 'day
+                  :time_end nil
+                  :resolution_end nil
+                  :raw_value ts))
+          (headlines
+           ,(list :file_path testing-filepath
+                  :headline_offset 1
+                  :tree_path "/"
+                  :headline_text "headline"
+                  :keyword nil
+                  :effort nil
+                  :scheduled_offset nil
+                  :deadline_offset nil
+                  :closed_offset 20
+                  :priority nil
+                  :archived nil
+                  :commented nil
+                  :content nil))))))
+
+  (it "scheduled/closed/deadlined headline"
+    (let* ((ts0 "<2112-01-01 Thu>")
+           (ts1 "<2112-01-02 Fri>")
+           (ts2 "[2112-01-03 Sat]")
+           (planning (format "SCHEDULED: %s DEADLINE: %s CLOSED: %s" ts0 ts1 ts2)))
+      (expect-sql (list "* headline"
+                        planning)
+        `((timestamp
+           ,(list :file_path testing-filepath
+                  :headline_offset 1
+                  :timestamp_offset 75
+                  :type 'inactive
+                  :warning_type nil
+                  :warning_value nil
+                  :warning_unit nil
+                  :repeat_type nil
+                  :repeat_value nil
+                  :repeat_unit nil
+                  :time (org-ts-to-unixtime ts2)
+                  :resolution 'day
+                  :time_end nil
+                  :resolution_end nil
+                  :raw_value ts2)
+           ,(list :file_path testing-filepath
+                  :headline_offset 1
+                  :timestamp_offset 50
+                  :type 'active
+                  :warning_type nil
+                  :warning_value nil
+                  :warning_unit nil
+                  :repeat_type nil
+                  :repeat_value nil
+                  :repeat_unit nil
+                  :time (org-ts-to-unixtime ts1)
+                  :resolution 'day
+                  :time_end nil
+                  :resolution_end nil
+                  :raw_value ts1)
+           ,(list :file_path testing-filepath
+                  :headline_offset 1
+                  :timestamp_offset 23
+                  :type 'active
+                  :warning_type nil
+                  :warning_value nil
+                  :warning_unit nil
+                  :repeat_type nil
+                  :repeat_value nil
+                  :repeat_unit nil
+                  :time (org-ts-to-unixtime ts0)
+                  :resolution 'day
+                  :time_end nil
+                  :resolution_end nil
+                  :raw_value ts0))
+          (headlines
+           ,(list :file_path testing-filepath
+                  :headline_offset 1
+                  :tree_path "/"
+                  :headline_text "headline"
+                  :keyword nil
+                  :effort nil
+                  :scheduled_offset 23
+                  :deadline_offset 50
+                  :closed_offset 75
+                  :priority nil
+                  :archived nil
+                  :commented nil
+                  :content nil))))))
+
   ;; tags table
 
   (it "single tag"

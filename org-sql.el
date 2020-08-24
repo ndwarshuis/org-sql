@@ -971,7 +971,7 @@ this function."
           ((&plist :closed :scheduled :deadline)
           ;; TODO make this function public
            (org-ml--get-all-properties planning))
-          (planning* (-non-nil (list closed scheduled deadline)))
+          (planning* (-non-nil (list scheduled deadline closed)))
           (hl-data
            (list
             :file_path fp
