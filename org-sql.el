@@ -5,7 +5,7 @@
 ;; Author: Nathan Dwarshuis <natedwarshuis@gmail.com>
 ;; Keywords: org-mode, data
 ;; Homepage: https://github.com/ndwarshuis/org-sql
-;; Package-Requires: ((emacs "25") (dash "2.15"))
+;; Package-Requires: ((emacs "27.1") (s "1.12") (dash "2.15") (org-ml "3.0.0"))
 ;; Version: 0.0.1
 
 ;; This program is free software; you can redistribute it and/or modify
@@ -43,8 +43,10 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'dash)
+(require 's)
 (require 'sql)
 (require 'org)
+(require 'org-ml)
 
 ;;; constants and customizations
 
@@ -205,31 +207,6 @@ ignored."
 
 ;;; helper functions
 
-(defun org-sql--strip-string (str)
-  "Remove text properties and trim STR and return the result."
-  (when str (string-trim (substring-no-properties str))))
-  
-(defun org-sql--alist-put (alist prop value)
-  "For given ALIST, append VALUE to the current values in prop.
-Current values (that is the cdr of each key) is assumed to be a list.
-If PROP does not exist, create it. Return the new alist. If FRONT is
-t, add to the front of current values list instead of the back."
-  (let* ((cur-cell (assoc prop alist))
-         (cur-values (cdr cur-cell)))
-      (cond
-       (cur-values
-        (let ((new-cdr (cons value cur-values)))
-        ;; (let ((new-cdr (if front
-                           ;; `(,value ,@cur-values)
-                         ;; `(,@cur-values ,value))))
-          (setcdr cur-cell new-cdr) alist))
-       (cur-cell
-        (setcdr cur-cell `(,value)) alist)
-       (alist
-        (append alist `((,prop ,value))))
-       (t
-        `((,prop ,value))))))
-        
 (defmacro org-sql--with-advice (adlist &rest body)
   "Execute BODY with temporary advice in ADLIST.
 
@@ -499,325 +476,267 @@ joined by AND)"
 
 ;;; org-mode string parsing functions
 
-;; TODO this can be refactored with s.el
-(defun org-sql--effort-to-int (effort-str &optional to-string throw-err)
+(defun org-sql--effort-to-int (effort-str)
   "Convert EFFORT-STR into an integer from HH:MM format.
 If it is already an integer, nothing is changed. If TO-STRING is t,
 convert the final number to a string of the number. If THROW-ERR is t,
 throw an error if the string is not recognized."
-  (when effort-str
-    (let ((effort-str (string-trim effort-str)))
-      (save-match-data
-        (cond
-         ((string-match "^\\([0-9]+\\):\\([0-6][0-9]\\)$" effort-str)
-          (let* ((hours (string-to-number (match-string 1 effort-str)))
-                 (minutes (string-to-number (match-string 2 effort-str)))
-                 (sum (+ (* 60 hours) minutes)))
-            (if to-string (number-to-string sum) sum)))
-         ((string-match-p "^[0-9]+$" effort-str)
-          (if to-string effort-str (string-to-number effort-str)))
-         (t (when throw-err
-              (error (concat "Unknown effort format: '" effort-str "'")))))))))
-
-(defun org-sql--ts-fmt-unix-time (ts)
-  "Return org timestamp TS as unix time integer.
-Return nil if TS is nil or if TS cannot be understood."
-  (-some-->
-   ts
-   (save-match-data (org-2ft it))
-   (when (> it 0) (+ (round it)))))
-
-;; TODO this can be refactored
-(defun org-sql--parse-ts-range (ts &optional fun)
-  "Return 'start' or 'end' of timestamp TS.
-Return value will be a cons cell like (START . END) where START is
-the first half of TS and END is the ending half or nil if it does not
-exist.
-
-By default, 'start' and 'end' are returned as integers in epoch time.
-If different return values, are desired, supply function FUN which
-takes a timestamp element (from either the start or end if a range) as
-its sole argument."
-  (when ts
-    (let* ((get-epoch-time
-            (lambda (ts)
-              (->> ts
-                   (org-element-property :raw-value)
-                   (org-sql--ts-fmt-unix-time))))
-           (fun (or fun get-epoch-time))
-           (split
-            (lambda (ts &optional end)
-              (--> ts
-                   (org-timestamp-split-range it end)
-                   (funcall fun it)))))
-      (if (eq (org-element-property :type ts) 'inactive-range)
-          (let ((start (funcall split ts))
-                (end (funcall split ts t)))
-            (cons start end))
-        `(,(funcall split ts))))))
-
-;; TODO is this really necessary?
-(defun org-sql--parse-ts-maybe (txt)
-  "Convert TXT to epoch time format if possible.
-Returns formatted string or TXT if it is not a timestamp."
-  ;; assume the iso parser to return nil on failure
-  (-> txt org-sql--ts-fmt-unix-time (or txt)))
+  (pcase (-some->> effort-str
+           (string-trim)
+           (s-match "^\\(\\([0-9]+\\)\\|\\([0-9]+\\):\\([0-6][0-9]\\)\\)$")
+           (-drop 2))
+    (`(nil ,h ,m) (+ (* 60 (string-to-number h)) (string-to-number m)))
+    (`(,m) (string-to-number m))))
 
 ;;; org-mode element helper functions
+        
+(defun org-sql--headline-get-path (headline)
+  "Return the path for HEADLINE node.
 
-;; (defun org-sql--element-ts-raw (prop obj &optional iso)
-;;   "Return the raw-value of the timestamp PROP in OBJ if exists.
-;; If ISO is t, return the timestamp in ISO 8601 format."
-;;   (-some--> obj
-;;             (org-element-property prop it)
-;;             (org-element-property :raw-value it)
-;;             (if iso (org-sql--ts-fmt-unix-time it) it)))
-            
-(defun org-sql--element-split-by-type (type contents &optional right)
-  "Split sequence of org-elements by first instance of TYPE.
-CONTENTS is a list of org-element objects. If RIGHT is t, return the
-list to the right of first-encountered TYPE rather than the left."
-  (if right
-      (cdr (--drop-while (not (eq type (org-element-type it))) contents))
-    (--take-while (not (eq type (org-element-type it))) contents)))
+Return a string formatted as /level1/level2/.../levelN for each
+level in HEADLINE's path (not including the current headline)."
+  (->> (org-ml-headline-get-path headline)
+       (-drop-last 1)
+       (s-join "/")
+       (format "/%s")))
         
-(defun org-sql--element-parent-headline (obj)
-  "Return parent headline element (if any) of org-element OBJ."
-  (when obj
-    (let ((parent (org-element-property :parent obj)))
-      (if (eq 'headline (org-element-type parent))
-          parent
-        (org-sql--element-parent-headline parent)))))
-        
-(defun org-sql--element-parent-tree-path (obj &optional acc)
-  "Construct parent tree path for OBJ and concatenate to ACC.
-Returns '/' delimited path of headlines or nil if obj is in a toplevel
-headline."
-  (let ((parent-hl (org-sql--element-parent-headline obj)))
-    (if parent-hl
-        (--> parent-hl
-             (org-element-property :raw-value it)
-             (concat "/" it acc)
-             (org-sql--element-parent-tree-path parent-hl it))
-      acc)))
-      
-(defun org-sql--element-parent-tags (obj &optional acc)
-  "Get all tags from parent headlines of OBJ and concat to ACC.
-ACC is treated as a set; therefore no duplicates are retained."
-  (let ((parent-hl (org-sql--element-parent-headline obj)))
-    (if parent-hl
-        (let* ((tags (->>
-                      parent-hl
-                      (org-element-property :tags)
-                      (mapcar #'org-sql--strip-string)))
-               (i-tags (org-element-property :ARCHIVE_ITAGS parent-hl))
-               (i-tags (when i-tags (split-string i-tags)))
-               (all-tags (delete-dups (append acc tags i-tags))))
-          (org-sql--element-parent-tags parent-hl all-tags))
-      acc)))
+(defun org-sql--headline-get-archive-itags (headline)
+  "Return archive itags from HEADLINE or nil if none."
+  (when org-sql-use-tag-inheritance
+    (-some-> (org-ml-headline-get-node-property "ARCHIVE_ITAGS" headline)
+      (split-string))))
+
+(defun org-sql--headline-get-tags (headline)
+  "Return list of tags from HEADLINE."
+  (->> (org-ml-get-property :tags headline)
+       (-map #'substring-no-properties)))
+
+(defun org-sql--element-parent-tags (acc headline)
+  "Get all tags from parent headlines of HEADLINE.
+Add tags to ACC (which is treated like a set)."
+  (cl-labels
+      ((get-tags
+        (acc hl)
+        (if (eq (car hl) 'org-data) acc
+          (-> (org-sql--headline-get-archive-itags hl)
+              (-union (org-sql--headline-get-tags hl))
+              (-union acc)
+              (get-tags (org-ml-get-property :parent hl))))))
+    (get-tags acc (org-ml-get-property :parent headline))))
 
 (defun org-sql--todo-keywords ()
  "Return `org-todo-keywords' as list of strings w/o selectors.
 Will likely match the value of `org-todo-keywords-1' in many cases,
 but this has the advantage of being always available and
 comprehensive."
- (->>
-  org-todo-keywords
-  copy-tree
-  (mapcan #'cdr)
-  (remove "|")
-  (--map (replace-regexp-in-string "(.*)" "" it))))
+ (->> org-todo-keywords
+      copy-tree
+      (mapcan #'cdr)
+      (remove "|")
+      (--map (replace-regexp-in-string "(.*)" "" it))))
+
+(defun org-sql--regexp-remove-captures (regexp)
+  "Return REGEXP string with captures removed."
+  (s-replace-all '(("\\(" . "") ("\\)" . "")) regexp))
 
 (defun org-sql--log-note-headings-convert ()
   "Convert `org-log-note-headings' to a regex matcher.
 This is used to set `org-sql--log-note-headings-regexp'; see this
 constant for further details."
-  (let* ((escapes '("%u" "%U" "%t" "%T" "%d" "%D" "%s" "%S"))
-         (ts-or-todo-regexp
-          (-->
-           (org-sql--todo-keywords)
-           (mapconcat #'regexp-quote it "\\|")
-           (format "\"\\(%s\\|%s\\)\"" org-ts-regexp-inactive it)))
-         (ts-regexp (format "\\(%s\\)" org-ts-regexp))
-         (ts-ia-regexp (format "\\(%s\\)" org-ts-regexp-inactive))
-         (re-no-pad-alist (-zip-pair escapes escapes))
-         (re-match-alist
-          (->>
-           (list "\\(.*\\)"
-                 "\\(.*\\)"
-                 ts-ia-regexp
-                 ts-regexp
-                 ts-ia-regexp
-                 ts-regexp
-                 ts-or-todo-regexp
-                 ts-or-todo-regexp)
-           (--map (concat "[[:space:]]*" it "[[:space:]]*"))
-           (-zip-pair escapes)))
-         (apply2note
-          (lambda (n f) (cons (car n) (funcall f (cdr n)))))
-         (replace-esc
-          (lambda (n re)
-            (funcall apply2note
-                     n
-                     (lambda (s) (org-replace-escapes s re)))))
-         (shrink-space
-          (lambda (n)
-            (funcall apply2note
-                     n
-                     (lambda (s) (replace-regexp-in-string "\s+" " " s))))))
-    (->>
-     org-log-note-headings
-     ;; remove padding information by replacing all escape sequences
-     ;; with their non-padded version and then removing extra spaces
-     (--map (funcall replace-esc it re-no-pad-alist))
-     (--map (funcall shrink-space it))
-     ;; replace all escape sequences with regexps that match
-     ;; the data to be inserted via the escape sequences
-     (--map (funcall replace-esc it re-match-alist))
-     ;; filter out anything that is blank (eg default clock-in)
-     (--remove (equal (cdr it) "")))))
-
+  (cl-labels
+      ((format-capture
+        (regexp)
+        (->> (s-replace-all '(("\\(" . "") ("\\)" . "")) regexp)
+             (format "\\(%s\\)")))
+       (reverse-lookup
+        (value alist)
+        (car (--find (equal (cdr it) value) alist))))
+    (let* ((keys '((:user .  "%u")
+                   (:user-full . "%U")
+                   (:ts . "%t")
+                   (:ts-active . "%T")
+                   (:short-ts . "%d")
+                   (:short-ts-active . "%D")
+                   (:old-state . "%S")
+                   (:new-state . "%s")))
+           (ts-or-todo-regexp (->> (org-sql--todo-keywords)
+                                   (-map #'regexp-quote)
+                                   (cons org-ts-regexp-inactive)
+                                   (s-join "\\|")
+                                   (format-capture)
+                                   (format "\"%s\"")))
+           (ts-regexp (format-capture org-ts-regexp))
+           (ts-ia-regexp (format-capture org-ts-regexp-inactive))
+           (re-match-alist
+            (->> (list "\\(.*\\)"
+                       "\\(.*\\)"
+                       ts-ia-regexp
+                       ts-regexp
+                       ts-ia-regexp
+                       ts-regexp
+                       ts-or-todo-regexp
+                       ts-or-todo-regexp)
+                 (--map (concat "[[:space:]]*" it "[[:space:]]*"))
+                 (-zip-pair (-map #'cdr keys))))
+           (unpadded-headings
+            (->> (-map #'cdr org-log-note-headings)
+                 (--map (org-replace-escapes it (->> (-map #'cdr keys)
+                                                     (--map (cons it it)))))))
+           (heading-types (-map #'car org-log-note-headings))
+           (heading-regexps (->> unpadded-headings
+                                 (--map (s-replace-regexp "\s+" " " it))
+                                 (--map (org-replace-escapes it re-match-alist))))
+           (heading-keys (->> unpadded-headings
+                              (--map (s-match-strings-all "%[[:alpha:]]" it))
+                              (--map (-map #'car it))
+                              (--map (--map (reverse-lookup it keys) it)))))
+      (->> (-zip-lists heading-types heading-regexps heading-keys)
+           (--remove (equal (cadr it) ""))))))
+           
 (defconst org-sql--log-note-headings-regexp
   (org-sql--log-note-headings-convert)
   "Like `org-log-note-headings' with regexps.
 Each regexp matches the text that will be inserted into the
 escape sequences of `org-log-note-headings'.")
 
+;; (clock :offset :note-text :state-old :state-new)
+;; (state (:offset :note-text :header-text :state-old :state-new :ts)
+;; ((re/del)/(schedule/deadline) (:offset :note-text :header-text :state-old :ts)
+;; (refile/done/note (:offset :note-text :header-text :ts)
+;; (none (:offset :note-text :header-text)
+
 (defun org-sql--lb-match-header (header-text)
   "Match HEADER-TEXT with `org-sql--log-note-headings-regexp'.
 If match successful, returns list whose car is the match type
 and cdr is the match data."
-  (letrec ((scan
-            (lambda (str note-regex-alist)
-              (when note-regex-alist
-                (let* ((cur (car note-regex-alist))
-                       (rem (cdr note-regex-alist))
-                       (type (car cur))
-                       (re (cdr cur)))
-                  (if (string-match re str)
-                      type
-                    (funcall scan str rem))))))
-           (type (funcall scan header-text org-sql--log-note-headings-regexp)))
-    (when type (cons type (match-data)))))
+  ;; ASSUME all keys are unique (this will crash and burn if not true)
+  (cl-labels
+      ((match-sum
+        (regexp i)
+        (s-matched-positions-all regexp header-text i))
+       (match-header
+        (acc cell)
+        (if acc acc
+          (-let (((type regexp keys) cell))
+            (-some->> keys
+              (--map-indexed (cons it (match-sum regexp (1+ it-index))))
+              (--filter (cdr it))
+              (apply #'append)
+              (cons type))))))
+    (or (->> org-sql--log-note-headings-regexp
+             (-reduce-from #'match-header nil))
+        '(none))))
 
-(defun org-sql--flatten-lb-entries (lb-contents)
-  "Given LB-CONTENTS, return a flattened list of clocks and items.
-LB-CONTENTS is assumed to contain only org-elements clock and
-plain-list, although this is not enforced here."
-  (->> lb-contents
-       (--map (if (eq 'clock (org-element-type it)) (list it)
-                (org-element-map it 'item #'identity)))
-       (apply #'append)))
+;; TODO this could be included in org-ml
+(defun org-sql--split-paragraph (paragraph)
+  "Split PARAGRAPH by first line-break node."
+  (let ((children (org-ml-get-children paragraph)))
+    (-if-let (lb-index (--find-index (org-ml-is-type 'line-break it) children))
+        (-let* (((head _rest) (-split-at lb-index children))
+                ((break . rest) _rest)
+                ;; assume begin/end should be the same as contents-begin/end
+                (parent (org-ml-get-property :parent (-first-item head)))
+                (b1 (org-ml-get-property :begin parent))
+                (e1 (org-ml-get-property :begin break))
+                (b2 (org-ml-get-property :end break))
+                (e2 (org-ml-get-property :end parent))
+                (head* (->> (apply #'org-ml-build-paragraph head)
+                            (org-ml--set-properties-nocheck
+                             (list :begin b1
+                                   :contents-begin b1
+                                   :end e1
+                                   :contents-end e1))))
+                (rest* (-some->> rest
+                         (apply #'org-ml-build-paragraph)
+                         (org-ml--set-properties-nocheck
+                          (list :begin b2
+                                :contents-begin b2
+                                :end e2
+                                :contents-end e2)))))
+          (if (not rest*) `(nil . ,head*) `(,head* . ,rest*)))
+      `(nil . ,paragraph))))
 
-(defun org-sql--split-lb-entries (lb-contents)
-  "Split logbook entry list into logbook and non-logbook halves.
+;; TODO this could be included in org-ml
+(defun org-sql--item-get-contents (item)
+  "Return the children of ITEM that are not items."
+  (->> (org-ml-get-children item)
+       (--take-while (not (org-ml-is-type 'plain-list it)))))
 
-LB-CONTENTS is assumed to have only clock and plain-list org elements
-objects, and this function is meant to evaluate the case where this
-list is not contained within a logbook drawer and thus may have
-non-logbook content at the end if LB-CONTENTS end with a plain-list
-element.
+;; TODO this could be included in org-ml
+(defun org-sql--split-item (item)
+  "Split the contents of ITEM by the first line break."
+  (-let (((first . rest) (org-sql--item-get-contents item)))
+    (when first
+      (if (not (org-ml-is-type 'paragraph first)) (cons nil contents)
+        (-let (((p0 . p1) (org-sql--split-paragraph first)))
+          (if (not p0) `(,p1 . ,rest) `(,p0 . (,p1 . ,rest))))))))
 
-Non-logbook content is determined by trying to match each item in the
-last plain-list element `org-log-note-headings'. If this last
-plain-list element is preceded by a clock, the first item is ignored
-as it may be a clock note. Note that anything that is not in the last
-run of items that does not match will go into the database with parse
- errors, as these should not happen.
+(defun org-sql--get-header-substring (entry key)
+  (-let* ((e (cdr entry))
+          ((&plist :header-text) e)
+          ((begin . end) (plist-get e key)))
+    (substring header-text begin end)))
 
-Returns a cons cell where the car is a list lb-entries and the
-cdr is a list of that are not part of the logbook.
+(defun org-sql--get-header-timestamp (entry key)
+  (-let* ((e (cdr entry))
+          ((&plist :header-node) e)
+          (header-begin (org-ml-get-property :begin header-node))
+          (ts-offset (car (plist-get e key)))
+          (ts-begin (+ header-begin ts-offset)))
+    (->> (org-ml-get-children header-node)
+         (--find (org-ml--property-is-eq :begin ts-begin it)))))
 
-The lb-entries are flattened using `org-sql--flatten-lb-entries'."
-  ;; if last element is a plain list, check for non-logbook items
-  (if (eq 'plain-list (org-element-type (-last-item lb-contents)))
-      (let* ((clock-present? (assoc 'clock lb-contents))
-             (last-split (-->
-                          lb-contents
-                          (-last-item it)
-                          (list it)
-                          (org-sql--flatten-lb-entries it)))
-             (butlast-split (-->
-                             lb-contents
-                             (-butlast it)
-                             (org-sql--flatten-lb-entries it)
-                             (if (not clock-present?) it
-                               (append it `(,(-first-item last-split))))))
-             (last-split-part (-->
-                               last-split
-                               (if clock-present? (-drop 1 it) it)
-                               (--split-with
-                                (--> it
-                                     ;; use nil for hl-part here
-                                     ;; because we only care about
-                                     ;; the :type field
-                                     (org-sql--partition-item it nil)
-                                     (alist-get :type it))
-                                it))))
-        (cons (append butlast-split (car last-split-part))
-              (cdr last-split-part)))
-    (list (org-sql--flatten-lb-entries lb-contents))))
+(defun org-sql--partition-item (item)
+  "Partition org-element ITEM into plist."
+  (-let* (((header . rest) (org-sql--split-item item))
+          (header-text (org-ml-to-trimmed-string header))
+          (note-text (-some->> (-map #'org-ml-to-string rest)
+                       (s-join "")
+                       (s-trim)))
+          (header-data (org-sql--lb-match-header header-text)))
+    (append header-data (list :header-node header
+                              :header-text header-text
+                              :note-text note-text
+                              :offset (org-ml-get-property :begin item)))))
 
-;;; org-mode element partitioning functions
+(defun org-sql--partition-clock (clock)
+  "Partition CLOCK into typed plist."
+  (let ((ts (org-ml-get-property :value clock)))
+    (list 'clock
+          :offset (org-ml-get-property :begin clock)
+          :state-old (-> (org-ml-timestamp-get-start-time ts)
+                         (org-ml-build-timestamp!))
+          :state-new (-some-> (org-ml-timestamp-get-end-time ts)
+                       (org-ml-build-timestamp!))
+          :note-text nil)))
 
-(defun org-sql--partition-headline (headline fp)
-  "Partition org-element HEADLINE into alist.
-
-The alist will be structured as such:
-
-:filepath - path to the headline's file as given by FP
-:headline - original headline element
-:section - the section contents of the headline if found
-:subheadlines - list of subheadlines if any"
- (unless headline (error "No headline given"))
- (unless fp (error "No file path given"))
- (let* ((hl-contents (org-element-contents headline))
-        (section (->> hl-contents (assoc 'section) org-element-contents))
-        (subheadlines (if section (cdr hl-contents) hl-contents)))
-   `((:headline . ,headline)
-     (:filepath . ,fp)
-     (:section . ,section)
-     (:subheadlines . ,subheadlines))))
-
-(defun org-sql--partition-item (item hl-part)
-  "Partition org-element ITEM into alist.
-
-ITEM is assumed to be part of a logbook. Return a alist with the
-following structure:
-
-:hl-part - the partitioned headline HL-PART surrounding the item,
-  which is an object as described in `org-sql--partition-headline'
-:item - the original item element
-:header-text - the first line of the note which is standardized using
-  `org-log-note-headings'
-:note-text - the remainder of the note text as a trimmed string with
-  no text properties (will be nil if item has no line-break element)
-:type - the type of the item's header text (may be nil if unknown)
-:match-data - match data associated with finding the type as done
-  using `org-sql--log-note-headings-regexp' (may be nil if undetermined).
-
-Anatomy of a logbook item (non-clocking):
-- header-text with linebreak //
-  note-text ... more text
-- another header-text linebreak
-
-The header text is solely used for determining :type and :match-data."
-  (let* ((contents (->> item (assoc 'paragraph) org-element-contents))
-         (header-text (->> contents
-                           (org-sql--element-split-by-type 'line-break)
-                           org-element-interpret-data
-                           org-sql--strip-string))
-         (note-text (--> contents
-                         (org-sql--element-split-by-type 'line-break it t)
-                         org-element-interpret-data
-                         org-sql--strip-string))
-         (header-match (org-sql--lb-match-header header-text)))
-    `((:item . ,item)
-      (:hl-part . ,hl-part)
-      (:header-text . ,header-text)
-      (:note-text . ,note-text)
-      (:type . ,(car header-match))
-      (:match-data . ,(cdr header-match)))))
+(defun org-sql--flatten-lb-entries (children)
+  "Return logbook drawer CHILDREN as flattened list."
+  (cl-labels
+       ((add-node
+         (clock-plist note)
+         (cons (car clock-entry) (plist-put :note note (cdr clock-entry))))
+        (merge-clock-notes
+         (acc next)
+         ;; if next node to add is a clock, partition and add it
+         (if (org-ml-is-type 'clock next)
+             (cons (org-sql--partition-clock next) acc)
+           ;; else assume next node is a plain-list, partition its items
+           (let* ((item-entries (->> (org-ml-get-children next)
+                                     (-map #'org-sql--partition-item)))
+                  (first-entry (car item-entries))
+                  (other-entries (cdr item-entries))
+                  (last (car acc)))
+             ;; if the top item doesn't have a type, assume it is a clock note
+             (if (and (eq (car last) 'clock) (eq (car first-entry) 'none))
+                 (->> (cdr acc)
+                      (cons (add-note last first-entry))
+                      (append (reverse other-entries)))
+               ;; else just append all the partitioned items
+               (append (reverse item-entries) acc))))))
+    (->> (--filter (org-ml-is-any-type '(clock plain-list) it) children)
+         (-reduce-from #'merge-clock-notes nil)
+         (reverse))))
 
 ;;; org element extraction functions
 ;;
@@ -834,445 +753,265 @@ The header text is solely used for determining :type and :match-data."
 ;; COLY is supplied as a keyword where ':column-name' represents
 ;; 'column_name' in the database.
 
+(defun org-sql--alist-put (alist prop value)
+  "For given ALIST, append VALUE to the current values in prop.
+Current values (that is the cdr of each key) is assumed to be a list.
+If PROP does not exist, create it. Return the new alist."
+  ;; NOTE: this function destructively modifies `alist'; this is fine so long as
+  ;; the only thing we are doing to `alist' is adding to it
+  (let* ((cur-cell (assoc prop alist))
+         (cur-values (cdr cur-cell)))
+      (cond
+       (cur-values
+        (setcdr cur-cell (cons value cur-values))
+        alist)
+       (cur-cell
+        (setcdr cur-cell `(,value))
+        alist)
+       (alist
+        (cons `(,prop ,value) alist))
+       (t
+        `((,prop ,value))))))
+
 (defun org-sql--extract (acc fun objs &rest args)
   "Iterate through OBJS and add them to accumulator ACC with FUN.
 FUN is a function that takes a single object from OBJS, the accumulator,
 and ARGS. FUN adds OBJ to ACC and returns new ACC."
-  (while objs
-    (setq acc (apply fun acc (car objs) args)
-          objs (cdr objs)))
-  acc)
+  (--reduce-from (apply fun acc it args) acc objs))
 
-(defun org-sql--extract-lb-planning-change (acc logbook-data item-part
-                                                planning-type)
-  "Add data from planning-change logbook entry to accumulator ACC.
-ITEM-PART is a partitioned logbook item as described in
-`org-sql--partition-item'. LOGBOOK-DATA is a plist as passed from
-`org-sql--extract-lb-item' PLANNING-TYPE is the type of the timestamp
-that was changed (either 'deadline' or 'scheduled')."
-  (let* ((hl-part (alist-get :hl-part item-part))
-         (ts-old (->> item-part
-                      (alist-get :item)
-                      (assoc 'paragraph)
-                      (org-element-contents)
-                      ;; assume old timestamp is always the first
-                      (assoc 'timestamp)))
-         (pc-data
-          (list
-           :file_path (plist-get logbook-data :file_path)
-           :entry_offset (plist-get logbook-data :entry_offset)
-           :timestamp_offset (org-element-property :begin ts-old))))
-    (->
-     acc
-     (org-sql--alist-put 'logbook logbook-data)
-     (org-sql--alist-put 'planning_changes pc-data)
-     (org-sql--extract-ts ts-old hl-part planning-type))))
+(defun org-sql--extract-lb-clock (acc entry headline fp)
+  "Add data from logbook CLOCK to accumulator ACC."
+  (if (not org-sql-store-clocks) acc
+    (-let* (((&plist :offset :note-text) (cdr entry))
+            ((&plist :state-old start :state-new end) (cdr entry))
+           (clock-data
+            (list :file_path fp
+                  :headline_offset (org-element-property :begin headline)
+                  :clock_offset offset
+                  :time_start (-> (org-ml-timestamp-get-start-time start)
+                                  (org-ml-time-to-unixtime))
+                  :time_end (-some-> end
+                              (org-ml-timestamp-get-start-time)
+                              (org-ml-time-to-unixtime))
+                  :clock_note (when org-sql-store-clock-notes note-text))))
+      (org-sql--alist-put acc 'clocking clock-data))))
 
-(defun org-sql--extract-lb-state-change (acc logbook-data item-part)
-  "Add data from state-change logbook entry to accumulator ACC.
-ITEM-PART is a partitioned logbook item as described in
-`org-sql--partition-item'. LOGBOOK-DATA is a plist as passed from
-`org-sql--extract-lb-item'"
-  (save-match-data
-    (set-match-data (alist-get :match-data item-part))
-    (let* ((header-text (alist-get :header-text item-part))
-           (state-data
-            (list :file_path (plist-get logbook-data :file_path)
-                  :entry_offset (plist-get logbook-data :entry_offset)
-                  :state_old (match-string 3 header-text)
-                  :state_new (match-string 1 header-text))))
-      (-> acc
-          (org-sql--alist-put 'logbook logbook-data)
-          (org-sql--alist-put 'state_changes state-data)))))
+(defun org-sql--extract-lb-item (acc entry headline fp)
+  "Add general logbook ENTRY to ACC."
+  (-let* (((entry-type . entry-plist) entry)
+          ((&plist :offset :header-text :note-text) entry-plist)
+          (logbook-data
+           (list :file_path fp
+                 :headline_offset (org-ml-get-property :begin headline)
+                 :entry_offset offset
+                 :entry_type entry-type
+                 :time_logged (-some->> (org-sql--get-header-timestamp entry :ts)
+                                (org-ml-timestamp-get-start-time)
+                                (org-ml-time-to-unixtime))
+                 :header header-text
+                 :note note-text)))
+    (org-sql--alist-put acc 'logbook logbook-data)))
 
-(defun org-sql--item-time-logged (item-part)
-  "Return time-logged of ITEM-PART or nil if it cannot be determined.
-ITEM-PART is a partitioned item given by `org-sql--partition-item'."
-  (let* ((type (alist-get :type item-part))
-         (time-index
-          (cond
-           ((memq type '(done note refile)) 1)
-           ((memq type '(reschedule delschedule redeadline deldeadline)) 3)
-           ((eq type 'state) 5))))
-    (when time-index
-      (set-match-data (alist-get :match-data item-part))
-      (->> item-part
-           (alist-get :header-text)
-           (match-string time-index)
-           org-sql--ts-fmt-unix-time))))
+(defun org-sql--extract-lb-state-change (acc entry headline fp)
+  "Add data from state-change logbook entry to accumulator ACC."
+  (-let* (((&plist :offset) (cdr entry))
+          (state-data
+           (list :file_path fp
+                 :entry_offset offset
+                 :state_old (org-sql--get-header-substring entry :old-state)
+                 :state_new (org-sql--get-header-substring entry :new-state))))
+    (-> (org-sql--extract-lb-item acc entry headline fp)
+        (org-sql--alist-put 'state_changes state-data))))
 
-(defun org-sql--extract-lb-item (acc item-part)
-  "Add data from logbook entry ITEM-PART to accumulator ACC.
-ITEM-PART is a partitioned logbook item as described in
-`org-sql--partition-item'."
-  (let* ((type (alist-get :type item-part))
-         (hl-part (alist-get :hl-part item-part))
-         (logbook-data
-          (list :file_path (alist-get :filepath hl-part)
-                :headline_offset (->> hl-part
-                                      (alist-get :headline)
-                                      (org-element-property :begin))
-                :entry_offset (->> item-part
-                                   (alist-get :item)
-                                   (org-element-property :begin))
-                :entry_type type
-                :time_logged (org-sql--item-time-logged item-part)
-                :header (alist-get :header-text item-part)
-                :note (alist-get :note-text item-part))))
-    (if (not (or (null type) (memq type org-sql-included-logbook-types)))
-        acc
-      (cond
-       ((eq type 'state)
-        (org-sql--extract-lb-state-change acc logbook-data item-part))
+(defun org-sql--extract-lb-planning-change (acc entry headline fp)
+  "Add data from planning-change logbook entry to accumulator ACC."
+  (-let* (((&plist :offset) (cdr entry))
+          (ts (org-sql--get-header-timestamp entry :old-state))
+          (planning-data
+           (list :file_path fp
+                 :entry_offset offset
+                 :timestamp_offset (org-ml-get-property :begin ts))))
+    (-> (org-sql--extract-lb-item acc entry headline fp)
+        (org-sql--alist-put 'planning_changes planning-data)
+        (org-sql--extract-ts ts headline fp))))
+         
+(defun org-sql--extract-logbook (acc headline fp)
+  "Given HL-PART, find logbook drawer and add to accumulator ACC."
+  (cl-flet
+      ((extract-entry
+        (acc entry)
+        (let ((entry-type (car entry)))
+          ;; TODO add clock to default logbook entries
+          (if (not (or (eq entry-type 'clock)
+                       (memq entry-type org-sql-included-logbook-types)))
+              acc
+            (cl-case entry-type
+              ((redeadline deldeadline reschedule delschedule)
+               (org-sql--extract-lb-planning-change acc entry headline fp))
+              (state
+               (org-sql--extract-lb-state-change acc entry headline fp))
+              (clock
+               (org-sql--extract-lb-clock acc entry headline fp))
+              (t
+               (org-sql--extract-lb-item acc entry headline fp)))))))
+    (->> (org-ml-headline-get-logbook headline)
+         (org-sql--flatten-lb-entries)
+         (-reduce-from #'extract-entry acc))))
 
-       ((memq type '(redeadline deldeadline))
-        (org-sql--extract-lb-planning-change acc logbook-data item-part
-                                             'deadline))
+(defun org-sql--extract-properties (acc headline fp)
+  "Add properties data from HL-PART and add to accumulator ACC."
+  (if (eq 'all org-sql-ignored-properties) acc
+    (let ((node-props
+           (->> (org-ml-headline-get-node-properties headline)
+                (--remove (member (org-ml-get-property :key it)
+                                  (append org-sql--ignored-properties-default
+                                          org-sql-ignored-properties))))))
+      (cl-flet
+          ((from
+            (acc np)
+            (->> (list :file_path fp
+                       :headline_offset (org-ml-get-property :begin headline)
+                       :property_offset (org-ml-get-property :begin np)
+                       :key_text (org-ml-get-property :key np)
+                       :val_text (org-ml-get-property :value np)
+                       ;; TODO add inherited flag
+                       :inherited nil)
+                 (org-sql--alist-put acc 'properties))))
+        (org-sql--extract acc #'from node-props)))))
 
-       ((memq type '(reschedule delschedule))
-        (org-sql--extract-lb-planning-change acc logbook-data item-part
-                                             'scheduled))
-
-       ;; ((memq type '(done refile note))
-       ;;  (org-sql--extract-lb-other acc logbook-data))
-
-       ;; TODO, need a better way to handle unrecognized logbook items
-       (t (org-sql--alist-put acc 'logbook logbook-data))))))
-
-(defun org-sql--extract-lb-clock (acc clock hl-part &optional item)
-  "Add data from logbook CLOCK to accumulator ACC.
-HL-PART is an object as returned by `org-sql--partition-headline'
-and represents the headline surrounding the clock.
-If ITEM is provided, check that this is a valid note that can be
-added to the clock, else add it as a normal logbook entry."
-  (let* ((item-part (org-sql--partition-item item hl-part))
-         (item-type (alist-get :type item-part))
-         (clock-data
-          (lambda ()
-            (let* ((hl (alist-get :headline hl-part))
-                   (ts-range (->> clock
-                                  (org-element-property :value)
-                                  org-sql--parse-ts-range)))
-              (list :file_path (alist-get :filepath hl-part)
-                    :headline_offset (org-element-property :begin hl)
-                    :clock_offset (org-element-property :begin clock)
-                    :time_start (car ts-range)
-                    :time_end (cdr ts-range))))))
-    (cond
-     ;; if item doesn't have type assume it is a clock note
-     ((and org-sql-store-clocks item-part (not item-type)
-           org-sql-store-clock-notes)
-      (->> (list :clock_note (alist-get :header-text item-part))
-           (append (funcall clock-data))
-           (org-sql--alist-put acc 'clocking)))
-
-     ;; but don't add a clock note if we don't want it
-     ((and org-sql-store-clocks item-part (not item-type))
-      (org-sql--alist-put acc 'clocking (funcall clock-data)))
-
-     ;; if item has type then add it as a separate item with clock
-     ((and org-sql-store-clocks item-part item-type)
-      (-> acc
-          (org-sql--alist-put 'clocking (funcall clock-data))
-          (org-sql--extract-lb-item item-part)))
-
-     ;; if no item just add the clock
-     ((and org-sql-store-clocks (not item-part))
-      (org-sql--alist-put acc 'clocking (funcall clock-data)))
-
-     ;; if we don't want clocks but there is still an item,
-     ;; add it as a logbook entry if it has a type
-     ((and (not org-sql-store-clocks) item-part item-type)
-      (org-sql--extract-lb-item acc item-part))
-
-     ;; else return acc unaltered
-     (t acc))))
-
-(defun org-sql--extract-lb-items (acc items hl-part)
-  "Add data from logbook ITEMS to accumulator ACC.
-HL-PART is an object as returned by `org-sql--partition-headline'
-and represents the headline surrounding the items."
-  (let ((from
-         (lambda (acc item hl-part)
-           (->> hl-part
-                (org-sql--partition-item item)
-                (org-sql--extract-lb-item acc)))))
-    (org-sql--extract acc from items hl-part)))
-
-(defun org-sql--extract-lb-one (acc entry hl-part)
-  "Add data from logbook ENTRY to accumulator ACC.
-HL-PART is an object as returned by `org-sql--partition-headline'
-and represents the headline surrounding the entry."
-  (let ((type (org-element-type entry)))
-    (cond
-     ((eq type 'clock)
-      (org-sql--extract-lb-clock acc entry hl-part))
-     ((eq type 'item)
-      (--> entry
-           (org-sql--partition-item it hl-part)
-           (org-sql--extract-lb-item acc it)))
-     ;; TODO add an "UNKNOWN" logbook parser
-     (t acc))))
-
-(defun org-sql--extract-lb-contents (acc lb-flat hl-part)
-  "Add list of logbook items LB-FLAT from HL-PART to accumulator ACC.
-HL-PART is an object as returned by `org-sql--partition-headline'
-and LB-FLAT is a flatted logbook entry list as given by
-`org-sql--flatten-lb-entries'."
-  (while lb-flat
-    ;; Need two of the next entries here because clocks may
-    ;; have notes associated with them, but the only
-    ;; distinguishing characteristic they have is that they
-    ;; don't match anything in org-log-note-headings. If we
-    ;; end up processing two entries at once, skip over two
-    ;; instead of one on the next iteration.
-    (let* ((cur1 (car lb-flat))
-           (cur2 (cadr lb-flat))
-           (type1 (org-element-type cur1))
-           (type2 (org-element-type cur2))
-           (try-clock-note (and (eq type1 'clock) (eq type2 'item))))
-      (if try-clock-note
-          (setq acc (org-sql--extract-lb-clock acc cur1 hl-part cur2)
-                lb-flat (cddr lb-flat))
-        (setq acc (org-sql--extract-lb-one acc cur1 hl-part)
-              lb-flat (cdr lb-flat)))))
-  acc)
-
-(defun org-sql--extract-lb-drawer (acc hl-part)
-  "Given HL-PART, find logbook drawer and add to accumulator ACC.
-HL-PART is an object as returned by `org-sql--partition-headline'."
-  (--> hl-part
-       (alist-get :section it)
-       (--first (equal org-log-into-drawer
-                       (org-element-property :drawer-name it))
-                it)
-       (org-element-contents it)
-       (org-sql--flatten-lb-entries it)
-       (org-sql--extract-lb-contents acc it hl-part)))
-
-(defun org-sql--extract-properties (acc hl-part)
-   "Add properties data from HL-PART and add to accumulator ACC.
-HL-PART is an object as returned by `org-sql--partition-headline'."
-   (if (eq 'all org-sql-ignored-properties) acc
-     (let ((node-props
-            (->> hl-part
-                 (alist-get :section)
-                 (assoc 'property-drawer)
-                 (org-element-contents)
-                 (--remove (member (org-element-property :key it)
-                                   org-sql--ignored-properties-default))
-                 (--remove (member (org-element-property :key it)
-                                   org-sql-ignored-properties))))
-           (from
-            (lambda (acc np hl-part)
-              (->>
-               (list :file_path (alist-get :filepath hl-part)
-                     :headline_offset (->>
-                                       hl-part
-                                       (alist-get :headline)
-                                       (org-element-property :begin))
-                     :property_offset (org-element-property :begin np)
-                     :key_text (org-element-property :key np)
-                     :val_text (->>
-                                np
-                                (org-element-property :value)
-                                org-sql--parse-ts-maybe)
-                     ;; TODO add inherited flag
-                     :inherited nil)
-               (org-sql--alist-put acc 'properties)))))
-       (org-sql--extract acc from node-props hl-part))))
-
-(defun org-sql--extract-tags (acc hl-part)
-  "Extract tags data from HL-PART and add to accumulator ACC.
-HL-PART is an object as returned by `org-sql--partition-headline'."
+(defun org-sql--extract-tags (acc headline fp)
+  "Extract tags data from HEADLINE and add to accumulator ACC."
   (if (eq 'all org-sql-ignored-tags) acc
-    (let* ((hl (alist-get :headline hl-part))
-           ;; first retrieve tags and strip text props and whitespace
-           ;; TODO add unique filter here and warn user if non-unique
-           ;; tags are found
-           (tags (--> hl
-                      (org-element-property :tags it)
-                      (mapcar #'org-sql--strip-string it)
-                      (-difference it org-sql-ignored-tags)))
-           ;; split-string returns nil if it gets ""
-           (i-tags (->
-                    (org-element-property :ARCHIVE_ITAGS hl)
-                    (or "")
-                    split-string
-                    (-difference org-sql-ignored-tags)))
-           ;; then retrieve i-tags, optionally going up to parents
-           (i-tags (when org-sql-use-tag-inheritance
-                     (org-sql--element-parent-tags hl i-tags)))
-           (from
-            (lambda (acc tag hl-part &optional inherited)
-              (->>
-               (list :file_path (alist-get :filepath hl-part)
-                     :headline_offset (->>
-                                       hl-part
-                                       (alist-get :headline)
-                                       (org-element-property :begin))
+    (cl-flet
+        ((from
+          (acc tag inherited)
+          (->> (list :file_path fp
+                     :headline_offset (org-ml-get-property :begin headline)
                      :tag tag
-                     :inherited (if inherited 1 0))
-                (org-sql--alist-put acc 'tags)))))
-      (-> acc
-          (org-sql--extract from tags hl-part)
-          (org-sql--extract from i-tags hl-part t)))))
+                     :inherited inherited)
+               (org-sql--alist-put acc 'tags)))
+         (filter-ignored
+          (tags)
+          (-difference tags org-sql-ignored-tags)))
+      (let ((tags (filter-ignored (org-sql--headline-get-tags headline)))
+            (i-tags (--> (org-sql--headline-get-archive-itags headline)
+                         (if (not org-sql-use-tag-inheritance) it
+                           (org-sql--element-parent-tags it headline))
+                         (filter-ignored it))))
+        (-> (org-sql--extract acc #'from tags nil)
+            (org-sql--extract #'from i-tags t))))))
 
-(defun org-sql--extract-links (acc hl-part)
-  "Add link data from headline HL-PART to accumulator ACC.
-HL-PART is an object as returned by `org-sql--partition-headline'."
+(defun org-sql--extract-links (acc headline fp)
+  "Add link data from headline HEADLINE to accumulator ACC."
   (if (eq 'all org-sql-ignored-link-types) acc
-    (let* ((links (--> (alist-get :section hl-part)
-                       (org-element-map it 'link #'identity)
-                       (--remove
-                        (member (org-element-property :type it)
-                                org-sql-ignored-link-types)
-                        it)))
-           (from
-            (lambda (acc ln hl-part)
-              (let ((hl (alist-get :headline hl-part)))
-                (->>
-                 (list :file_path (alist-get :filepath hl-part)
-                       :headline_offset (org-element-property :begin hl)
-                       :link_offset (org-element-property :begin ln)
-                       :link_path (org-element-property :path ln)
-                       :link_text (->> ln
-                                       org-element-contents
-                                       org-element-interpret-data
-                                       org-sql--strip-string)
-                       :link_type (org-element-property :type ln))
-                 (org-sql--alist-put acc 'links))))))
-      (org-sql--extract acc from links hl-part))))
+    (let ((links (->> (org-ml-match '(:any * link) headline)
+                      (--remove (member (org-ml-get-property :type it)
+                                        org-sql-ignored-link-types)))))
+      (cl-flet
+          ((from
+            (acc link)
+            (->> (list :file_path fp
+                       :headline_offset (org-ml-get-property :begin headline)
+                       :link_offset (org-ml-get-property :begin link)
+                       :link_path (org-ml-get-property :path link)
+                       :link_text (->> (org-ml-get-children link)
+                                       (-map #'org-ml-to-string)
+                                       (s-join ""))
+                       :link_type (org-ml-get-property :type link))
+                 (org-sql--alist-put acc 'links))))
+        (org-sql--extract acc #'from links)))))
 
-(defun org-sql--extract-ts (acc ts hl-part &optional pt)
+(defun org-sql--extract-ts (acc ts headline fp)
   "Add timestamp TS data from headline HL-PART to accumulator ACC.
-HL-PART is an object as returned by `org-sql--partition-headline'.
 PT is a string representing the planning type and is one of 'closed,'
 'scheduled,' or 'deadline' although these values are not enforced by
 this function."
-  (let* ((ts-range (org-sql--parse-ts-range ts))
-         (get-resolution
-          (lambda (ts)
-            (when ts
-              (if (org-element-property :hour-start ts)
-                  'minute
-                'day))))
-         (ts-range-res (org-sql--parse-ts-range ts get-resolution))
-         (fp (alist-get :filepath hl-part))
-         (ts-offset (org-element-property :begin ts))
-         (ts-data
-          (list
-           :file_path fp
-           :headline_offset (->> hl-part
-                                 (alist-get :headline)
-                                 (org-element-property :begin))
-           :timestamp_offset ts-offset
-           ;; don't care if they are ranges here, this is reflected in
-           ;; the time_end value
-           :type (--> ts
-                      (org-element-property :type it)
-                      (cond ((eq it 'inactive-range) 'inactive)
-                            ((eq it 'active-range) 'active)
-                            (t it)))
-           :planning_type pt
-           :warning_type (org-element-property :warning-type ts)
-           :warning_value (org-element-property :warning-value ts)
-           :warning_unit (org-element-property :warning-unit ts)
-           :repeat_type (org-element-property :repeater-type ts)
-           :repeat_value (org-element-property :repeater-value ts)
-           :repeat_unit (org-element-property :repeater-unit ts)
-           :time (car ts-range)
-           :resolution (car ts-range-res)
-           :time_end (cdr ts-range)
-           :resolution_end (cdr ts-range-res)
-           :raw_value (org-element-property :raw-value ts))))
-    (org-sql--alist-put acc 'timestamp ts-data)))
+  (cl-flet
+      ((get-resolution
+        (time)
+        ;; TODO this should be public in org-ml
+        (when time
+          (if (org-ml--time-is-long time) 'minute 'day))))
+    (let* ((start (org-ml-timestamp-get-start-time ts))
+           (end (org-ml-timestamp-get-end-time ts))
+           (ts-data
+            (list :file_path fp
+                  :headline_offset (org-ml-get-property :begin headline)
+                  :timestamp_offset (org-ml-get-property :begin ts)
+                  :type (if (org-ml-timestamp-is-active ts) 'active 'inactive)
+                  ;; :planning_type planning-type
+                  :planning_type nil
+                  :warning_type (org-ml-get-property :warning-type ts)
+                  :warning_value (org-ml-get-property :warning-value ts)
+                  :warning_unit (org-ml-get-property :warning-unit ts)
+                  :repeat_type (org-ml-get-property :repeater-type ts)
+                  :repeat_value (org-ml-get-property :repeater-value ts)
+                  :repeat_unit (org-ml-get-property :repeater-unit ts)
+                  :time (org-ml-time-to-unixtime start)
+                  :resolution (get-resolution start)
+                  :time_end (-some-> end (org-ml-time-to-unixtime))
+                  :resolution_end (get-resolution end)
+                  :raw_value (org-ml-get-property :raw-value ts))))
+      (org-sql--alist-put acc 'timestamp ts-data))))
 
-(defun org-sql--extract-hl-contents (acc hl-part)
-  "Add contents from partitioned header HL-PART to accumulator ACC.
-HL-PART is an object as returned by `org-sql--partition-headline'."
-  ;; start by getting the 'section contents, which is everything
-  ;; except for the planning element, logbook drawer, and property
-  ;; drawer
-  (let* ((sec (->>
-               hl-part
-               (alist-get :section)
-               (--remove (eq 'planning (org-element-type it)))
-               (--remove (eq 'property-drawer (org-element-type it)))
-               (--remove (equal (org-element-property :drawer-name it)
-                                org-log-into-drawer))))
-         (sec-split (--split-with
-                     (or (eq 'clock (org-element-type it))
-                         (eq 'plain-list (org-element-type it)))
-                     sec))
-         (lb-split (-> sec-split car org-sql--split-lb-entries))
-         (sec-rem (->> sec-split cdr (append (cdr lb-split))))
-         (hl-ts
-          (->>
-           (org-element-map sec-rem 'timestamp #'identity)
-           (--filter (memq (org-element-property :type it)
-                           org-sql-included-contents-timestamp-types)))))
-    (->
-     acc
-     (org-sql--extract-lb-contents (car lb-split) hl-part)
-     (org-sql--extract #'org-sql--extract-ts hl-ts hl-part))))
+(defun org-sql--extract-hl-contents (acc headline fp)
+  "Add contents from partitioned header HEADLINE to accumulator ACC."
+  ;; TODO this only works when `org-log-into-drawer' is defined
+  (let ((timestamps
+         (->> (org-ml-headline-get-section headline)
+              ;; TODO need a function in org-ml that returns non-meta
+              (--remove (org-ml-is-any-type '(planning property-drawer) it))
+              (--remove (equal (org-element-property :drawer-name it)
+                               org-log-into-drawer))
+              (org-ml-match '(:any * timestamp))
+              (--filter (org-ml-is-any-type org-sql-included-contents-timestamp-types it)))))
+    (org-sql--extract acc #'org-sql--extract-ts timestamps headline fp)))
 
-(defun org-sql--extract-hl-planning (acc hl-part)
-  "Add planning timestamps from HL-PART to accumulator ACC.
-HL-PART is an object as returned by `org-sql--partition-headline'.
+(defun org-sql--extract-hl-planning (acc headline fp)
+  "Add planning timestamps from HEADLINE to accumulator ACC.
 This will include planning timestamps according to
 `org-sql-included-headline-planning-types'."
-  (let ((hl (alist-get :headline hl-part)))
-    (dolist (type org-sql-included-headline-planning-types)
-      (let* ((ts (org-element-property type hl))
-             (pt (org-sql--kw-to-colname type)))
-        (when ts
-          (setq acc (org-sql--extract-ts acc ts hl-part pt)))))
+  ;; TODO make offset entries in headline table for these
+  (-if-let (planning (org-ml-headline-get-planning headline))
+      (->> org-sql-included-headline-planning-types
+           (--map (org-ml-get-property it planning))
+           (--remove (null (cdr it)))
+           (--reduce-from (org-sql--extract-ts acc it headline fp) acc))
     acc))
 
-(defun org-sql--extract-hl-meta (acc hl-part)
-  "Add general data from headline HL-PART to accumulator ACC.
-HL-PART is an object as returned by `org-sql--partition-headline'."
-  (let* ((hl (alist-get :headline hl-part))
-         (hl-data
-          (list
-           :file_path (alist-get :filepath hl-part)
-           :headline_offset (org-element-property :begin hl)
-           :tree_path (org-sql--element-parent-tree-path hl)
-           :headline_text (org-element-property :raw-value hl)
-           :keyword (->> hl
-                         (org-element-property :todo-keyword)
-                         org-sql--strip-string)
-           :effort (--> hl
-                        (org-element-property :EFFORT it)
-                        (org-sql--effort-to-int it t))
-           :priority (-some->> hl
-                               (org-element-property :priority)
-                               byte-to-string)
-           :archived (if (org-element-property :archivedp hl) 1 0)
-           :commented (if (org-element-property :commentedp hl) 1 0)
-           :content nil)))
-    (->
-     acc
-     (org-sql--alist-put 'headlines hl-data)
-     (org-sql--extract-hl-contents hl-part)
-     (org-sql--extract-hl-planning hl-part))))
+(defun org-sql--extract-hl-meta (acc headline fp)
+  "Add general data from HEADLINE to accumulator ACC."
+  (let ((hl-data
+         (list
+          :file_path fp
+          :headline_offset (org-ml-get-property :begin headline)
+          :tree_path (org-sql--headline-get-path headline)
+          :headline_text (org-ml-get-property :raw-value headline)
+          :keyword (org-ml-get-property :todo-keyword headline)
+          :effort (-some-> (org-ml-headline-get-node-property "Effort" headline)
+                    (org-sql--effort-to-int))
+          :priority (-some->> (org-ml-get-property :priority headline)
+                      (byte-to-string))
+          :archived (org-ml-get-property :archivedp headline)
+          :commented (org-ml-get-property :commentedp headline)
+          :content nil)))
+    (-> (org-sql--alist-put acc 'headlines hl-data)
+        (org-sql--extract-hl-contents headline fp)
+        (org-sql--extract-hl-planning headline fp))))
 
 (defun org-sql--extract-hl (acc headlines fp)
   "Extract data from HEADLINES and add to accumulator ACC.
 FP is the path to the file containing the headlines."
-  (let ((from
-         (lambda (acc hl fp)
-           (let* ((hl-part (org-sql--partition-headline hl fp))
-                  (hl-sub (alist-get :subheadlines hl-part)))
-             (-> acc
-                 (org-sql--extract-hl-meta hl-part)
-                 (org-sql--extract-links hl-part)
-                 (org-sql--extract-tags hl-part)
-                 (org-sql--extract-properties hl-part)
-                 (org-sql--extract-lb-drawer hl-part)
-                 (org-sql--extract-hl hl-sub fp))))))
-    (org-sql--extract acc from headlines fp)))
+  (cl-flet
+      ((from
+        (acc hl)
+        (-> (org-sql--extract-hl-meta acc hl fp)
+            (org-sql--extract-links hl fp)
+            (org-sql--extract-tags hl fp)
+            (org-sql--extract-properties hl fp)
+            (org-sql--extract-logbook hl fp)
+            (org-sql--extract-hl (org-ml-headline-get-subheadlines hl) fp))))
+    (org-sql--extract acc #'from headlines)))
 
 (defun org-sql--extract-buffer (acc fp)
   "Extracts all headlines from the current buffer to ACC.

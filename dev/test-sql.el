@@ -13,6 +13,14 @@ list then join the cdr of IN with newlines."
    ((consp in) `(s-join "\n" ,in))
    (t (error "String or list of strings expected"))))
 
+(defun org-ts-to-unixtime (timestamp-string)
+  "Convert TIMESTAMP-STRING to unixtime."
+  (let ((decoded (org-parse-time-string timestamp-string)))
+    (->> (-snoc decoded (current-time-zone))
+         (apply #'encode-time)
+         (float-time)
+         (round))))
+
 (defconst testing-filepath "/tmp/dummy")
 
 (defmacro expect-sql* (in tbl res-form)
@@ -49,13 +57,13 @@ list then join the cdr of IN with newlines."
       `((headlines
          ,(list :file_path testing-filepath
                 :headline_offset 1
-                :tree_path nil
+                :tree_path "/"
                 :headline_text "headline"
                 :keyword nil
                 :effort nil
                 :priority nil
-                :archived 0
-                :commented 0
+                :archived nil
+                :commented nil
                 :content nil)))))
 
   (it "two headlines"
@@ -65,23 +73,23 @@ list then join the cdr of IN with newlines."
       `((headlines
          ,(list :file_path testing-filepath
                 :headline_offset 12
-                :tree_path nil
+                :tree_path "/"
                 :headline_text "another headline"
                 :keyword nil
                 :effort nil
                 :priority nil
-                :archived 0
-                :commented 0
+                :archived nil
+                :commented nil
                 :content nil)
          ,(list :file_path testing-filepath
                 :headline_offset 1
-                :tree_path nil
+                :tree_path "/"
                 :headline_text "headline"
                 :keyword nil
                 :effort nil
                 :priority nil
-                :archived 0
-                :commented 0
+                :archived nil
+                :commented nil
                 :content nil)))))
 
   (it "fancy headline"
@@ -92,13 +100,13 @@ list then join the cdr of IN with newlines."
       `((headlines
          ,(list :file_path testing-filepath
                 :headline_offset 1
-                :tree_path nil
+                :tree_path "/"
                 :headline_text "another headline"
                 :keyword "TODO"
-                :effort "30"
+                :effort 30
                 :priority "A"
-                :archived 0
-                :commented 1
+                :archived nil
+                :commented t
                 :content nil)))))
 
   (it "nested headline"
@@ -112,18 +120,18 @@ list then join the cdr of IN with newlines."
                 :keyword nil
                 :effort nil
                 :priority nil
-                :archived 0
-                :commented 0
+                :archived nil
+                :commented nil
                 :content nil)
          ,(list :file_path testing-filepath
                 :headline_offset 1
-                :tree_path nil
+                :tree_path "/"
                 :headline_text "headline"
                 :keyword nil
                 :effort nil
                 :priority nil
-                :archived 0
-                :commented 0
+                :archived nil
+                :commented nil
                 :content nil)))))
 
 
@@ -132,19 +140,14 @@ list then join the cdr of IN with newlines."
       `((headlines
          ,(list :file_path testing-filepath
                 :headline_offset 1
-                :tree_path nil
+                :tree_path "/"
                 :headline_text "headline"
                 :keyword nil
                 :effort nil
                 :priority nil
-                :archived 1
-                :commented 0
-                :content nil))
-        (tags
-         ,(list :file_path testing-filepath
-                :headline_offset 1
-                :tag "ARCHIVE"
-                :inherited 0)))))
+                :archived t
+                :commented nil
+                :content nil)))))
 
   ;; tags table
 
@@ -153,7 +156,7 @@ list then join the cdr of IN with newlines."
       `(,(list :file_path testing-filepath
                :headline_offset 1
                :tag "sometag"
-               :inherited 0))))
+               :inherited nil))))
 
   (it "multiple tags"
     (expect-sql-tbl tags (list "* headline :onetag:"
@@ -161,11 +164,11 @@ list then join the cdr of IN with newlines."
       `(,(list :file_path testing-filepath
                :headline_offset 21
                :tag "twotag"
-               :inherited 0)
+               :inherited nil)
         ,(list :file_path testing-filepath
                :headline_offset 1
                :tag "onetag"
-               :inherited 0))))
+               :inherited nil))))
 
   (it "inherited tag"
     (setq org-sql-use-tag-inheritance t)
@@ -174,11 +177,11 @@ list then join the cdr of IN with newlines."
       `(,(list :file_path testing-filepath
                :headline_offset 19
                :tag "onetag"
-               :inherited 1)
+               :inherited t)
         ,(list :file_path testing-filepath
                :headline_offset 1
                :tag "onetag"
-               :inherited 0))))
+               :inherited nil))))
 
   (it "inherited tag (ARCHIVE_ITAGS)"
     ;; TODO clean up the variable settings elsewhere
@@ -189,7 +192,7 @@ list then join the cdr of IN with newlines."
       `(,(list :file_path testing-filepath
                :headline_offset 1
                :tag "sometag"
-               :inherited 1))))
+               :inherited t))))
 
   (it "inherited tag (option off)"
     ;; TODO clean up the variable settings elsewhere
@@ -199,12 +202,12 @@ list then join the cdr of IN with newlines."
       `(,(list :file_path testing-filepath
                :headline_offset 1
                :tag "onetag"
-               :inherited 0))))
+               :inherited nil))))
 
-  ;; timestamp table
+ ;;  ;; timestamp table
 
   (it "closed timestamp"
-    (let* ((ts "<2112-01-01 Fri>")
+    (let* ((ts "<2112-01-01 Thu>")
            (planning (format "CLOSED: %s" ts)))
       (expect-sql-tbl timestamp (list "* parent"
                                       planning)
@@ -212,21 +215,21 @@ list then join the cdr of IN with newlines."
                  :headline_offset 1
                  :timestamp_offset 18
                  :type 'active
-                 :planning_type "closed"
+                 :planning_type nil
                  :warning_type nil
                  :warning_value nil
                  :warning_unit nil
                  :repeat_type nil
                  :repeat_value nil
                  :repeat_unit nil
-                 :time (round (org-2ft ts))
+                 :time (org-ts-to-unixtime ts)
                  :resolution 'day
                  :time_end nil
                  :resolution_end nil
                  :raw_value ts)))))
 
   (it "closed timestamp (long)"
-    (let* ((ts "<2112-01-01 Fri 00:00>")
+    (let* ((ts "<2112-01-01 Thu 00:00>")
            (planning (format "CLOSED: %s" ts)))
       (expect-sql-tbl timestamp (list "* parent"
                                       planning)
@@ -234,21 +237,21 @@ list then join the cdr of IN with newlines."
                  :headline_offset 1
                  :timestamp_offset 18
                  :type 'active
-                 :planning_type "closed"
+                 :planning_type nil
                  :warning_type nil
                  :warning_value nil
                  :warning_unit nil
                  :repeat_type nil
                  :repeat_value nil
                  :repeat_unit nil
-                 :time (round (org-2ft ts))
+                 :time (org-ts-to-unixtime ts)
                  :resolution 'minute
                  :time_end nil
                  :resolution_end nil
                  :raw_value ts)))))
 
  (it "timestamp deadline (repeater)"
-    (let* ((ts "<2112-01-01 Fri +2d>")
+    (let* ((ts "<2112-01-01 Thu +2d>")
            (planning (format "DEADLINE: %s" ts)))
       (expect-sql-tbl timestamp (list "* parent"
                                       planning)
@@ -256,21 +259,21 @@ list then join the cdr of IN with newlines."
                  :headline_offset 1
                  :timestamp_offset 20
                  :type 'active
-                 :planning_type "deadline"
+                 :planning_type nil
                  :warning_type nil
                  :warning_value nil
                  :warning_unit nil
                  :repeat_type 'cumulate
                  :repeat_value 2
                  :repeat_unit 'day
-                 :time (round (org-2ft ts))
+                 :time (org-ts-to-unixtime ts)
                  :resolution 'day
                  :time_end nil
                  :resolution_end nil
                  :raw_value ts)))))
 
  (it "timestamp deadline (warning)"
-    (let* ((ts "<2112-01-01 Fri -2d>")
+    (let* ((ts "<2112-01-01 Thu -2d>")
            (planning (format "DEADLINE: %s" ts)))
       (expect-sql-tbl timestamp (list "* parent"
                                       planning)
@@ -278,14 +281,14 @@ list then join the cdr of IN with newlines."
                  :headline_offset 1
                  :timestamp_offset 20
                  :type 'active
-                 :planning_type "deadline"
+                 :planning_type nil
                  :warning_type 'all
                  :warning_value 2
                  :warning_unit 'day
                  :repeat_type nil
                  :repeat_value nil
                  :repeat_unit nil
-                 :time (round (org-2ft ts))
+                 :time (org-ts-to-unixtime ts)
                  :resolution 'day
                  :time_end nil
                  :resolution_end nil
@@ -293,8 +296,8 @@ list then join the cdr of IN with newlines."
 
  ;; TODO obviously this is bullshit
  (it "timestamp deadline (ranged)"
-   (let* ((ts0 "<2112-01-01 Fri>")
-          (ts1 "<2112-01-02 Sat>")
+   (let* ((ts0 "<2112-01-01 Thu>")
+          (ts1 "<2112-01-02 Fri>")
           (ts (format "%s--%s" ts0 ts1))
           (planning (format "DEADLINE: %s" ts)))
      (expect-sql-tbl timestamp (list "* parent"
@@ -303,19 +306,21 @@ list then join the cdr of IN with newlines."
                 :headline_offset 1
                 :timestamp_offset 20
                 :type 'active
-                :planning_type "deadline"
+                :planning_type nil
                 :warning_type nil
                 :warning_value nil
                 :warning_unit nil
                 :repeat_type nil
                 :repeat_value nil
                 :repeat_unit nil
-                :time (round (org-2ft ts0))
+                :time (org-ts-to-unixtime ts0)
                 :resolution 'day
                 ;; TODO this is odd
-                :time_end nil
-                :resolution_end nil
+                :time_end (org-ts-to-unixtime ts1)
+                :resolution_end 'day
                 :raw_value ts)))))
+
+ ;; link table
 
  (it "single link"
    (expect-sql-tbl links (list "* parent"
@@ -370,6 +375,8 @@ list then join the cdr of IN with newlines."
                                  "file:///tmp/eternalblue.exe")
        nil)))
 
+ ;; property table
+
  (it "single property"
    (expect-sql-tbl properties (list "* parent"
                                     ":PROPERTIES:"
@@ -402,7 +409,7 @@ list then join the cdr of IN with newlines."
               :val_text "ragtime dandies"
               :inherited nil))))
 
- ;; TODO add inherited properties once they exist
+ ;; ;; TODO add inherited properties once they exist
 
  (it "single clock (closed)"
    (let* ((org-log-into-drawer "LOGBOOK")
@@ -417,10 +424,10 @@ list then join the cdr of IN with newlines."
        `(,(list :file_path testing-filepath
                 :headline_offset 1
                 :clock_offset 20
-                :time_start (round (org-2ft ts0))
-                :time_end (round (org-2ft ts1))
+                :time_start (org-ts-to-unixtime ts0)
+                :time_end (org-ts-to-unixtime ts1)
                 ;; TODO why is this a ""?
-                :clock_note "")))))
+                :clock_note nil)))))
 
  (it "single clock (open)"
    (let* ((org-log-into-drawer "LOGBOOK")
@@ -433,9 +440,9 @@ list then join the cdr of IN with newlines."
        `(,(list :file_path testing-filepath
                 :headline_offset 1
                 :clock_offset 20
-                :time_start (round (org-2ft ts))
+                :time_start (org-ts-to-unixtime ts)
                 :time_end nil
-                :clock_note "")))))
+                :clock_note nil)))))
 
  (it "multiple clocks"
    (let* ((org-log-into-drawer "LOGBOOK")
@@ -451,15 +458,15 @@ list then join the cdr of IN with newlines."
        `(,(list :file_path testing-filepath
                 :headline_offset 1
                 :clock_offset 50
-                :time_start (round (org-2ft ts1))
+                :time_start (org-ts-to-unixtime ts1)
                 :time_end nil
-                :clock_note "")
+                :clock_note nil)
          ,(list :file_path testing-filepath
                 :headline_offset 1
                 :clock_offset 20
-                :time_start (round (org-2ft ts0))
+                :time_start (org-ts-to-unixtime ts0)
                 :time_end nil
-                :clock_note "")))))
+                :clock_note nil)))))
 
  (it "logbook item (note)"
    (let* ((org-log-into-drawer "LOGBOOK")
@@ -475,7 +482,7 @@ list then join the cdr of IN with newlines."
                 :headline_offset 1
                 :entry_offset 20
                 :entry_type 'note
-                :time_logged (round (org-2ft ts))
+                :time_logged (org-ts-to-unixtime ts)
                 :header header
                 :note note)))))
 
@@ -488,19 +495,19 @@ list then join the cdr of IN with newlines."
                ":LOGBOOK:"
                (format "- %s" header)
                ":END:")
-       `((logbook
+       `((state_changes
+          ,(list :file_path testing-filepath
+                 :entry_offset 20
+                 :state_old "TODO"
+                 :state_new "DONE"))
+         (logbook
           ,(list :file_path testing-filepath
                  :headline_offset 1
                  :entry_offset 20
                  :entry_type 'state
-                 :time_logged (round (org-2ft ts))
+                 :time_logged (org-ts-to-unixtime ts)
                  :header header
-                 :note ""))
-         (state_changes
-          ,(list :file_path testing-filepath
-                 :entry_offset 20
-                 :state_old "TODO"
-                 :state_new "DONE"))))))
+                 :note nil))))))
 
  (it "logbook item (reschedule)"
    (let* ((org-log-into-drawer "LOGBOOK")
@@ -512,36 +519,35 @@ list then join the cdr of IN with newlines."
                ":LOGBOOK:"
                (format "- %s" header)
                ":END:")
-       `((logbook
-          ,(list :file_path testing-filepath
-                 :headline_offset 1
-                 :entry_offset 20
-                 :entry_type 'reschedule
-                 :time_logged (round (org-2ft ts1))
-                 :header header
-                 :note ""))
-         (planning_changes
-          ,(list :file_path testing-filepath
-                 :entry_offset 20
-                 :timestamp_offset 40))
-         (timestamp
+       `((timestamp
           ,(list :file_path testing-filepath
                  :headline_offset 1
                  :timestamp_offset 40
                  :type 'inactive
-                 ;; TODO is 'scheduled' supposed to be here?
-                 :planning_type 'scheduled
+                 :planning_type nil
                  :warning_type nil
                  :warning_value nil
                  :warning_unit nil
                  :repeat_type nil
                  :repeat_value nil
                  :repeat_unit nil
-                 :time (round (org-2ft ts0))
+                 :time (org-ts-to-unixtime ts0)
                  :resolution 'minute
                  :time_end nil
                  :resolution_end nil
-                 :raw_value ts0))))))
+                 :raw_value ts0))
+         (planning_changes
+          ,(list :file_path testing-filepath
+                 :entry_offset 20
+                 :timestamp_offset 40))
+         (logbook
+          ,(list :file_path testing-filepath
+                 :headline_offset 1
+                 :entry_offset 20
+                 :entry_type 'reschedule
+                 :time_logged (org-ts-to-unixtime ts1)
+                 :header header
+                 :note nil))))))
 
  (it "logbook item (redeadline)"
    (let* ((org-log-into-drawer "LOGBOOK")
@@ -553,35 +559,35 @@ list then join the cdr of IN with newlines."
                ":LOGBOOK:"
                (format "- %s" header)
                ":END:")
-       `((logbook
-          ,(list :file_path testing-filepath
-                :headline_offset 1
-                :entry_offset 20
-                :entry_type 'redeadline
-                :time_logged (round (org-2ft ts1))
-                :header header
-                :note ""))
-         (planning_changes
-          ,(list :file_path testing-filepath
-                 :entry_offset 20
-                 :timestamp_offset 41))
-         (timestamp
+       `((timestamp
           ,(list :file_path testing-filepath
                  :headline_offset 1
                  :timestamp_offset 41
                  :type 'inactive
-                 :planning_type 'deadline
+                 :planning_type nil
                  :warning_type nil
                  :warning_value nil
                  :warning_unit nil
                  :repeat_type nil
                  :repeat_value nil
                  :repeat_unit nil
-                 :time (round (org-2ft ts0))
+                 :time (org-ts-to-unixtime ts0)
                  :resolution 'minute
                  :time_end nil
                  :resolution_end nil
-                 :raw_value ts0))))))
+                 :raw_value ts0))
+         (planning_changes
+          ,(list :file_path testing-filepath
+                 :entry_offset 20
+                 :timestamp_offset 41))
+         (logbook
+          ,(list :file_path testing-filepath
+                 :headline_offset 1
+                 :entry_offset 20
+                 :entry_type 'redeadline
+                 :time_logged (org-ts-to-unixtime ts1)
+                 :header header
+                 :note nil))))))
 
  (it "logbook item (delschedule)"
    (let* ((org-log-into-drawer "LOGBOOK")
@@ -593,35 +599,35 @@ list then join the cdr of IN with newlines."
                ":LOGBOOK:"
                (format "- %s" header)
                ":END:")
-       `((logbook
-          ,(list :file_path testing-filepath
-                :headline_offset 1
-                :entry_offset 20
-                :entry_type 'delschedule
-                :time_logged (round (org-2ft ts1))
-                :header header
-                :note ""))
-         (planning_changes
-          ,(list :file_path testing-filepath
-                 :entry_offset 20
-                 :timestamp_offset 42))
-         (timestamp
+       `((timestamp
           ,(list :file_path testing-filepath
                  :headline_offset 1
                  :timestamp_offset 42
                  :type 'inactive
-                 :planning_type 'scheduled
+                 :planning_type nil
                  :warning_type nil
                  :warning_value nil
                  :warning_unit nil
                  :repeat_type nil
                  :repeat_value nil
                  :repeat_unit nil
-                 :time (round (org-2ft ts0))
+                 :time (org-ts-to-unixtime ts0)
                  :resolution 'minute
                  :time_end nil
                  :resolution_end nil
-                 :raw_value ts0))))))
+                 :raw_value ts0))
+         (planning_changes
+          ,(list :file_path testing-filepath
+                 :entry_offset 20
+                 :timestamp_offset 42))
+         (logbook
+          ,(list :file_path testing-filepath
+                :headline_offset 1
+                :entry_offset 20
+                :entry_type 'delschedule
+                :time_logged (org-ts-to-unixtime ts1)
+                :header header
+                :note nil))))))
 
  (it "logbook item (deldeadline)"
    (let* ((org-log-into-drawer "LOGBOOK")
@@ -633,35 +639,35 @@ list then join the cdr of IN with newlines."
                ":LOGBOOK:"
                (format "- %s" header)
                ":END:")
-       `((logbook
-          ,(list :file_path testing-filepath
-                :headline_offset 1
-                :entry_offset 20
-                :entry_type 'deldeadline
-                :time_logged (round (org-2ft ts1))
-                :header header
-                :note ""))
-         (planning_changes
-          ,(list :file_path testing-filepath
-                 :entry_offset 20
-                 :timestamp_offset 45))
-         (timestamp
+       `((timestamp
           ,(list :file_path testing-filepath
                  :headline_offset 1
                  :timestamp_offset 45
                  :type 'inactive
-                 :planning_type 'deadline
+                 :planning_type nil
                  :warning_type nil
                  :warning_value nil
                  :warning_unit nil
                  :repeat_type nil
                  :repeat_value nil
                  :repeat_unit nil
-                 :time (round (org-2ft ts0))
+                 :time (org-ts-to-unixtime ts0)
                  :resolution 'minute
                  :time_end nil
                  :resolution_end nil
-                 :raw_value ts0))))))
+                 :raw_value ts0))
+         (planning_changes
+          ,(list :file_path testing-filepath
+                 :entry_offset 20
+                 :timestamp_offset 45))
+         (logbook
+          ,(list :file_path testing-filepath
+                :headline_offset 1
+                :entry_offset 20
+                :entry_type 'deldeadline
+                :time_logged (org-ts-to-unixtime ts1)
+                :header header
+                :note nil))))))
 
  (it "logbook item (refile)"
    (let* ((org-log-into-drawer "LOGBOOK")
@@ -675,9 +681,9 @@ list then join the cdr of IN with newlines."
                 :headline_offset 1
                 :entry_offset 20
                 :entry_type 'refile
-                :time_logged (round (org-2ft ts))
+                :time_logged (org-ts-to-unixtime ts)
                 :header header
-                :note "")))))
+                :note nil)))))
 
  (it "logbook item (done)"
    (let* ((org-log-into-drawer "LOGBOOK")
@@ -691,6 +697,8 @@ list then join the cdr of IN with newlines."
                 :headline_offset 1
                 :entry_offset 20
                 :entry_type 'done
-                :time_logged (round (org-2ft ts))
+                :time_logged (org-ts-to-unixtime ts)
                 :header header
-                :note ""))))))
+                :note nil)))))
+
+ )
