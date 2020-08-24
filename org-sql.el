@@ -60,7 +60,7 @@ to store them. This is in addition to any properties specifified by
 ;; TODO, make a formating function to convert a lisp obj to schema
 (defconst org-sql--schemas
   '("CREATE TABLE files (file_path TEXT PRIMARY KEY ASC,md5 TEXT NOT NULL,size INTEGER NOT NULL,time_modified INTEGER,time_created INTEGER,time_accessed INTEGER);"
-    "CREATE TABLE headlines (file_path TEXT, headline_offset INTEGER, tree_path TEXT, headline_text TEXT NOT NULL, keyword TEXT, effort INTEGER, priority CHAR, archived BOOLEAN, commented BOOLEAN, content TEXT, PRIMARY KEY (file_path ASC, headline_offset ASC), FOREIGN KEY (file_path) REFERENCES files (file_path) ON UPDATE CASCADE ON DELETE CASCADE);"
+    "CREATE TABLE headlines (file_path TEXT, headline_offset INTEGER, tree_path TEXT, headline_text TEXT NOT NULL, keyword TEXT, effort INTEGER, scheduled_offset INTEGER, deadline_offset INTEGER, closed_offset INTEGER, priority CHAR, archived BOOLEAN, commented BOOLEAN, content TEXT, PRIMARY KEY (file_path ASC, headline_offset ASC), FOREIGN KEY (file_path) REFERENCES files (file_path) ON UPDATE CASCADE ON DELETE CASCADE);"
     "CREATE TABLE tags (file_path TEXT,headline_offset INTEGER,tag TEXT,inherited BOOLEAN,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path, headline_offset, tag, inherited));"
     "CREATE TABLE properties (file_path TEXT,headline_offset INTEGER,property_offset INTEGER,key_text TEXT NOT NULL,val_text TEXT NOT NULL,inherited BOOLEAN,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, property_offset ASC));"
     "CREATE TABLE clocking (file_path TEXT,headline_offset INTEGER,clock_offset INTEGER,time_start INTEGER,time_end INTEGER,clock_note TEXT,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset)ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, clock_offset ASC));"
@@ -68,7 +68,7 @@ to store them. This is in addition to any properties specifified by
     "CREATE TABLE state_changes (file_path TEXT,entry_offset INTEGER,state_old TEXT NOT NULL,state_new TEXT NOT NULL,FOREIGN KEY (file_path, entry_offset) REFERENCES logbook (file_path, entry_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, entry_offset ASC));"
     "CREATE TABLE planning_changes (file_path TEXT, entry_offset INTEGER, timestamp_offset INTEGER NOT NULL, FOREIGN KEY (file_path, entry_offset) REFERENCES logbook (file_path, entry_offset) ON DELETE CASCADE ON UPDATE CASCADE, PRIMARY KEY (file_path ASC, entry_offset ASC), FOREIGN KEY (file_path, timestamp_offset) REFERENCES timestamp (file_path, timestamp_offset) ON DELETE CASCADE ON UPDATE CASCADE);"
     "CREATE TABLE links (file_path TEXT,headline_offset INTEGER,link_offset INTEGER,link_path TEXT,link_text TEXT,link_type TEXT,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, link_offset ASC));"
-    "CREATE TABLE timestamp (file_path TEXT, headline_offset INTEGER, timestamp_offset INTEGER, raw_value TEXT NOT NULL, type TEXT, planning_type TEXT, warning_type TEXT, warning_value INTEGER, warning_unit TEXT, repeat_type TEXT, repeat_value INTEGER, repeat_unit TEXT, time INTEGER NOT NULL, time_end INTEGER, resolution TEXT, resolution_end TEXT, PRIMARY KEY (file_path, timestamp_offset), FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON DELETE CASCADE ON UPDATE CASCADE);")
+    "CREATE TABLE timestamp (file_path TEXT, headline_offset INTEGER, timestamp_offset INTEGER, raw_value TEXT NOT NULL, type TEXT, warning_type TEXT, warning_value INTEGER, warning_unit TEXT, repeat_type TEXT, repeat_value INTEGER, repeat_unit TEXT, time INTEGER NOT NULL, time_end INTEGER, resolution TEXT, resolution_end TEXT, PRIMARY KEY (file_path, timestamp_offset), FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON DELETE CASCADE ON UPDATE CASCADE);")
   "Table schemas for the org database.")
 
 (defconst org-sql--default-pragma
@@ -939,8 +939,6 @@ this function."
                   :headline_offset (org-ml-get-property :begin headline)
                   :timestamp_offset (org-ml-get-property :begin ts)
                   :type (if (org-ml-timestamp-is-active ts) 'active 'inactive)
-                  ;; :planning_type planning-type
-                  :planning_type nil
                   :warning_type (org-ml-get-property :warning-type ts)
                   :warning_value (org-ml-get-property :warning-value ts)
                   :warning_unit (org-ml-get-property :warning-unit ts)
@@ -967,37 +965,34 @@ this function."
               (--filter (org-ml-is-any-type org-sql-included-contents-timestamp-types it)))))
     (org-sql--extract acc #'org-sql--extract-ts timestamps headline fp)))
 
-(defun org-sql--extract-hl-planning (acc headline fp)
-  "Add planning timestamps from HEADLINE to accumulator ACC.
-This will include planning timestamps according to
-`org-sql-included-headline-planning-types'."
-  ;; TODO make offset entries in headline table for these
-  (-if-let (planning (org-ml-headline-get-planning headline))
-      (->> org-sql-included-headline-planning-types
-           (--map (org-ml-get-property it planning))
-           (--remove (null (cdr it)))
-           (--reduce-from (org-sql--extract-ts acc it headline fp) acc))
-    acc))
-
 (defun org-sql--extract-hl-meta (acc headline fp)
   "Add general data from HEADLINE to accumulator ACC."
-  (let ((hl-data
-         (list
-          :file_path fp
-          :headline_offset (org-ml-get-property :begin headline)
-          :tree_path (org-sql--headline-get-path headline)
-          :headline_text (org-ml-get-property :raw-value headline)
-          :keyword (org-ml-get-property :todo-keyword headline)
-          :effort (-some-> (org-ml-headline-get-node-property "Effort" headline)
-                    (org-sql--effort-to-int))
-          :priority (-some->> (org-ml-get-property :priority headline)
-                      (byte-to-string))
-          :archived (org-ml-get-property :archivedp headline)
-          :commented (org-ml-get-property :commentedp headline)
-          :content nil)))
+  (-let* ((planning (org-ml-headline-get-planning headline))
+          ((&plist :closed :scheduled :deadline)
+          ;; TODO make this function public
+           (org-ml--get-all-properties planning))
+          (planning* (-non-nil (list closed scheduled deadline)))
+          (hl-data
+           (list
+            :file_path fp
+            :headline_offset (org-ml-get-property :begin headline)
+            :tree_path (org-sql--headline-get-path headline)
+            :headline_text (org-ml-get-property :raw-value headline)
+            :keyword (org-ml-get-property :todo-keyword headline)
+            :effort (-some->
+                        (org-ml-headline-get-node-property "Effort" headline)
+                      (org-sql--effort-to-int))
+            :scheduled_offset (-some->> scheduled (org-ml-get-property :begin))
+            :deadline_offset (-some->> deadline (org-ml-get-property :begin))
+            :closed_offset (-some->> closed (org-ml-get-property :begin))
+            :priority (-some->> (org-ml-get-property :priority headline)
+                        (byte-to-string))
+            :archived (org-ml-get-property :archivedp headline)
+            :commented (org-ml-get-property :commentedp headline)
+            :content nil)))
     (-> (org-sql--alist-put acc 'headlines hl-data)
-        (org-sql--extract-hl-contents headline fp)
-        (org-sql--extract-hl-planning headline fp))))
+        (org-sql--extract #'org-sql--extract-ts planning* headline fp)
+        (org-sql--extract-hl-contents headline fp))))
 
 (defun org-sql--extract-hl (acc headlines fp)
   "Extract data from HEADLINES and add to accumulator ACC.

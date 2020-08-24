@@ -61,6 +61,9 @@ list then join the cdr of IN with newlines."
                 :headline_text "headline"
                 :keyword nil
                 :effort nil
+                :scheduled_offset nil
+                :deadline_offset nil
+                :closed_offset nil
                 :priority nil
                 :archived nil
                 :commented nil
@@ -77,6 +80,9 @@ list then join the cdr of IN with newlines."
                 :headline_text "another headline"
                 :keyword nil
                 :effort nil
+                :scheduled_offset nil
+                :deadline_offset nil
+                :closed_offset nil
                 :priority nil
                 :archived nil
                 :commented nil
@@ -87,6 +93,9 @@ list then join the cdr of IN with newlines."
                 :headline_text "headline"
                 :keyword nil
                 :effort nil
+                :scheduled_offset nil
+                :deadline_offset nil
+                :closed_offset nil
                 :priority nil
                 :archived nil
                 :commented nil
@@ -104,6 +113,9 @@ list then join the cdr of IN with newlines."
                 :headline_text "another headline"
                 :keyword "TODO"
                 :effort 30
+                :scheduled_offset nil
+                :deadline_offset nil
+                :closed_offset nil
                 :priority "A"
                 :archived nil
                 :commented t
@@ -119,6 +131,9 @@ list then join the cdr of IN with newlines."
                 :headline_text "nested headline"
                 :keyword nil
                 :effort nil
+                :scheduled_offset nil
+                :deadline_offset nil
+                :closed_offset nil
                 :priority nil
                 :archived nil
                 :commented nil
@@ -129,6 +144,9 @@ list then join the cdr of IN with newlines."
                 :headline_text "headline"
                 :keyword nil
                 :effort nil
+                :scheduled_offset nil
+                :deadline_offset nil
+                :closed_offset nil
                 :priority nil
                 :archived nil
                 :commented nil
@@ -144,6 +162,9 @@ list then join the cdr of IN with newlines."
                 :headline_text "headline"
                 :keyword nil
                 :effort nil
+                :scheduled_offset nil
+                :deadline_offset nil
+                :closed_offset nil
                 :priority nil
                 :archived t
                 :commented nil
@@ -215,7 +236,6 @@ list then join the cdr of IN with newlines."
                  :headline_offset 1
                  :timestamp_offset 18
                  :type 'active
-                 :planning_type nil
                  :warning_type nil
                  :warning_value nil
                  :warning_unit nil
@@ -237,7 +257,6 @@ list then join the cdr of IN with newlines."
                  :headline_offset 1
                  :timestamp_offset 18
                  :type 'active
-                 :planning_type nil
                  :warning_type nil
                  :warning_value nil
                  :warning_unit nil
@@ -259,7 +278,6 @@ list then join the cdr of IN with newlines."
                  :headline_offset 1
                  :timestamp_offset 20
                  :type 'active
-                 :planning_type nil
                  :warning_type nil
                  :warning_value nil
                  :warning_unit nil
@@ -281,7 +299,6 @@ list then join the cdr of IN with newlines."
                  :headline_offset 1
                  :timestamp_offset 20
                  :type 'active
-                 :planning_type nil
                  :warning_type 'all
                  :warning_value 2
                  :warning_unit 'day
@@ -306,7 +323,6 @@ list then join the cdr of IN with newlines."
                 :headline_offset 1
                 :timestamp_offset 20
                 :type 'active
-                :planning_type nil
                 :warning_type nil
                 :warning_value nil
                 :warning_unit nil
@@ -524,7 +540,6 @@ list then join the cdr of IN with newlines."
                  :headline_offset 1
                  :timestamp_offset 40
                  :type 'inactive
-                 :planning_type nil
                  :warning_type nil
                  :warning_value nil
                  :warning_unit nil
@@ -564,7 +579,6 @@ list then join the cdr of IN with newlines."
                  :headline_offset 1
                  :timestamp_offset 41
                  :type 'inactive
-                 :planning_type nil
                  :warning_type nil
                  :warning_value nil
                  :warning_unit nil
@@ -604,7 +618,6 @@ list then join the cdr of IN with newlines."
                  :headline_offset 1
                  :timestamp_offset 42
                  :type 'inactive
-                 :planning_type nil
                  :warning_type nil
                  :warning_value nil
                  :warning_unit nil
@@ -644,7 +657,6 @@ list then join the cdr of IN with newlines."
                  :headline_offset 1
                  :timestamp_offset 45
                  :type 'inactive
-                 :planning_type nil
                  :warning_type nil
                  :warning_value nil
                  :warning_unit nil
