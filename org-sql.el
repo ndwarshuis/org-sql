@@ -68,7 +68,7 @@ to store them. This is in addition to any properties specifified by
       (:time_created :type integer)
       (:time_accessed :type integer))
      (constraints
-      (primary (:file_path asc))))
+      (primary :keys (:file_path asc))))
 
     (headlines
      (columns
@@ -86,7 +86,7 @@ to store them. This is in addition to any properties specifified by
       (:commented :type boolean)
       (:content :type text))
      (constraints
-      (primary (:file_path asc :headline_offset asc))
+      (primary :keys (:file_path asc :headline_offset asc))
       (foreign :ref files
                :keys (:file_path)
                :parent_keys (:file_path)
@@ -100,7 +100,7 @@ to store them. This is in addition to any properties specifified by
       (:tag :type text)
       (:inherited :type boolean))
      (constraints
-      (primary (:file_path nil :headline_offset nil :tag nil :inherited nil))
+      (primary :keys (:file_path nil :headline_offset nil :tag nil :inherited nil))
       (foreign :ref headlines
                :keys (:file_path :headline_offset)
                :parent_keys (:file_path :headline_offset)
@@ -116,7 +116,7 @@ to store them. This is in addition to any properties specifified by
       (:val_text :type text :constraints (notnull))
       (:inherited :type boolean))
      (constraints
-      (primary (:file_path asc :property_offset asc))
+      (primary :keys (:file_path asc :property_offset asc))
       (foreign :ref headlines
                :keys (:file_path :headline_offset)
                :parent_keys (:file_path :headline_offset)
@@ -132,7 +132,7 @@ to store them. This is in addition to any properties specifified by
       (:time_end :type integer)
       (:clock_note :type text))
      (constraints
-      (primary (:file_path asc :clock_offset asc))
+      (primary :keys (:file_path asc :clock_offset asc))
       (foreign :ref headlines
                :keys (:file_path :headline_offset)
                :parent_keys (:file_path :headline_offset)
@@ -149,7 +149,7 @@ to store them. This is in addition to any properties specifified by
       (:header :type text)
       (:note :type text))
      (constraints
-      (primary (:file_path asc :entry_offset asc))
+      (primary :keys (:file_path asc :entry_offset asc))
       (foreign :ref headlines
                :keys (:file_path :headline_offset)
                :parent_keys (:file_path :headline_offset)
@@ -163,7 +163,7 @@ to store them. This is in addition to any properties specifified by
       (:state_old :type text :constraints (notnull))
       (:state_new :type text :constraints (notnull)))
      (constraints
-      (primary (:file_path asc :entry_offset asc))
+      (primary :keys (:file_path asc :entry_offset asc))
       (foreign :ref logbook
                :keys (:file_path :entry_offset)
                :parent_keys (:file_path :entry_offset)
@@ -176,7 +176,7 @@ to store them. This is in addition to any properties specifified by
       (:entry_offset :type integer)
       (:timestamp_offset :type integer :constraints (notnull)))
      (constraints
-      (primary (:file_path asc :entry_offset asc))
+      (primary :keys (:file_path asc :entry_offset asc))
       (foreign :ref timestamp
                :keys (:file_path :timestamp_offset)
                :parent_keys (:file_path :timestamp_offset)
@@ -197,7 +197,7 @@ to store them. This is in addition to any properties specifified by
       (:link_text :type text)
       (:link_type :type text))
      (constraints
-      (primary (:file_path asc :link_offset asc))
+      (primary :keys (:file_path asc :link_offset asc))
       (foreign :ref headlines
                :keys (:file_path :headline_offset)
                :parent_keys (:file_path :headline_offset)
@@ -222,7 +222,7 @@ to store them. This is in addition to any properties specifified by
       (:resolution :type text)
       (:resolution_end :type text))
      (constraints
-      (primary (:file_path asc :clock_offset asc))
+      (primary :keys (:file_path asc :clock_offset asc))
       (foreign :ref headlines
                :keys (:file_path :headline_offset)
                :parent_keys (:file_path :headline_offset)
