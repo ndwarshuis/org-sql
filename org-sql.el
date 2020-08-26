@@ -168,13 +168,13 @@ or 'inactive-range'. To include none set to nil."
   :group 'org-sql)
 
 (defcustom org-sql-included-logbook-types
-  '(done state note reschedule delschedule redeadline deldeadline
-         refile)
+  '(clock done state note reschedule delschedule redeadline deldeadline refile)
   "List of logbook entry types to include in the database.
 List members are any of the keys from `org-log-note-headings' with the
 exception of 'clock-out' as these are treated as clock-notes (see
 `org-sql-store-clock-notes'). To include none set to nil."
   :type '(set :tag "List of types to include"
+              (const :tag "Clocks" clock)
               (const :tag "Closing notes" done)
               (const :tag "State changes" state)
               (const :tag "Notes taken" note)
@@ -185,10 +185,10 @@ exception of 'clock-out' as these are treated as clock-notes (see
               (const :tag "Refiled tasks" refile))
   :group 'org-sql)
 
-(defcustom org-sql-store-clocks t
-  "Set to t to store clocks in the database."
-  :type 'boolean
-  :group 'org-sql)
+;; (defcustom org-sql-store-clocks t
+;;   "Set to t to store clocks in the database."
+;;   :type 'boolean
+;;   :group 'org-sql)
 
 (defcustom org-sql-store-clock-notes t
   "Set to t to store clock notes in the database.
@@ -781,20 +781,19 @@ and ARGS. FUN adds OBJ to ACC and returns new ACC."
 
 (defun org-sql--extract-lb-clock (acc entry headline fp)
   "Add data from logbook CLOCK to accumulator ACC."
-  (if (not org-sql-store-clocks) acc
-    (-let* (((&plist :offset :note-text) (cdr entry))
-            ((&plist :state-old start :state-new end) (cdr entry))
-           (clock-data
-            (list :file_path fp
-                  :headline_offset (org-element-property :begin headline)
-                  :clock_offset offset
-                  :time_start (-> (org-ml-timestamp-get-start-time start)
-                                  (org-ml-time-to-unixtime))
-                  :time_end (-some-> end
-                              (org-ml-timestamp-get-start-time)
-                              (org-ml-time-to-unixtime))
-                  :clock_note (when org-sql-store-clock-notes note-text))))
-      (org-sql--alist-put acc 'clocking clock-data))))
+  (-let* (((&plist :offset :note-text) (cdr entry))
+          ((&plist :state-old start :state-new end) (cdr entry))
+          (clock-data
+           (list :file_path fp
+                 :headline_offset (org-element-property :begin headline)
+                 :clock_offset offset
+                 :time_start (-> (org-ml-timestamp-get-start-time start)
+                                 (org-ml-time-to-unixtime))
+                 :time_end (-some-> end
+                             (org-ml-timestamp-get-start-time)
+                             (org-ml-time-to-unixtime))
+                 :clock_note (when org-sql-store-clock-notes note-text))))
+    (org-sql--alist-put acc 'clocking clock-data)))
 
 (defun org-sql--extract-lb-item (acc entry headline fp)
   "Add general logbook ENTRY to ACC."
@@ -841,10 +840,7 @@ and ARGS. FUN adds OBJ to ACC and returns new ACC."
       ((extract-entry
         (acc entry)
         (let ((entry-type (car entry)))
-          ;; TODO add clock to default logbook entries
-          (if (not (or (eq entry-type 'clock)
-                       (memq entry-type org-sql-included-logbook-types)))
-              acc
+          (if (not (memq entry-type org-sql-included-logbook-types)) acc
             (cl-case entry-type
               ((redeadline deldeadline reschedule delschedule)
                (org-sql--extract-lb-planning-change acc entry headline fp))
