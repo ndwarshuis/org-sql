@@ -58,6 +58,7 @@ to store them. This is in addition to any properties specifified by
 `nd/org-sql-ignored-properties'.")
 
 ;; TODO this assumes that columns b/t foreign keys and refs are the same name
+;; TODO add compile check to make sure the columns in the constraints exist
 (defconst org-sql--metaschema
   '((files
      (columns
@@ -222,13 +223,87 @@ to store them. This is in addition to any properties specifified by
       (:resolution :type text)
       (:resolution_end :type text))
      (constraints
-      (primary :keys (:file_path asc :clock_offset asc))
+      (primary :keys (:file_path asc :timestamp_offset asc))
       (foreign :ref headlines
                :keys (:file_path :headline_offset)
                :parent_keys (:file_path :headline_offset)
                :on_delete cascade
                :on_update cascade))))
   "Internal schema representation as a pure symbolic list.")
+
+(defun org-sql--meta-format-column-constraints (constraints-meta)
+  (cl-flet
+      ((format-constraint
+        (constraint)
+        (pcase constraint
+          ('notnull "NOT NULL")
+          ('unique "UNIQUE")
+          ;; TODO add CHECK?
+          ;; TODO add PRIMARY KEY?
+          (e (error "Unknown constraint %s" e)))))
+    (->> constraints-meta
+         (-map #'format-constraint)
+         (s-join " "))))
+
+(defun org-sql--meta-format-columns (columns-meta)
+  (cl-flet
+      ((format-column
+        (column-meta)
+        (-let* (((name . meta) column-meta)
+                (name* (org-sql--kw-to-colname name))
+                ((&plist :type :constraints) meta)
+                (type* (upcase (symbol-name type)))
+                (column-str (format "%s %s" name* type*)))
+          (if (not constraints) column-str
+            (->> (org-sql--meta-format-column-constraints constraints)
+                 (format "%s %s" column-str))))))
+    (-map #'format-column columns-meta)))
+
+(defun org-sql--meta-format-table-constraints (constraints-meta)
+  (cl-labels
+      ((format-primary
+        (meta)
+        (-let* (((&plist :keys) meta))
+          (->> (-partition 2 keys)
+               (--map (let ((n (org-sql--kw-to-colname (car it)))
+                            (s (-some-> (cadr it) (symbol-name) (upcase))))
+                        (if s (format "%s %s" n s) n)))
+               (s-join ",")
+               (format "PRIMARY KEY (%s)"))))
+       (format-foreign
+        (meta)
+        (-let* (((&plist :ref :keys :parent_keys :on_delete :on_update) meta)
+                (keys* (->> keys (-map #'org-sql--kw-to-colname) (s-join ",")))
+                (parent-keys* (->> parent_keys
+                                   (-map #'org-sql--kw-to-colname)
+                                   (s-join ",")))
+                (foreign-str (format "FOREIGN KEY (%s) REFERENCES %s (%s)"
+                                     keys* ref parent-keys*))
+                (on-delete* (-some->> on_delete
+                              (symbol-name)
+                              (upcase)
+                              (format "ON DELETE %s")))
+                (on-update* (-some->> on_update
+                              (symbol-name)
+                              (upcase)
+                              (format "ON UPDATE %s"))))
+          (->> (list foreign-str on-delete* on-update*)
+               (-non-nil)
+               (s-join " "))))
+       (format-constraint
+        (constraint)
+        (pcase constraint
+          (`(primary . ,meta) (format-primary meta))
+          (`(foreign . ,meta) (format-foreign meta)))))
+    (-map #'format-constraint constraints-meta)))
+
+(defun org-sql--meta-create-table (tbl-meta)
+  (-let* (((tbl-name . meta) tbl-meta)
+          ((&alist 'columns 'constraints) meta)
+          (column-str (->> (org-sql--meta-format-table-constraints constraints)
+                           (append (org-sql--meta-format-columns columns))
+                           (s-join ","))))
+    (format "CREATE TABLE %s (%s);" tbl-name column-str)))
 
 ;; TODO, make a formating function to convert a lisp obj to schema
 (defconst org-sql--schemas
