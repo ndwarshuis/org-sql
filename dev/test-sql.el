@@ -43,6 +43,33 @@ list then join the cdr of IN with newlines."
   `(expect-sql* ,in ,tbl (->> (org-sql--extract-buffer nil testing-filepath)
                               (--filter (member (car it) ',names)))))
 
+(describe "SQLite formatting spec"
+  (it "string conversion (symbol)"
+    (expect (org-sql--to-string 'foo) :to-equal "'foo'"))
+
+  (it "string conversion (string)"
+    (expect (org-sql--to-string "foo") :to-equal "'foo'"))
+
+  (it "string conversion (number)"
+    (expect (org-sql--to-string 1) :to-equal "1"))
+
+  (it "string conversion (keyword)"
+    (expect (org-sql--to-string :foo) :to-equal "foo"))
+
+  (it "string conversion (string w/ quotes)"
+    (expect (org-sql--to-string "'foo'") :to-equal "'''foo'''"))
+
+  (it "string conversion (string w/ newlines)"
+    (expect (org-sql--to-string "foo\nbar") :to-equal "'foo'||char(10)||'bar'"))
+
+  (it "concat plist"
+    (expect (org-sql--plist-concat '(:one 1 :two "2" :three :thrice))
+            :to-equal "one=1,two='2',three=thrice"))
+
+  (it "format insert"
+    (expect (org-sql--fmt-insert 'nombre '(:one 1 :two "2"))
+            :to-equal "insert into nombre (one,two) values (1,'2');")))
+
 (describe "SQL metalangage spec"
   (before-all
     (org-mode))
