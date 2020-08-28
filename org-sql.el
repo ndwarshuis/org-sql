@@ -59,177 +59,178 @@ to store them. This is in addition to any properties specifified by
 
 ;; TODO this assumes that columns b/t foreign keys and refs are the same name
 ;; TODO add compile check to make sure the columns in the constraints exist
-(defconst org-sql--metaschema
-  '((files
-     (columns
-      (:file_path :type text)
-      (:md5 :type text :constraints (notnull))
-      (:size :type integer :constraints (notnull)))
-      ;; (:time_modified :type integer)
-      ;; (:time_created :type integer)
-      ;; (:time_accessed :type integer))
-     (constraints
-      (primary :keys (:file_path asc))))
+(eval-and-compile
+  (defconst org-sql--metaschema
+    '((files
+       (columns
+        (:file_path :type text)
+        (:md5 :type text :constraints (notnull))
+        (:size :type integer :constraints (notnull)))
+       ;; (:time_modified :type integer)
+       ;; (:time_created :type integer)
+       ;; (:time_accessed :type integer))
+       (constraints
+        (primary :keys (:file_path asc))))
 
-    (headlines
-     (columns
-      (:file_path :type text)
-      (:headline_offset :type integer)
-      (:tree_path :type text)
-      (:headline_text :type text :constraints (notnull))
-      (:keyword :type text)
-      (:effort :type integer)
-      (:scheduled_offset :type integer)
-      (:deadline_offset :type integer)
-      (:closed_offset :type integer)
-      (:priority :type char)
-      (:archived :type boolean)
-      (:commented :type boolean)
-      (:content :type text))
-     (constraints
-      (primary :keys (:file_path asc :headline_offset asc))
-      (foreign :ref files
-               :keys (:file_path)
-               :parent_keys (:file_path)
-               :on_delete cascade
-               :on_update cascade)))
+      (headlines
+       (columns
+        (:file_path :type text)
+        (:headline_offset :type integer)
+        (:tree_path :type text)
+        (:headline_text :type text :constraints (notnull))
+        (:keyword :type text)
+        (:effort :type integer)
+        (:scheduled_offset :type integer)
+        (:deadline_offset :type integer)
+        (:closed_offset :type integer)
+        (:priority :type char)
+        (:archived :type boolean)
+        (:commented :type boolean)
+        (:content :type text))
+       (constraints
+        (primary :keys (:file_path asc :headline_offset asc))
+        (foreign :ref files
+                 :keys (:file_path)
+                 :parent_keys (:file_path)
+                 :on_delete cascade
+                 :on_update cascade)))
 
-    (tags
-     (columns
-      (:file_path :type text)
-      (:headline_offset :type integer)
-      (:tag :type text)
-      (:inherited :type boolean))
-     (constraints
-      (primary :keys (:file_path nil :headline_offset nil :tag nil :inherited nil))
-      (foreign :ref headlines
-               :keys (:file_path :headline_offset)
-               :parent_keys (:file_path :headline_offset)
-               :on_delete cascade
-               :on_update cascade)))
+      (tags
+       (columns
+        (:file_path :type text)
+        (:headline_offset :type integer)
+        (:tag :type text)
+        (:inherited :type boolean))
+       (constraints
+        (primary :keys (:file_path nil :headline_offset nil :tag nil :inherited nil))
+        (foreign :ref headlines
+                 :keys (:file_path :headline_offset)
+                 :parent_keys (:file_path :headline_offset)
+                 :on_delete cascade
+                 :on_update cascade)))
 
-    (properties
-     (columns
-      (:file_path :type text)
-      (:headline_offset :type integer)
-      (:property_offset :type integer)
-      (:key_text :type text :constraints (notnull))
-      (:val_text :type text :constraints (notnull))
-      (:inherited :type boolean))
-     (constraints
-      (primary :keys (:file_path asc :property_offset asc))
-      (foreign :ref headlines
-               :keys (:file_path :headline_offset)
-               :parent_keys (:file_path :headline_offset)
-               :on_delete cascade
-               :on_update cascade)))
+      (properties
+       (columns
+        (:file_path :type text)
+        (:headline_offset :type integer)
+        (:property_offset :type integer)
+        (:key_text :type text :constraints (notnull))
+        (:val_text :type text :constraints (notnull))
+        (:inherited :type boolean))
+       (constraints
+        (primary :keys (:file_path asc :property_offset asc))
+        (foreign :ref headlines
+                 :keys (:file_path :headline_offset)
+                 :parent_keys (:file_path :headline_offset)
+                 :on_delete cascade
+                 :on_update cascade)))
 
-    (clocking
-     (columns
-      (:file_path :type text)
-      (:headline_offset :type integer)
-      (:clock_offset :type integer)
-      (:time_start :type integer)
-      (:time_end :type integer)
-      (:clock_note :type text))
-     (constraints
-      (primary :keys (:file_path asc :clock_offset asc))
-      (foreign :ref headlines
-               :keys (:file_path :headline_offset)
-               :parent_keys (:file_path :headline_offset)
-               :on_delete cascade
-               :on_update cascade)))
+      (clocking
+       (columns
+        (:file_path :type text)
+        (:headline_offset :type integer)
+        (:clock_offset :type integer)
+        (:time_start :type integer)
+        (:time_end :type integer)
+        (:clock_note :type text))
+       (constraints
+        (primary :keys (:file_path asc :clock_offset asc))
+        (foreign :ref headlines
+                 :keys (:file_path :headline_offset)
+                 :parent_keys (:file_path :headline_offset)
+                 :on_delete cascade
+                 :on_update cascade)))
 
-    (logbook
-     (columns
-      (:file_path :type text)
-      (:headline_offset :type integer)
-      (:entry_offset :type integer)
-      (:entry_type :type text)
-      (:time_logged :type integer)
-      (:header :type text)
-      (:note :type text))
-     (constraints
-      (primary :keys (:file_path asc :entry_offset asc))
-      (foreign :ref headlines
-               :keys (:file_path :headline_offset)
-               :parent_keys (:file_path :headline_offset)
-               :on_delete cascade
-               :on_update cascade)))
+      (logbook
+       (columns
+        (:file_path :type text)
+        (:headline_offset :type integer)
+        (:entry_offset :type integer)
+        (:entry_type :type text)
+        (:time_logged :type integer)
+        (:header :type text)
+        (:note :type text))
+       (constraints
+        (primary :keys (:file_path asc :entry_offset asc))
+        (foreign :ref headlines
+                 :keys (:file_path :headline_offset)
+                 :parent_keys (:file_path :headline_offset)
+                 :on_delete cascade
+                 :on_update cascade)))
 
-    (state_changes
-     (columns
-      (:file_path :type text)
-      (:entry_offset :type integer)
-      (:state_old :type text :constraints (notnull))
-      (:state_new :type text :constraints (notnull)))
-     (constraints
-      (primary :keys (:file_path asc :entry_offset asc))
-      (foreign :ref logbook
-               :keys (:file_path :entry_offset)
-               :parent_keys (:file_path :entry_offset)
-               :on_delete cascade
-               :on_update cascade)))
+      (state_changes
+       (columns
+        (:file_path :type text)
+        (:entry_offset :type integer)
+        (:state_old :type text :constraints (notnull))
+        (:state_new :type text :constraints (notnull)))
+       (constraints
+        (primary :keys (:file_path asc :entry_offset asc))
+        (foreign :ref logbook
+                 :keys (:file_path :entry_offset)
+                 :parent_keys (:file_path :entry_offset)
+                 :on_delete cascade
+                 :on_update cascade)))
 
-    (planning_changes
-     (columns
-      (:file_path :type text)
-      (:entry_offset :type integer)
-      (:timestamp_offset :type integer :constraints (notnull)))
-     (constraints
-      (primary :keys (:file_path asc :entry_offset asc))
-      (foreign :ref timestamp
-               :keys (:file_path :timestamp_offset)
-               :parent_keys (:file_path :timestamp_offset)
-               :on_delete cascade
-               :on_update cascade)
-      (foreign :ref logbook
-               :keys (:file_path :entry_offset)
-               :parent_keys (:file_path :entry_offset)
-               :on_delete cascade
-               :on_update cascade)))
+      (planning_changes
+       (columns
+        (:file_path :type text)
+        (:entry_offset :type integer)
+        (:timestamp_offset :type integer :constraints (notnull)))
+       (constraints
+        (primary :keys (:file_path asc :entry_offset asc))
+        (foreign :ref timestamp
+                 :keys (:file_path :timestamp_offset)
+                 :parent_keys (:file_path :timestamp_offset)
+                 :on_delete cascade
+                 :on_update cascade)
+        (foreign :ref logbook
+                 :keys (:file_path :entry_offset)
+                 :parent_keys (:file_path :entry_offset)
+                 :on_delete cascade
+                 :on_update cascade)))
 
-    (links
-     (columns
-      (:file_path :type text)
-      (:headline_offset :type integer)
-      (:link_offset :type integer)
-      (:link_path :type text)
-      (:link_text :type text)
-      (:link_type :type text))
-     (constraints
-      (primary :keys (:file_path asc :link_offset asc))
-      (foreign :ref headlines
-               :keys (:file_path :headline_offset)
-               :parent_keys (:file_path :headline_offset)
-               :on_delete cascade
-               :on_update cascade)))
+      (links
+       (columns
+        (:file_path :type text)
+        (:headline_offset :type integer)
+        (:link_offset :type integer)
+        (:link_path :type text)
+        (:link_text :type text)
+        (:link_type :type text))
+       (constraints
+        (primary :keys (:file_path asc :link_offset asc))
+        (foreign :ref headlines
+                 :keys (:file_path :headline_offset)
+                 :parent_keys (:file_path :headline_offset)
+                 :on_delete cascade
+                 :on_update cascade)))
 
-    (timestamp
-     (columns
-      (:file_path :type text)
-      (:headline_offset :type integer)
-      (:timestamp_offset :type integer)
-      (:raw_value :type text :constraints (notnull))
-      (:type :type text)
-      (:warning_type :type text)
-      (:warning_value :type integer)
-      (:warning_unit :type text)
-      (:repeat_type :type text)
-      (:repeat_value :type integer)
-      (:repeat_unit :type text)
-      (:time :type integer :constraints (notnull))
-      (:time_end :type integer)
-      (:resolution :type text)
-      (:resolution_end :type text))
-     (constraints
-      (primary :keys (:file_path asc :timestamp_offset asc))
-      (foreign :ref headlines
-               :keys (:file_path :headline_offset)
-               :parent_keys (:file_path :headline_offset)
-               :on_delete cascade
-               :on_update cascade))))
-  "Internal schema representation as a pure symbolic list.")
+      (timestamp
+       (columns
+        (:file_path :type text)
+        (:headline_offset :type integer)
+        (:timestamp_offset :type integer)
+        (:raw_value :type text :constraints (notnull))
+        (:type :type text)
+        (:warning_type :type text)
+        (:warning_value :type integer)
+        (:warning_unit :type text)
+        (:repeat_type :type text)
+        (:repeat_value :type integer)
+        (:repeat_unit :type text)
+        (:time :type integer :constraints (notnull))
+        (:time_end :type integer)
+        (:resolution :type text)
+        (:resolution_end :type text))
+       (constraints
+        (primary :keys (:file_path asc :timestamp_offset asc))
+        (foreign :ref headlines
+                 :keys (:file_path :headline_offset)
+                 :parent_keys (:file_path :headline_offset)
+                 :on_delete cascade
+                 :on_update cascade))))
+    "Internal schema representation as a pure symbolic list."))
 
 (defun org-sql--meta-format-column-constraints (constraints-meta)
   (cl-flet
@@ -880,8 +881,8 @@ and cdr is the match data."
   "Split PARAGRAPH by first line-break node."
   (let ((children (org-ml-get-children paragraph)))
     (-if-let (lb-index (--find-index (org-ml-is-type 'line-break it) children))
-        (-let* (((head _rest) (-split-at lb-index children))
-                ((break . rest) _rest)
+        (-let* (((head rest*) (-split-at lb-index children))
+                ((break . rest) rest*)
                 ;; assume begin/end should be the same as contents-begin/end
                 (parent (org-ml-get-property :parent (-first-item head)))
                 (b1 (org-ml-get-property :begin parent))
@@ -915,7 +916,7 @@ and cdr is the match data."
   "Split the contents of ITEM by the first line break."
   (-let (((first . rest) (org-sql--item-get-contents item)))
     (when first
-      (if (not (org-ml-is-type 'paragraph first)) (cons nil contents)
+      (if (not (org-ml-is-type 'paragraph first)) (cons nil rest)
         (-let (((p0 . p1) (org-sql--split-paragraph first)))
           (if (not p0) `(,p1 . ,rest) `(,p0 . (,p1 . ,rest))))))))
 
@@ -961,27 +962,27 @@ and cdr is the match data."
 (defun org-sql--flatten-lb-entries (children)
   "Return logbook drawer CHILDREN as flattened list."
   (cl-labels
-       ((add-node
-         (clock-plist note)
-         (cons (car clock-entry) (plist-put :note note (cdr clock-entry))))
-        (merge-clock-notes
-         (acc next)
-         ;; if next node to add is a clock, partition and add it
-         (if (org-ml-is-type 'clock next)
-             (cons (org-sql--partition-clock next) acc)
-           ;; else assume next node is a plain-list, partition its items
-           (let* ((item-entries (->> (org-ml-get-children next)
-                                     (-map #'org-sql--partition-item)))
-                  (first-entry (car item-entries))
-                  (other-entries (cdr item-entries))
-                  (last (car acc)))
-             ;; if the top item doesn't have a type, assume it is a clock note
-             (if (and (eq (car last) 'clock) (eq (car first-entry) 'none))
-                 (->> (cdr acc)
-                      (cons (add-note last first-entry))
-                      (append (reverse other-entries)))
-               ;; else just append all the partitioned items
-               (append (reverse item-entries) acc))))))
+      ((add-note
+        (clock-entry note)
+        (cons (car clock-entry) (plist-put :note note (cdr clock-entry))))
+       (merge-clock-notes
+        (acc next)
+        ;; if next node to add is a clock, partition and add it
+        (if (org-ml-is-type 'clock next)
+            (cons (org-sql--partition-clock next) acc)
+          ;; else assume next node is a plain-list, partition its items
+          (let* ((item-entries (->> (org-ml-get-children next)
+                                    (-map #'org-sql--partition-item)))
+                 (first-entry (car item-entries))
+                 (other-entries (cdr item-entries))
+                 (last (car acc)))
+            ;; if the top item doesn't have a type, assume it is a clock note
+            (if (and (eq (car last) 'clock) (eq (car first-entry) 'none))
+                (->> (cdr acc)
+                     (cons (add-note last first-entry))
+                     (append (reverse other-entries)))
+              ;; else just append all the partitioned items
+              (append (reverse item-entries) acc))))))
     (->> (--filter (org-ml-is-any-type '(clock plain-list) it) children)
          (-reduce-from #'merge-clock-notes nil)
          (reverse))))
