@@ -64,10 +64,10 @@ to store them. This is in addition to any properties specifified by
      (columns
       (:file_path :type text)
       (:md5 :type text :constraints (notnull))
-      (:size :type integer :constraints (notnull))
-      (:time_modified :type integer)
-      (:time_created :type integer)
-      (:time_accessed :type integer))
+      (:size :type integer :constraints (notnull)))
+      ;; (:time_modified :type integer)
+      ;; (:time_created :type integer)
+      ;; (:time_accessed :type integer))
      (constraints
       (primary :keys (:file_path asc))))
 
@@ -1021,6 +1021,23 @@ If PROP does not exist, create it. Return the new alist."
        (t
         `((,prop ,value))))))
 
+(defmacro org-sql--cons (acc tbl-name &rest plist)
+  "Add line to ACC under TBL-NAME for PLIST."
+  (declare (indent 2))
+  (let ((valid-keys (->> org-sql--metaschema
+                         (alist-get tbl-name)
+                         (alist-get 'columns)
+                         (-map #'car)))
+        (input-keys (->> (-partition 2 plist)
+                         (-map #'car))))
+    (unless valid-keys (error "Invalid table name: %s" tbl-name))
+    (-some->> (-difference valid-keys input-keys)
+      (error "Keys not given for table %s: %s" tbl-name))
+    (-some->> (-difference input-keys valid-keys)
+      (error "Keys not valid for table %s: %s" tbl-name))
+    ;; TODO this can literally just be cons instead of this wacky alist function
+    `(org-sql--alist-put ,acc ',tbl-name (list ,@plist))))
+
 (defun org-sql--extract (acc fun objs &rest args)
   "Iterate through OBJS and add them to accumulator ACC with FUN.
 FUN is a function that takes a single object from OBJS, the accumulator,
@@ -1028,62 +1045,56 @@ and ARGS. FUN adds OBJ to ACC and returns new ACC."
   (--reduce-from (apply fun acc it args) acc objs))
 
 (defun org-sql--extract-lb-clock (acc entry headline fp)
-  "Add data from logbook CLOCK to accumulator ACC."
-  (-let* (((&plist :offset :note-text) (cdr entry))
-          ((&plist :state-old start :state-new end) (cdr entry))
-          (clock-data
-           (list :file_path fp
-                 :headline_offset (org-element-property :begin headline)
-                 :clock_offset offset
-                 :time_start (-> (org-ml-timestamp-get-start-time start)
-                                 (org-ml-time-to-unixtime))
-                 :time_end (-some-> end
-                             (org-ml-timestamp-get-start-time)
-                             (org-ml-time-to-unixtime))
-                 :clock_note (when org-sql-store-clock-notes note-text))))
-    (org-sql--alist-put acc 'clocking clock-data)))
+  "Add data from logbook clock ENTRY to accumulator ACC."
+  (-let (((&plist :offset :note-text) (cdr entry))
+         ((&plist :state-old start :state-new end) (cdr entry)))
+    (org-sql--cons acc clocking
+      :file_path fp
+      :headline_offset (org-element-property :begin headline)
+      :clock_offset offset
+      :time_start (-> (org-ml-timestamp-get-start-time start)
+                      (org-ml-time-to-unixtime))
+      :time_end (-some-> end
+                  (org-ml-timestamp-get-start-time)
+                  (org-ml-time-to-unixtime))
+      :clock_note (when org-sql-store-clock-notes note-text))))
 
 (defun org-sql--extract-lb-item (acc entry headline fp)
   "Add general logbook ENTRY to ACC."
   (-let* (((entry-type . entry-plist) entry)
-          ((&plist :offset :header-text :note-text) entry-plist)
-          (logbook-data
-           (list :file_path fp
-                 :headline_offset (org-ml-get-property :begin headline)
-                 :entry_offset offset
-                 :entry_type entry-type
-                 :time_logged (-some->> (org-sql--get-header-timestamp entry :ts)
-                                (org-ml-timestamp-get-start-time)
-                                (org-ml-time-to-unixtime))
-                 :header header-text
-                 :note note-text)))
-    (org-sql--alist-put acc 'logbook logbook-data)))
+          ((&plist :offset :header-text :note-text) entry-plist))
+    (org-sql--cons acc logbook
+      :file_path fp
+      :headline_offset (org-ml-get-property :begin headline)
+      :entry_offset offset
+      :entry_type entry-type
+      :time_logged (-some->> (org-sql--get-header-timestamp entry :ts)
+                     (org-ml-timestamp-get-start-time)
+                     (org-ml-time-to-unixtime))
+      :header header-text
+      :note note-text)))
 
 (defun org-sql--extract-lb-state-change (acc entry headline fp)
-  "Add data from state-change logbook entry to accumulator ACC."
-  (-let* (((&plist :offset) (cdr entry))
-          (state-data
-           (list :file_path fp
-                 :entry_offset offset
-                 :state_old (org-sql--get-header-substring entry :old-state)
-                 :state_new (org-sql--get-header-substring entry :new-state))))
-    (-> (org-sql--extract-lb-item acc entry headline fp)
-        (org-sql--alist-put 'state_changes state-data))))
+  "Add data from state-change logbook ENTRY to accumulator ACC."
+  (-> (org-sql--extract-lb-item acc entry headline fp)
+      (org-sql--cons state_changes
+          :file_path fp
+          :entry_offset (plist-get (cdr entry) :offset)
+          :state_old (org-sql--get-header-substring entry :old-state)
+          :state_new (org-sql--get-header-substring entry :new-state))))
 
 (defun org-sql--extract-lb-planning-change (acc entry headline fp)
-  "Add data from planning-change logbook entry to accumulator ACC."
-  (-let* (((&plist :offset) (cdr entry))
-          (ts (org-sql--get-header-timestamp entry :old-state))
-          (planning-data
-           (list :file_path fp
-                 :entry_offset offset
-                 :timestamp_offset (org-ml-get-property :begin ts))))
+  "Add data from planning-change logbook ENTRY to accumulator ACC."
+  (let ((ts (org-sql--get-header-timestamp entry :old-state)))
     (-> (org-sql--extract-lb-item acc entry headline fp)
-        (org-sql--alist-put 'planning_changes planning-data)
+        (org-sql--cons planning_changes
+            :file_path fp
+            :entry_offset (plist-get (cdr entry) :offset)
+            :timestamp_offset (org-ml-get-property :begin ts))
         (org-sql--extract-ts ts headline fp))))
          
 (defun org-sql--extract-logbook (acc headline fp)
-  "Given HL-PART, find logbook drawer and add to accumulator ACC."
+  "Given HEADLINE, find logbook drawer and add to accumulator ACC."
   (cl-flet
       ((extract-entry
         (acc entry)
@@ -1103,7 +1114,7 @@ and ARGS. FUN adds OBJ to ACC and returns new ACC."
          (-reduce-from #'extract-entry acc))))
 
 (defun org-sql--extract-properties (acc headline fp)
-  "Add properties data from HL-PART and add to accumulator ACC."
+  "Add properties data from HEADLINE to accumulator ACC."
   (if (eq 'all org-sql-ignored-properties) acc
     (let ((node-props
            (->> (org-ml-headline-get-node-properties headline)
@@ -1113,14 +1124,14 @@ and ARGS. FUN adds OBJ to ACC and returns new ACC."
       (cl-flet
           ((from
             (acc np)
-            (->> (list :file_path fp
-                       :headline_offset (org-ml-get-property :begin headline)
-                       :property_offset (org-ml-get-property :begin np)
-                       :key_text (org-ml-get-property :key np)
-                       :val_text (org-ml-get-property :value np)
-                       ;; TODO add inherited flag
-                       :inherited nil)
-                 (org-sql--alist-put acc 'properties))))
+            (org-sql--cons acc properties
+              :file_path fp
+              :headline_offset (org-ml-get-property :begin headline)
+              :property_offset (org-ml-get-property :begin np)
+              :key_text (org-ml-get-property :key np)
+              :val_text (org-ml-get-property :value np)
+              ;; TODO add inherited flag
+              :inherited nil)))
         (org-sql--extract acc #'from node-props)))))
 
 (defun org-sql--extract-tags (acc headline fp)
@@ -1129,11 +1140,11 @@ and ARGS. FUN adds OBJ to ACC and returns new ACC."
     (cl-flet
         ((from
           (acc tag inherited)
-          (->> (list :file_path fp
-                     :headline_offset (org-ml-get-property :begin headline)
-                     :tag tag
-                     :inherited inherited)
-               (org-sql--alist-put acc 'tags)))
+          (org-sql--cons acc tags
+            :file_path fp
+            :headline_offset (org-ml-get-property :begin headline)
+            :tag tag
+            :inherited inherited))
          (filter-ignored
           (tags)
           (-difference tags org-sql-ignored-tags)))
@@ -1154,15 +1165,15 @@ and ARGS. FUN adds OBJ to ACC and returns new ACC."
       (cl-flet
           ((from
             (acc link)
-            (->> (list :file_path fp
-                       :headline_offset (org-ml-get-property :begin headline)
-                       :link_offset (org-ml-get-property :begin link)
-                       :link_path (org-ml-get-property :path link)
-                       :link_text (->> (org-ml-get-children link)
-                                       (-map #'org-ml-to-string)
-                                       (s-join ""))
-                       :link_type (org-ml-get-property :type link))
-                 (org-sql--alist-put acc 'links))))
+            (org-sql--cons acc links
+              :file_path fp
+              :headline_offset (org-ml-get-property :begin headline)
+              :link_offset (org-ml-get-property :begin link)
+              :link_path (org-ml-get-property :path link)
+              :link_text (->> (org-ml-get-children link)
+                              (-map #'org-ml-to-string)
+                              (s-join ""))
+              :link_type (org-ml-get-property :type link))))
         (org-sql--extract acc #'from links)))))
 
 (defun org-sql--extract-ts (acc ts headline fp)
@@ -1176,25 +1187,24 @@ this function."
         ;; TODO this should be public in org-ml
         (when time
           (if (org-ml--time-is-long time) 'minute 'day))))
-    (let* ((start (org-ml-timestamp-get-start-time ts))
-           (end (org-ml-timestamp-get-end-time ts))
-           (ts-data
-            (list :file_path fp
-                  :headline_offset (org-ml-get-property :begin headline)
-                  :timestamp_offset (org-ml-get-property :begin ts)
-                  :type (if (org-ml-timestamp-is-active ts) 'active 'inactive)
-                  :warning_type (org-ml-get-property :warning-type ts)
-                  :warning_value (org-ml-get-property :warning-value ts)
-                  :warning_unit (org-ml-get-property :warning-unit ts)
-                  :repeat_type (org-ml-get-property :repeater-type ts)
-                  :repeat_value (org-ml-get-property :repeater-value ts)
-                  :repeat_unit (org-ml-get-property :repeater-unit ts)
-                  :time (org-ml-time-to-unixtime start)
-                  :resolution (get-resolution start)
-                  :time_end (-some-> end (org-ml-time-to-unixtime))
-                  :resolution_end (get-resolution end)
-                  :raw_value (org-ml-get-property :raw-value ts))))
-      (org-sql--alist-put acc 'timestamp ts-data))))
+    (let ((start (org-ml-timestamp-get-start-time ts))
+          (end (org-ml-timestamp-get-end-time ts)))
+      (org-sql--cons acc timestamp
+        :file_path fp
+        :headline_offset (org-ml-get-property :begin headline)
+        :timestamp_offset (org-ml-get-property :begin ts)
+        :type (if (org-ml-timestamp-is-active ts) 'active 'inactive)
+        :warning_type (org-ml-get-property :warning-type ts)
+        :warning_value (org-ml-get-property :warning-value ts)
+        :warning_unit (org-ml-get-property :warning-unit ts)
+        :repeat_type (org-ml-get-property :repeater-type ts)
+        :repeat_value (org-ml-get-property :repeater-value ts)
+        :repeat_unit (org-ml-get-property :repeater-unit ts)
+        :time (org-ml-time-to-unixtime start)
+        :resolution (get-resolution start)
+        :time_end (-some-> end (org-ml-time-to-unixtime))
+        :resolution_end (get-resolution end)
+        :raw_value (org-ml-get-property :raw-value ts)))))
 
 (defun org-sql--extract-hl-contents (acc headline fp)
   "Add contents from partitioned header HEADLINE to accumulator ACC."
@@ -1211,31 +1221,28 @@ this function."
 
 (defun org-sql--extract-hl-meta (acc headline fp)
   "Add general data from HEADLINE to accumulator ACC."
-  (-let* ((planning (org-ml-headline-get-planning headline))
-          ((&plist :closed :scheduled :deadline)
-          ;; TODO make this function public
-           (org-ml--get-all-properties planning))
-          (planning* (-non-nil (list scheduled deadline closed)))
-          (hl-data
-           (list
-            :file_path fp
-            :headline_offset (org-ml-get-property :begin headline)
-            :tree_path (org-sql--headline-get-path headline)
-            :headline_text (org-ml-get-property :raw-value headline)
-            :keyword (org-ml-get-property :todo-keyword headline)
-            :effort (-some->
-                        (org-ml-headline-get-node-property "Effort" headline)
-                      (org-sql--effort-to-int))
-            :scheduled_offset (-some->> scheduled (org-ml-get-property :begin))
-            :deadline_offset (-some->> deadline (org-ml-get-property :begin))
-            :closed_offset (-some->> closed (org-ml-get-property :begin))
-            :priority (-some->> (org-ml-get-property :priority headline)
-                        (byte-to-string))
-            :archived (org-ml-get-property :archivedp headline)
-            :commented (org-ml-get-property :commentedp headline)
-            :content nil)))
-    (-> (org-sql--alist-put acc 'headlines hl-data)
-        (org-sql--extract #'org-sql--extract-ts planning* headline fp)
+  (-let* (((&plist :closed :scheduled :deadline)
+           (->> (org-ml-headline-get-planning headline)
+                ;; TODO make this function public
+                (org-ml--get-all-properties)))
+          (planning-timestamps (-non-nil (list scheduled deadline closed))))
+    (-> (org-sql--cons acc headlines
+          :file_path fp
+          :headline_offset (org-ml-get-property :begin headline)
+          :tree_path (org-sql--headline-get-path headline)
+          :headline_text (org-ml-get-property :raw-value headline)
+          :keyword (org-ml-get-property :todo-keyword headline)
+          :effort (-some-> (org-ml-headline-get-node-property "Effort" headline)
+                    (org-sql--effort-to-int))
+          :scheduled_offset (-some->> scheduled (org-ml-get-property :begin))
+          :deadline_offset (-some->> deadline (org-ml-get-property :begin))
+          :closed_offset (-some->> closed (org-ml-get-property :begin))
+          :priority (-some->> (org-ml-get-property :priority headline)
+                      (byte-to-string))
+          :archived (org-ml-get-property :archivedp headline)
+          :commented (org-ml-get-property :commentedp headline)
+          :content nil)
+        (org-sql--extract #'org-sql--extract-ts planning-timestamps headline fp)
         (org-sql--extract-hl-contents headline fp))))
 
 (defun org-sql--extract-hl (acc headlines fp)
@@ -1265,11 +1272,12 @@ FP is the filepath where the buffer lives."
 The results are accumulated in ACC which is returned on exit."
   (let* ((fp (car cell))
          (md5sum (cdr cell))
-         (fsize (->> fp file-attributes file-attribute-size))
-         (file-data (list :file_path fp :md5 md5sum :size fsize)))
+         (fsize (->> fp file-attributes file-attribute-size)))
     (with-current-buffer (find-file-noselect fp t)
-      (-> acc
-          (org-sql--alist-put 'files file-data)
+      (-> (org-sql--cons acc files
+            :file_path fp
+            :md5 md5sum
+            :size fsize)
           (org-sql--extract-buffer fp)))))
 
 ;;; database syncing functions
@@ -1284,6 +1292,7 @@ The results are accumulated in ACC which is returned on exit."
   "Add update commands for CELL in accumulator ACC. Return new ACC."
   (let ((updt-acc (plist-get acc 'update)))
     (->> `((:file_path ,(car cell)) . (:md5 ,(cdr cell)))
+         ;; TODO add compile time schema validation
          (org-sql--alist-put updt-acc 'files)
          (plist-put acc 'update))))
 
@@ -1291,6 +1300,7 @@ The results are accumulated in ACC which is returned on exit."
   "Add deletion commands for CELL in accumulator ACC. Return new ACC."
   (let ((dlt-acc (plist-get acc 'delete)))
     (->>  `(:file_path ,(car cell))
+         ;; TODO add compile time schema validation
           (org-sql--alist-put dlt-acc 'files)
           (plist-put acc 'delete))))
 
