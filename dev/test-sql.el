@@ -1,8 +1,13 @@
 (require 'org-sql)
 (require 's)
+;; (require 'f)
 (require 'buttercup)
 
 ;;; Code:
+
+;; (defconst test-dir (f-dirname (f-this-file)))
+
+;; (defconst test-files (f-join test-dir "files"))
 
 (defmacro list-to-lines (in)
   "Convert IN to string.
@@ -66,9 +71,24 @@ list then join the cdr of IN with newlines."
     (expect (org-sql--plist-concat '(:one 1 :two "2" :three :thrice))
             :to-equal "one=1,two='2',three=thrice"))
 
+  ;; TODO these functions kinda suck
   (it "format insert"
     (expect (org-sql--fmt-insert 'nombre '(:one 1 :two "2"))
-            :to-equal "insert into nombre (one,two) values (1,'2');")))
+            :to-equal "insert into nombre (one,two) values (1,'2');"))
+
+  (it "format update"
+    (expect (org-sql--fmt-update 'nombre '((:one 1 :two "2") :three three))
+            :to-equal "update nombre set one=1,two='2' where three='three';"))
+
+  (it "format delete"
+    (expect (org-sql--fmt-delete 'nombre '(:three three))
+            :to-equal "delete from nombre where three='three';"))
+
+  (it "format delete all"
+    (expect (org-sql--fmt-delete 'nombre nil t)
+            :to-equal "delete from nombre;"))
+
+  )
 
 (describe "SQL metalangage spec"
   (before-all
