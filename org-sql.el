@@ -503,12 +503,13 @@ sql command string is in double quotes."
   "Convert ENTRY to a string suitable for insertion into SQLite db.
 Converts numbers to strings, flanks strings with '\"', and converts
 any other symbols to their symbol name."
-  (cond ((null s) "NULL")
-        ((stringp s) (org-sql--escape-text entry))
-        ((numberp s) (number-to-string entry))
-        ((keywordp s) (org-sql--kw-to-colname entry))
-        ((symbolp s) (-> (symbol-name s) (org-sql--escape-text)))
-        (t (error "Cannot convert to string: %s" s))))
+  (pcase s
+    (`nil "NULL")
+    ((pred stringp) (org-sql--escape-text s))
+    ((pred numberp) (number-to-string s))
+    ((pred keywordp) (org-sql--kw-to-colname s))
+    ((pred symbolp) (org-sql--escape-text (symbol-name s)))
+    (e (error "Cannot convert to string: %s" e))))
 
 ;; TODO this name is too specific
 ;; TODO this now seems redundant
@@ -552,7 +553,7 @@ to be satisfied (using and)."
 
 (defun org-sql--fmt-delete (tbl-name where)
   "Format SQL update command from TBL-NAME and WHERE."
-  (->> (org-sql--plist-concat " and " conds)
+  (->> (org-sql--plist-concat " and " where)
        (format "delete from %s where %s;" tbl-name)))
 
 (defun org-sql--fmt-delete-all (tbl-name)
