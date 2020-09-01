@@ -1,9 +1,11 @@
-(require 'org-sql)
-(require 's)
-;; (require 'f)
-(require 'buttercup)
+;;; test-sql.el --- Org-Mode SQL Tests -*- lexical-binding: t; -*-
 
 ;;; Code:
+
+(require 'org-sql)
+(require 's)
+(require 'f)
+(require 'buttercup)
 
 ;; (defconst test-dir (f-dirname (f-this-file)))
 
@@ -82,7 +84,71 @@ list then join the cdr of IN with newlines."
     (expect (org-sql--fmt-delete-all 'foo)
             :to-equal "delete from foo;"))
 
-  )
+  (it "format create table (columns only)"
+    (let* ((create "CREATE TABLE foo")
+           (columns "bar TEXT,bam INTEGER NOT NULL")
+           (test-res (format "%s (%s);" create columns))
+           (meta '(foo
+                   (columns
+                    (:bar :type text)
+                    (:bam :type integer :constraints (notnull))))))
+      (expect (org-sql--meta-create-table meta) :to-equal test-res)))
+
+  (it "format create table (primary)"
+    (let* ((create "CREATE TABLE foo")
+           (columns "bar TEXT,bam INTEGER NOT NULL")
+           (primary "PRIMARY KEY (bar ASC)")
+           (test-res (format "%s (%s,%s);" create columns primary))
+           (meta '(foo
+                   (columns
+                    (:bar :type text)
+                    (:bam :type integer :constraints (notnull)))
+                   (constraints
+                    (primary :keys (:bar ASC))))))
+      (expect (org-sql--meta-create-table meta) :to-equal test-res)))
+
+  (it "format create table (all)"
+    (let* ((create "CREATE TABLE foo")
+           (columns "bar TEXT,bam INTEGER NOT NULL")
+           (primary "PRIMARY KEY (bar ASC)")
+           (foreign "FOREIGN KEY (bam) REFERENCES fubar (BAM)")
+           (cascade "ON DELETE CASCADE ON UPDATE CASCADE")
+           (test-res (format "%s (%s,%s,%s %s);" create columns primary foreign cascade))
+           (meta '(foo
+                   (columns
+                    (:bar :type text)
+                    (:bam :type integer :constraints (notnull)))
+                   (constraints
+                    (primary :keys (:bar ASC))
+                    (foreign :ref fubar
+                             :keys (:bam)
+                             :parent_keys (:BAM)
+                             :on_delete cascade
+                             :on_update cascade)))))
+      (expect (org-sql--meta-create-table meta) :to-equal test-res))))
+
+(describe "SQLite command spec"
+  (before-each
+    (setq org-sql-sqlite-path "/tmp/org-sql-test.db")
+    (f-delete org-sql-sqlite-path t))
+
+  (after-each
+    (f-delete org-sql-sqlite-path t))
+
+  (let ((schema-cmd "CREATE TABLE FOO (foo TEXT, bar INTEGER);"))
+    (it "create SQLite db with schema"
+      (org-sql--cmd org-sql-sqlite-path schema-cmd)
+      (expect (s-trim (org-sql--cmd org-sql-sqlite-path ".schema"))
+                            :to-equal schema-cmd))
+
+    (it "add entries to SQLite db and run simple query"
+      (expect (org-sql--cmd org-sql-sqlite-path schema-cmd)
+              :to-equal "")
+      (expect (org-sql--cmd* org-sql-sqlite-path "INSERT INTO FOO (foo,bar) values ('1',2);")
+              :to-equal "")
+      (expect (s-trim (org-sql--cmd org-sql-sqlite-path "SELECT * FROM FOO;"))
+                            :to-equal "1|2"))))
+
 
 (describe "SQL metalangage spec"
   (before-all

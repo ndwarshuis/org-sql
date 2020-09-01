@@ -662,7 +662,7 @@ PRAGMA is a plist of pragma to set. This is merged with
 ;; TODO don't hardcode the exe paths or the tmp path...just to make everyone happy
 (defun org-sql--cmd (db-path sql-cmd)
   "Execute SQL-CMD using sqlite3 on database at DB-PATH."
-  (let ((cmd (format "/usr/bin/sqlite3 %s %s" db-path sql-cmd)))
+  (let ((cmd (format "/usr/bin/sqlite3 %s '%s'" db-path sql-cmd)))
     (shell-command-to-string cmd)))
 
 (defun org-sql--cmd* (db-path sql-cmd)
