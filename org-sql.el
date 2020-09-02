@@ -434,11 +434,6 @@ exception of 'clock-out' as these are treated as clock-notes (see
               (const :tag "Refiled tasks" refile))
   :group 'org-sql)
 
-;; (defcustom org-sql-store-clocks t
-;;   "Set to t to store clocks in the database."
-;;   :type 'boolean
-;;   :group 'org-sql)
-
 (defcustom org-sql-store-clock-notes t
   "Set to t to store clock notes in the database.
 Setting `org-sql-store-clocks' to nil will cause this variable to be
@@ -450,25 +445,7 @@ ignored."
   "Set to t to enable high-level debugging of SQL transactions."
   :type 'boolean)
 
-;; TODO add a debug buffer
-;; (defconst org-sql-debug-buffer "*SQL: Org-Debug*"
-;;   "Name of the SQLi buffer connected to the database.")
-
 ;;; helper functions
-
-(defmacro org-sql--with-advice (adlist &rest body)
-  "Execute BODY with temporary advice in ADLIST.
-
-Each element of ADLIST should be a list of the form
-  (SYMBOL WHERE FUNCTION [PROPS])
-suitable for passing to `advice-add'.  The BODY is wrapped in an
-`unwind-protect' form, so the advice will be removed even in the
-event of an error or nonlocal exit."
-  (declare (debug ((&rest (&rest form)) body)) (indent 1))
-  `(progn
-     ,@(--map (cons #'advice-add it) adlist)
-     (unwind-protect (progn ,@body)
-       ,@(--map `(advice-remove ,(car it) ,(nth 2 it)) adlist))))
 
 (defun org-sql--plist-get-keys (plist)
   "Return all the keys in PLIST."
@@ -567,100 +544,42 @@ to be satisfied (using and)."
                       "*")))
     (format "select %s from %s;" columns* tbl-name)))
 
-(defun org-sql--fmt-trans (sql-strs)
-  "Format SQL transactions string.
-SQL-STRS is a list of individual SQL commands to be included in the
-transaction."
-  (-some->> sql-strs
-    (s-join "")
-    ;; turn on deferred keys for all transactions
-    (format "pragma defer_foreign_keys=on;begin transaction;%scommit;")))
-
-(defun org-sql--fmt-multi (tbl fun)
-  "Format multiple SQL command strings.
-TBL is tree structure containing the data to insert and
-FUN is a function used to format the data in TBL."
-  (--map (funcall fun (car tbl) it) (cdr tbl)))
-
-(defun org-sql--fmt-inserts (tbl)
-  "Format data in TBL as SQL insert commands.
-Returns a list of formatted strings."
-  (org-sql--fmt-multi tbl #'org-sql--fmt-insert))
-
-(defun org-sql--fmt-updates (tbl)
-  "Format data in TBL as SQL update commands.
-Returns a list of formatted strings."
-  (org-sql--fmt-multi tbl #'org-sql--fmt-update))
-
-(defun org-sql--fmt-deletes (tbl)
-  "Format data in TBL as SQL delete commands.
-Returns a list of formatted strings."
-  (org-sql--fmt-multi tbl #'org-sql--fmt-delete))
+(defun org-sql--pragma-merge-default (pragma)
+  "Add PRAGMA to `org-sql--default-pragma'."
+  (if (not pragma) org-sql--default-pragma
+    (cl-flet
+        ((getv
+          (p)
+          (or (plist-get org-sql--default-pragma p)
+              (plist-get pragma p))))
+      (->> (org-sql--plist-get-keys org-sql--default-pragma)
+           (append (org-sql--plist-get-keys pragma))
+           (-uniq)
+           (--mapcat (list it (getv it)))))))
 
 (defun org-sql--fmt-pragma (plist)
   "Create a SQL statement for setting pragmas in PLIST.
 PLIST contains the pragmas as the properties and their intended
 values as the property values."
   (let ((pragmas (->> (org-sql--plist-get-keys plist)
-                      (mapcar #'org-sql--kw-to-colname))))
+                      (-map #'org-sql--kw-to-colname))))
     (->> (org-sql--plist-get-vals plist)
          (--zip-with (format "PRAGMA %s=%s;" it other) pragmas)
          (s-join ""))))
-  
+
+(defun org-sql--fmt-trans (sql-strs)
+  "Format SQL transactions string.
+SQL-STRS is a list of individual SQL commands to be included in the
+transaction."
+  ;; turn on deferred keys for all transactions
+  (let ((pragma (->> (org-sql--pragma-merge-default '(:defer_foreign_keys on))
+                     (org-sql--fmt-pragma))))
+  (-some->> sql-strs
+    (s-join "")
+    (format "begin transaction;%scommit;")
+    (concat pragma))))
+
 ;;; SQL command abstractions
-
-;; (defun org-sql-cmd-open-connection ()
-;;   "Open a new SQL connection to `org-sql-sqlite-path'.
-;; This also sets the pragma according to `org-sql--default-pragma'
-;; and `org-sql-pragma'. The process buffer is named `org-sql-buffer'."
-;;   (unless (get-buffer-process org-sql-buffer)
-;;     (org-sql--with-advice
-;;         ((#'sql-get-login :override #'ignore)
-;;          (#'pop-to-buffer :override #'ignore))
-;;       (let ((sql-database org-sql-sqlite-path))
-;;         (sql-sqlite org-sql-buffer)
-;;         (org-sql--cmd-set-pragma org-sql-pragma)))))
-
-;; (defun org-sql-cmd-kill-connection ()
-;;   "Close the SQL connections to `org-sql-sqlite-path' if it exists."
-;;   (let ((proc (get-buffer-process org-sql-buffer)))
-;;     (when proc
-;;       (set-process-query-on-exit-flag proc nil)
-;;       (kill-process proc)
-;;       (while (eq 'run (process-status proc))
-;;         (sleep-for 0 1))))
-;;   (when (get-buffer org-sql-buffer)
-;;     (kill-buffer org-sql-buffer)))
-
-(defun org-sql--pragma-merge-default (&optional pragma)
-  "Add PRAGMA to `org-sql--default-pragma'.
-PRAGMA is a plist as described in `org-sql--fmt-pragma'. Return a
-new plist with values from PRAGMA added, except for pragma already in
-`org-sql--default-pragma'."
-  (if (not pragma) org-sql--default-pragma
-    (let ((getv
-           (lambda (p)
-             (or (plist-get org-sql--default-pragma p)
-                 (plist-get pragma p)))))
-      (->>
-       org-sql--default-pragma
-       org-sql--plist-get-keys
-       (append (org-sql--plist-get-keys pragma))
-       delete-dups
-       (mapcan (lambda (p) `(,p ,(funcall getv p))))))))
-
-;; (defun org-sql--cmd-set-pragma (&optional pragma)
-;;   "Set the pragma of the running SQL connection.
-;; PRAGMA is a plist of pragma to set. This is merged with
-;; `org-sql-default-pragma' before executing in `org-sql-buffer'."
-;;   (->> pragma
-;;        org-sql--pragma-merge-default
-;;        org-sql--fmt-pragma
-;;        org-sql-cmd))
-
-;; new sql-redirect function with windows prompt fixed
-;; use advice and system-type = 'windows-nt' varable to wrap the
-;; advice
 
 ;; TODO don't hardcode the exe paths or the tmp path...just to make everyone happy
 (defun org-sql--cmd (db-path sql-cmd)
@@ -681,39 +600,6 @@ shell limits."
     (let ((res (shell-command-to-string cmd)))
       (f-delete tmp-path)
       res)))
-  
-;; (defun org-sql-cmd (cmd)
-;;   "Execute SQL string CMD in SQLi buffer named as `org-sql-buffer'.
-;; If buffer process not running, it is started automatically. Returns
-;; the output of CMD as given by the running SQL shell."
-;;   (when cmd
-;;     (org-sql--with-advice
-;;         ;; this function will throw a "regex too long error"
-;;         ((#'looking-at :override #'ignore))
-;;       ;; TODO add a debug option here so the temp buffer is not
-;;       ;; thrown away
-;;       (let ((temp-buf "*SQL: Out*")
-;;             (get-output
-;;              (lambda (b)
-;;                (with-current-buffer b
-;;                  (let ((out (buffer-substring-no-properties
-;;                              (point-min)
-;;                              (point-max))))
-;;                    (kill-buffer b)
-;;                    out)))))
-;;         (sql-redirect-one org-sql-buffer cmd temp-buf nil)
-;;         (->> temp-buf (funcall get-output) string-trim)))))
-
-;; (defun org-sql-cmd-select (tbl-name cols)
-;;   "Select columns from TBL-NAME where COLS is the list of columns.
-;; If COLS is nil, all columns will be returned. Columns is expected as
-;; a list of keywords like ':col1' and ':col2'."
-;;   (let ((columns (or (-some->> (-map #'org-sql--kw-to-colname cols)
-;;                         (s-join ","))
-;;                       "*")))
-;;     (--> (format "select %s from %s;" columns tbl-name)
-;;          (org-sql--cmd it)
-;;          (org-sql--to-plist it cols))))
 
 ;;; org-mode string parsing functions
 
@@ -775,10 +661,6 @@ comprehensive."
       (mapcan #'cdr)
       (remove "|")
       (--map (replace-regexp-in-string "(.*)" "" it))))
-
-(defun org-sql--regexp-remove-captures (regexp)
-  "Return REGEXP string with captures removed."
-  (s-replace-all '(("\\(" . "") ("\\)" . "")) regexp))
 
 (defun org-sql--log-note-headings-convert ()
   "Convert `org-log-note-headings' to a regex matcher.
@@ -984,38 +866,12 @@ and cdr is the match data."
 
 ;;; org element extraction functions
 ;;
-;; These are functions used to pull data from the org-data tree
-;; given by `org-element-parse-buffer'. They all adhere to the same
-;; idiom where they take an accumulator as the first argument and
-;; return a modified accumulator with the data to be added to the
-;; database. The accumulator is an alist of plists that represents
-;; the data to be inserted:
-;; ((TABLE1 ((:COL1 VAL1 :COL2 VOL2) ..))
-;;  (TABLE2 ((:COL1 VAL1 :COL2 VOL2) ..) ..))
-;; where TABLEX is the table name, COLY is a column within TABLEX
-;; and VALY is the value to add to COLY within TABLEX. Note that
-;; COLY is supplied as a keyword where ':column-name' represents
-;; 'column_name' in the database.
-
-;; (defun org-sql--alist-put (alist prop value)
-;;   "For given ALIST, append VALUE to the current values in prop.
-;; Current values (that is the cdr of each key) is assumed to be a list.
-;; If PROP does not exist, create it. Return the new alist."
-;;   ;; NOTE: this function destructively modifies `alist'; this is fine so long as
-;;   ;; the only thing we are doing to `alist' is adding to it
-;;   (let* ((cur-cell (assoc prop alist))
-;;          (cur-values (cdr cur-cell)))
-;;       (cond
-;;        (cur-values
-;;         (setcdr cur-cell (cons value cur-values))
-;;         alist)
-;;        (cur-cell
-;;         (setcdr cur-cell `(,value))
-;;         alist)
-;;        (alist
-;;         (cons `(,prop ,value) alist))
-;;        (t
-;;         `((,prop ,value))))))
+;; These are functions used to pull data from the org-data tree given by
+;; `org-element-parse-buffer'. They all adhere to the same idiom where they take
+;; an accumulator as the first argument and return a modified accumulator with
+;; the data to be added to the database. The accumulator is a list of typed
+;; plist, where the car is the table name, the properties are the column names,
+;; and the values are the values to be inserted into those columns.
 
 (defmacro org-sql--cons (acc tbl-name &rest plist)
   "Add line to ACC under TBL-NAME for PLIST."
@@ -1279,28 +1135,6 @@ The results are accumulated in ACC which is returned on exit."
 
 ;;; database syncing functions
 
-;; (defun org-sql-sync-insert (cell acc)
-;;   "Add insertion commands for CELL in accumulator ACC. Return new ACC."
-;;   (->> (plist-get acc 'insert)
-;;        (org-sql--extract-file cell)
-;;        (plist-put acc 'insert)))
-
-;; (defun org-sql-sync-update (cell acc)
-;;   "Add update commands for CELL in accumulator ACC. Return new ACC."
-;;   (let ((updt-acc (plist-get acc 'update)))
-;;     (->> `((:file_path ,(car cell)) . (:md5 ,(cdr cell)))
-;;          ;; TODO add compile time schema validation
-;;          (org-sql--alist-put updt-acc 'files)
-;;          (plist-put acc 'update))))
-
-;; (defun org-sql-sync-delete (cell acc)
-;;   "Add deletion commands for CELL in accumulator ACC. Return new ACC."
-;;   (let ((dlt-acc (plist-get acc 'delete)))
-;;     (->>  `(:file_path ,(car cell))
-;;          ;; TODO add compile time schema validation
-;;           (org-sql--alist-put dlt-acc 'files)
-;;           (plist-put acc 'delete))))
-
 (defun org-sql--get-inserts (actions format-fun)
   (cl-flet
       ((cons-insert
@@ -1328,98 +1162,6 @@ The results are accumulated in ACC which is returned on exit."
           ;; TODO add compile time check for this
           (funcall format-fun 'files `(:file_path ,db-path)))))
     (-map #'fmt-update actions)))
-
-;; ;; TODO can probs rewrite this in a clearer way using partitioning
-;; ;; from dash
-;; (defun org-sql-sync-one (cell fp-qry acc)
-;;   "Match CELL with entries FP-QRY and process accordingly.
-;; CELL is a cons cell given by `org-sql--files-on-disk' and FP-QRY
-;; is a list of cons cells given by `org-sql-files-from-db'.
-
-;; By comparing the file path and md5 in CELL with those contained in
-;; FP-QRY, this function will determine the sync state between disk and
-;; db for the file represented by CELL. These scenarios can occur:
-
-;; - both filepath and md5 match: do nothing, fully synced
-
-;; - filepath doesn't match: assume the file was renamed and update db
-;;   with filepath from CELL
-
-;; - md5 doesn't match: assume file was modified; delete the path from
-;;   the db and repopulate the filepath from CELL
-
-;; - neither match: assume file is new and untracked; insert filepath
-;;   from CELL into db
-
-;; Returns a cons cell of the new accumulator ACC and the remaining
-;; FP-QRY. If a match is found is it removed fro FP-QRY before returning.
-
-;; Note that this does not test if there are entries in the db that
-;; have no files on disk. This is dealt with in `org-sql-sync'."
-;;   ;; if perfect match, do nothing
-;;   (if (cl-find cell fp-qry :test #'equal)
-;;       (cons acc (remove cell fp-qry))
-;;     (let* ((match-cells
-;;             (lambda (a b fun)
-;;               (let ((car-a (car a))
-;;                     (cdr-a (cdr a))
-;;                     (car-b (car b))
-;;                     (cdr-b (cdr b)))
-;;                 (funcall fun car-a car-b cdr-a cdr-b))))
-;;            (match-fp
-;;             (lambda (fp-a fp-b md5-a md5-b)
-;;               (and (equal fp-a fp-b) (not (equal md5-a md5-b)))))
-;;            (match-md5
-;;             (lambda (fp-a fp-b md5-a md5-b)
-;;               (and (not (equal fp-a fp-b)) (equal md5-a md5-b))))
-;;            (match-fp*
-;;             (lambda (b)
-;;               (funcall match-cells cell b match-fp)))
-;;            (match-md5*
-;;             (lambda (b)
-;;               (funcall match-cells cell b match-md5)))
-;;            (found-fp (cl-find-if (lambda (q) (funcall match-fp* q)) fp-qry)))
-;;       (cond
-;;        ;; if fp matches, delete qry in db and insert cell
-;;        (found-fp
-;;         (cons (org-sql-sync-insert cell (org-sql-sync-delete found-fp acc))
-;;               (remove found-fp fp-qry)))
-;;        ;; if md5 matches, update fp in db
-;;        ((cl-find-if (lambda (q) (funcall match-md5* q)) fp-qry)
-;;         (cons (org-sql-sync-update cell acc)
-;;               (cl-remove-if (lambda (q) (funcall match-md5* q)) fp-qry)))
-;;        ;; if none match, insert cell
-;;        (t
-;;         (cons (org-sql-sync-insert cell acc) fp-qry))))))
-
-;; (defun org-sql-sync-all (fp-dsk fp-qry)
-;;   "Synchronize state between disk and db.
-
-;; FP-DSK and FP-QRY are lists of cons cells as returned via
-;; `org-sql-files-in-disk' and `org-sql--files-in-db' respectively.
-;; This function iterates through all cells in FP-QRY, interrogating
-;; their sync state via `org-sql-sync-one' (this takes care of any
-;; insertion and update operations for cells in FP-DSK). Anything in
-;; FP-QRY that is not matched with anything in FP-DSK is assumed to be
-;; deleted and is removed at the end of this function.
-
-;; This creates and returns an accumulator object which is an alist of
-;; alists of plists which holds the operations to be performed on the
-;; database."
-;;   (let (acc)
-;;     ;; sync each cell in fp-dsk first and remove matching fp-qry cells
-;;     (while fp-dsk
-;;       (let ((found (--> fp-dsk
-;;                         (car it)
-;;                         (org-sql-sync-one it fp-qry acc))))
-;;         (setq fp-dsk (cdr fp-dsk)
-;;               acc (car found)
-;;               fp-qry (cdr found))))
-;;     ;; remove all leftover entries in the db
-;;     (while fp-qry
-;;       (setq acc (org-sql-sync-delete (car fp-qry) acc)
-;;             fp-qry (cdr fp-qry)))
-;;     acc))
 
 (defun org-sql--classify-transactions (on-disk in-db)
   (cl-flet
@@ -1494,18 +1236,6 @@ for dumping to buffers."
                  (org-sql--get-deletes deletes #'org-sql--fmt-delete))
          (reverse)
          (org-sql--fmt-trans))))
-     
-  ;; (cl-flet
-  ;;     ((map-trns
-  ;;       (op fun trans)
-  ;;       (--> (plist-get trans op)
-  ;;            (--map (funcall fun it) it)
-  ;;            (org-sql--fmt-trans it newlines)
-  ;;            (plist-put trans op it))))
-  ;;   (->> 
-  ;;        (map-trns 'insert #'org-sql--fmt-inserts)
-  ;;        (map-trns 'update #'org-sql--fmt-updates)
-  ;;        (map-trns 'delete #'org-sql--fmt-deletes))))
 
 (defun org-sql-dump-update-transactions ()
   "Dump the transactions to be committed the database during an update.

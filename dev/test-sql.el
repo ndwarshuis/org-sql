@@ -179,7 +179,7 @@ list then join the cdr of IN with newlines."
                 (deletes
                  (:hash "789" :disk-path nil :db-path "/foo0.org"))))))
 
-  (let ((pragma "pragma defer_foreign_keys=on;begin transaction;")
+  (let ((pragma "PRAGMA defer_foreign_keys=on;PRAGMA foreign_keys=on;begin transaction;")
         (commit "commit;"))
     (it "transaction (insert new file)"
       (let* ((org-sql-files (list test-files))
