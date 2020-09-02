@@ -945,9 +945,12 @@ and cdr is the match data."
   (let ((ts (org-ml-get-property :value clock)))
     (list 'clock
           :offset (org-ml-get-property :begin clock)
-          :state-old (-> (org-ml-timestamp-get-start-time ts)
-                         (org-ml-build-timestamp!))
-          :state-new (-some-> (org-ml-timestamp-get-end-time ts)
+          ;; NOTE if clocks are malformed they may not have a start time
+          :state-old (-some-> ts
+                       (org-ml-timestamp-get-start-time)
+                       (org-ml-build-timestamp!))
+          :state-new (-some-> ts
+                       (org-ml-timestamp-get-end-time)
                        (org-ml-build-timestamp!))
           :note-text nil)))
 
@@ -1044,8 +1047,9 @@ and ARGS. FUN adds OBJ to ACC and returns new ACC."
       :file_path fp
       :headline_offset (org-element-property :begin headline)
       :clock_offset offset
-      :time_start (-> (org-ml-timestamp-get-start-time start)
-                      (org-ml-time-to-unixtime))
+      :time_start (-some-> start
+                    (org-ml-timestamp-get-start-time)
+                    (org-ml-time-to-unixtime))
       :time_end (-some-> end
                   (org-ml-timestamp-get-start-time)
                   (org-ml-time-to-unixtime))
