@@ -649,14 +649,14 @@ new plist with values from PRAGMA added, except for pragma already in
        delete-dups
        (mapcan (lambda (p) `(,p ,(funcall getv p))))))))
 
-(defun org-sql--cmd-set-pragma (&optional pragma)
-  "Set the pragma of the running SQL connection.
-PRAGMA is a plist of pragma to set. This is merged with
-`org-sql-default-pragma' before executing in `org-sql-buffer'."
-  (->> pragma
-       org-sql--pragma-merge-default
-       org-sql--fmt-pragma
-       org-sql-cmd))
+;; (defun org-sql--cmd-set-pragma (&optional pragma)
+;;   "Set the pragma of the running SQL connection.
+;; PRAGMA is a plist of pragma to set. This is merged with
+;; `org-sql-default-pragma' before executing in `org-sql-buffer'."
+;;   (->> pragma
+;;        org-sql--pragma-merge-default
+;;        org-sql--fmt-pragma
+;;        org-sql-cmd))
 
 ;; new sql-redirect function with windows prompt fixed
 ;; use advice and system-type = 'windows-nt' varable to wrap the
@@ -704,16 +704,16 @@ shell limits."
 ;;         (sql-redirect-one org-sql-buffer cmd temp-buf nil)
 ;;         (->> temp-buf (funcall get-output) string-trim)))))
 
-(defun org-sql-cmd-select (tbl-name cols)
-  "Select columns from TBL-NAME where COLS is the list of columns.
-If COLS is nil, all columns will be returned. Columns is expected as
-a list of keywords like ':col1' and ':col2'."
-  (let ((columns (or (-some->> (-map #'org-sql--kw-to-colname cols)
-                        (s-join ","))
-                      "*")))
-    (--> (format "select %s from %s;" columns tbl-name)
-         (org-sql--cmd it)
-         (org-sql--to-plist it cols))))
+;; (defun org-sql-cmd-select (tbl-name cols)
+;;   "Select columns from TBL-NAME where COLS is the list of columns.
+;; If COLS is nil, all columns will be returned. Columns is expected as
+;; a list of keywords like ':col1' and ':col2'."
+;;   (let ((columns (or (-some->> (-map #'org-sql--kw-to-colname cols)
+;;                         (s-join ","))
+;;                       "*")))
+;;     (--> (format "select %s from %s;" columns tbl-name)
+;;          (org-sql--cmd it)
+;;          (org-sql--to-plist it cols))))
 
 ;;; org-mode string parsing functions
 
@@ -1428,7 +1428,7 @@ The results are accumulated in ACC which is returned on exit."
         (alist-get key alist nil nil #'equal))
        (classify-transaction
         (transaction)
-        (-let (((&plist :hash :disk-path :db-path) transaction))
+        (-let (((&plist :disk-path :db-path) transaction))
           ;; for a given md5, check the corresponding path given for its disk
           ;; location and in the db to determine the action to take
           (cond
