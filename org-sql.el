@@ -1205,15 +1205,18 @@ this function."
 (defun org-sql--extract-hl-contents (acc headline fp)
   "Add contents from partitioned header HEADLINE to accumulator ACC."
   ;; TODO this only works when `org-log-into-drawer' is defined
-  (let ((timestamps
-         (->> (org-ml-headline-get-section headline)
-              ;; TODO need a function in org-ml that returns non-meta
-              (--remove (org-ml-is-any-type '(planning property-drawer) it))
-              (--remove (equal (org-element-property :drawer-name it)
-                               org-log-into-drawer))
-              (org-ml-match '(:any * timestamp))
-              (--filter (org-ml-is-any-type org-sql-included-contents-timestamp-types it)))))
-    (org-sql--extract acc #'org-sql--extract-ts timestamps headline fp)))
+  (-if-let (pattern (-some--> org-sql-included-contents-timestamp-types
+                      (--map `(:type ',it) it)
+                      `(:any * (:and timestamp (:or ,@it)))))
+      (let ((timestamps
+             (-some->> (org-ml-headline-get-section headline)
+               ;; TODO need a function in org-ml that returns non-meta
+               (--remove (org-ml-is-any-type '(planning property-drawer) it))
+               (--remove (equal (org-element-property :drawer-name it)
+                                org-log-into-drawer))
+               (org-ml-match pattern))))
+        (org-sql--extract acc #'org-sql--extract-ts timestamps headline fp))
+    acc))
 
 (defun org-sql--extract-hl-meta (acc headline fp)
   "Add general data from HEADLINE to accumulator ACC."
