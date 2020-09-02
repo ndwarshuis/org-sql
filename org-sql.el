@@ -1507,32 +1507,24 @@ for dumping to buffers."
   ;;        (map-trns 'update #'org-sql--fmt-updates)
   ;;        (map-trns 'delete #'org-sql--fmt-deletes))))
 
-;; (defun org-sql-dump-update-transactions ()
-;;   "Dump the transactions to be committed the database during an update.
+(defun org-sql-dump-update-transactions ()
+  "Dump the transactions to be committed the database during an update.
 
-;; It will have three sections denoted \"### DELETE ###\", \" ###
-;; UPDATE ###\", and \"### INSERT ###\". Note this function is only
-;; useful for debugging where one wants to see the exact
-;; transactions to be committed and/or save a file to run the SQL
-;; commands outside of this package."
-;;   (interactive)
-;;   (let ((out (->> (org-sql--get-transactions t)
-;;                   (-partition 2)
-;;                   (--map (-as-> (car it)
-;;                                 header
-;;                                 (symbol-name header)
-;;                                 (upcase header)
-;;                                 (format "### %s ###\n\n%s"
-;;                                         header (cadr it))))
-;;                   (reverse))))
-;;     (switch-to-buffer "SQL: Org-update-dump")
-;;     (insert (string-join out "\n\n"))))
+It will have three sections denoted \"### DELETE ###\", \" ###
+UPDATE ###\", and \"### INSERT ###\". Note this function is only
+useful for debugging where one wants to see the exact
+transactions to be committed and/or save a file to run the SQL
+commands outside of this package."
+  (interactive)
+  (let ((out (org-sql--get-transactions)))
+    (switch-to-buffer "SQL: Org-update-dump")
+    (insert (s-replace ";" ";\n" out))))
 
 (defun org-sql-init-db ()
   "Add schemas to database if they do not exist already.
 This assumes an active connection is open."
   ;; assume that the db will be created when a new connection is opened
-  (org-sql--cmd (s-join "" org-sql--schemas)))
+  (org-sql--cmd org-sql-sqlite-path (s-join "" org-sql--schemas)))
 
 (defun org-sql-delete-db ()
   "Deletes the database from disk."
