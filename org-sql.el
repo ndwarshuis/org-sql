@@ -233,6 +233,7 @@ to store them. This is in addition to any properties specifified by
     "Internal schema representation as a pure symbolic list."))
 
 (defun org-sql--meta-format-column-constraints (constraints-meta)
+  "Return formatted column constraints for CONSTRAINTS-META."
   (cl-flet
       ((format-constraint
         (constraint)
@@ -247,6 +248,7 @@ to store them. This is in addition to any properties specifified by
          (s-join " "))))
 
 (defun org-sql--meta-format-columns (columns-meta)
+  "Return formatted tables columns for COLUMNS-META."
   (cl-flet
       ((format-column
         (column-meta)
@@ -261,6 +263,7 @@ to store them. This is in addition to any properties specifified by
     (-map #'format-column columns-meta)))
 
 (defun org-sql--meta-format-table-constraints (constraints-meta)
+  "Return formatted table constraints for CONSTRAINTS-META."
   (cl-labels
       ((format-primary
         (meta)
@@ -299,6 +302,7 @@ to store them. This is in addition to any properties specifified by
     (-map #'format-constraint constraints-meta)))
 
 (defun org-sql--meta-create-table (tbl-meta)
+  "Return formatted 'CREATE TABLE' SQL for TBL-META."
   (-let* (((tbl-name . meta) tbl-meta)
           ((&alist 'columns 'constraints) meta)
           (column-str (->> (org-sql--meta-format-table-constraints constraints)
@@ -477,7 +481,7 @@ sql command string is in double quotes."
        (format "'%s'")))
 
 (defun org-sql--to-string (s)
-  "Convert ENTRY to a string suitable for insertion into SQLite db.
+  "Convert S to a string suitable for insertion into SQLite db.
 Converts numbers to strings, flanks strings with '\"', and converts
 any other symbols to their symbol name."
   (pcase s
@@ -794,13 +798,19 @@ and cdr is the match data."
         (-let (((p0 . p1) (org-sql--split-paragraph first)))
           (if (not p0) `(,p1 . ,rest) `(,p0 . (,p1 . ,rest))))))))
 
+;; TODO this docstring sucks
 (defun org-sql--get-header-substring (entry key)
+  "Return header substring for ENTRY.
+KEY is a valid key for the entry."
   (-let* ((e (cdr entry))
           ((&plist :header-text) e)
           ((begin . end) (plist-get e key)))
     (substring header-text begin end)))
 
+;; TODO this docstring sucks
 (defun org-sql--get-header-timestamp (entry key)
+  "Return header timestamp for ENTRY.
+KEY is a valid key for the entry."
   (-let* ((e (cdr entry))
           ((&plist :header-node) e)
           (header-begin (org-ml-get-property :begin header-node))
@@ -1123,8 +1133,9 @@ FP is the filepath where the buffer lives."
     (org-sql--extract-hl acc headlines fp)))
 
 (defun org-sql--extract-file (fp md5 acc)
-  "Extract the file in the car of CELL for a sql insertion.
-The results are accumulated in ACC which is returned on exit."
+  "Extract the file at FP.
+MD5 is the md5sum of the file. The results are accumulated in ACC
+which is returned on exit."
   (let ((fsize (file-attribute-size (file-attributes fp))))
     (with-current-buffer (find-file-noselect fp t)
       (-> (org-sql--cons acc files
@@ -1136,6 +1147,9 @@ The results are accumulated in ACC which is returned on exit."
 ;;; database syncing functions
 
 (defun org-sql--get-inserts (actions format-fun)
+  "Return formatted SQL insert commands.
+ACTIONS is a list of file actions to insert, and FORMAT-FUN is
+the function used to format the final SQL output."
   (cl-flet
       ((cons-insert
         (acc action)
@@ -1146,6 +1160,9 @@ The results are accumulated in ACC which is returned on exit."
            (--map (funcall format-fun (car it) (cdr it)))))))
 
 (defun org-sql--get-updates (actions format-fun)
+  "Return formatted SQL update commands.
+ACTIONS is a list of file actions to update, and FORMAT-FUN is
+the function used to format the final SQL output."
   (cl-flet
       ((fmt-update
         (action)
@@ -1155,6 +1172,9 @@ The results are accumulated in ACC which is returned on exit."
     (-map #'fmt-update actions)))
            
 (defun org-sql--get-deletes (actions format-fun)
+  "Return formatted SQL delete commands.
+ACTIONS is a list of file actions to delete, and FORMAT-FUN is
+the function used to format the final SQL output."
   (cl-flet
       ((fmt-update
         (action)
@@ -1164,6 +1184,11 @@ The results are accumulated in ACC which is returned on exit."
     (-map #'fmt-update actions)))
 
 (defun org-sql--classify-transactions (on-disk in-db)
+  "Return a list of classified file actions.
+ON-DISK and IN-DB are lists of file cells where each member is like
+\(md5 . filepath). Return an alist where the keys represent the
+actions to take on the files on disk/in the database. The keys of
+the alist will be 'noops', 'inserts', 'updates', and 'deletes'."
   (cl-flet
       ((get-path
         (key alist)
