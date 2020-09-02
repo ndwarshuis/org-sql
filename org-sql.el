@@ -562,16 +562,19 @@ to be satisfied (using and)."
 
 (defun org-sql--fmt-select (tbl-name columns)
   "Return SQL command to select COLUMNS in TBL-NAME."
-  (format "select %s from %s;" columns tbl-name))
+  (let ((columns* (or (-some->> (-map #'org-sql--kw-to-colname columns)
+                        (s-join ","))
+                      "*")))
+    (format "select %s from %s;" columns* tbl-name)))
 
 (defun org-sql--fmt-trans (sql-strs)
   "Format SQL transactions string.
 SQL-STRS is a list of individual SQL commands to be included in the
 transaction."
-  (-some--> (s-join "" sql-strs)
+  (-some->> sql-strs
+    (s-join "")
     ;; turn on deferred keys for all transactions
-    (format "pragma defer_foreign_keys=on;begin transaction;%scommit;")
-    (concat pragma)))
+    (format "pragma defer_foreign_keys=on;begin transaction;%scommit;")))
 
 (defun org-sql--fmt-multi (tbl fun)
   "Format multiple SQL command strings.
@@ -662,7 +665,8 @@ PRAGMA is a plist of pragma to set. This is merged with
 ;; TODO don't hardcode the exe paths or the tmp path...just to make everyone happy
 (defun org-sql--cmd (db-path sql-cmd)
   "Execute SQL-CMD using sqlite3 on database at DB-PATH."
-  (let ((cmd (format "/usr/bin/sqlite3 %s '%s'" db-path sql-cmd)))
+  (let ((cmd (->> (s-replace "'" "'\"'\"'" sql-cmd)
+                  (format "/usr/bin/sqlite3 %s '%s'" db-path))))
     (shell-command-to-string cmd)))
 
 (defun org-sql--cmd* (db-path sql-cmd)
@@ -1297,25 +1301,25 @@ The results are accumulated in ACC which is returned on exit."
         (-let (((&plist :disk-path :hash) action))
           (org-sql--extract-file disk-path hash acc))))
     (let ((acc))
-      (->> (-reduce #'cons-insert acc actions)
+      (->> (-reduce-from #'cons-insert acc actions)
            (--map (funcall format-fun (car it) (cdr it)))))))
 
 (defun org-sql--get-updates (actions format-fun)
   (cl-flet
       ((fmt-update
-        ((action)
-         (-let (((&plist :disk-path :hash) action))
-           ;; TODO add compile time check for this
-           (funcall format-fun 'files `(:file_path ,disk-path) `(:md5 ,hash))))))
+        (action)
+        (-let (((&plist :disk-path :hash) action))
+          ;; TODO add compile time check for this
+          (funcall format-fun 'files `(:file_path ,disk-path) `(:md5 ,hash)))))
     (-map #'fmt-update actions)))
            
 (defun org-sql--get-deletes (actions format-fun)
   (cl-flet
       ((fmt-update
-        ((action)
-         (-let (((&plist :db-path) action))
-           ;; TODO add compile time check for this
-           (funcall format-fun 'files `(:file_path ,db-path))))))
+        (action)
+        (-let (((&plist :db-path) action))
+          ;; TODO add compile time check for this
+          (funcall format-fun 'files `(:file_path ,db-path)))))
     (-map #'fmt-update actions)))
 
 ;; ;; TODO can probs rewrite this in a clearer way using partitioning
@@ -1422,13 +1426,13 @@ The results are accumulated in ACC which is returned on exit."
           ;; location and in the db to determine the action to take
           (cond
            ;; if paths are equal, do nothing
-           ((equal disk-path db-path) :noops)
+           ((equal disk-path db-path) 'noops)
            ;; if paths non-nil but unequal, assume disk path changed and update
-           ((and disk-path db-path) :updates)
+           ((and disk-path db-path) 'updates)
            ;; if path on in db doesn't exist, assume new file and insert
-           ((and disk-path (not db-path) :inserts))
+           ((and disk-path (not db-path) 'inserts))
            ;; if path on on disk doesn't exist, assume removed file and delete
-           ((and (not disk-path) db-path) :deletes)
+           ((and (not disk-path) db-path) 'deletes)
            ;; at least one path should be non-nil, else there is a problem
            (t (error "Transaction classifier: this should not happen"))))))
     (->> (-union (-map #'car on-disk) (-map #'car in-db))
@@ -1452,16 +1456,19 @@ In each cell, the car is the file path and cdr is the file's MD5."
         (fp)
         (if (not (file-directory-p fp)) `(,fp)
             (directory-files fp t "\\`.*\\.org\\(_archive\\)?\\'"))))
-    (->> (-mapcat #'expand-if-dir org-sql-files)
-         (-filter #'file-exists-p)
-         (-map #'cons-md5))))
+    (if (stringp org-sql-files)
+        (error "`org-sql-files' must be a list of paths")
+      (->> (-mapcat #'expand-if-dir org-sql-files)
+           (-filter #'file-exists-p)
+           (-map #'cons-md5)))))
 
 (defun org-sql--files-in-db ()
   "Get all files and their metadata from the database."
   (when (file-exists-p org-sql-sqlite-path)
-    (let ((sql-select (org-sql--fmt-select 'files '(:md5 :file_path))))
+    (let* ((columns '(:md5 :file_path))
+           (sql-select (org-sql--fmt-select 'files columns)))
       (--> (org-sql--cmd org-sql-sqlite-path sql-select)
-           (org-sql--to-plist it cols)
+           (org-sql--to-plist it columns)
            (-map #'org-sql--plist-get-vals it)
            (--map (cons (car it) (cadr it)) it)))))
 
@@ -1473,7 +1480,7 @@ If NEWLINES is t, add newlines between SQL commands; this is useful
 for dumping to buffers."
   (-let* ((on-disk (org-sql--files-on-disk))
           (in-db (org-sql--files-in-db))
-          ((&plist :updates :inserts :deletes)
+          ((&alist 'updates 'inserts 'deletes)
            (org-sql--classify-transactions on-disk in-db)))
     (->> (append (org-sql--get-inserts inserts #'org-sql--fmt-insert)
                  (org-sql--get-updates updates #'org-sql--fmt-update)

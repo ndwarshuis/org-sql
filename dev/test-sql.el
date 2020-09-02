@@ -7,9 +7,9 @@
 (require 'f)
 (require 'buttercup)
 
-;; (defconst test-dir (f-dirname (f-this-file)))
+(defconst test-dir (f-dirname (f-this-file)))
 
-;; (defconst test-files (f-join test-dir "files"))
+(defconst test-files (f-join test-dir "files"))
 
 (defmacro list-to-lines (in)
   "Convert IN to string.
@@ -84,6 +84,10 @@ list then join the cdr of IN with newlines."
     (expect (org-sql--fmt-delete-all 'foo)
             :to-equal "delete from foo;"))
 
+  (it "format select"
+    (expect (org-sql--fmt-select 'foo '(:a :b))
+            :to-equal "select a,b from foo;"))
+
   (it "format create table (columns only)"
     (let* ((create "CREATE TABLE foo")
            (columns "bar TEXT,bam INTEGER NOT NULL")
@@ -149,6 +153,75 @@ list then join the cdr of IN with newlines."
       (expect (s-trim (org-sql--cmd org-sql-sqlite-path "SELECT * FROM FOO;"))
                             :to-equal "1|2"))))
 
+(describe "Transaction spec"
+  (before-each
+    (setq org-sql-sqlite-path "/tmp/org-sql-test.db")
+    (f-delete org-sql-sqlite-path t))
+
+  (after-each
+    (f-delete org-sql-sqlite-path t))
+
+  (it "classify transactions"
+    (let ((on-disk '(("123" . "/bar.org")
+                     ("654" . "/bam.org")
+                     ("456" . "/foo.org")))
+          (in-db '(("123" . "/bar.org")
+                   ("654" . "/bam0.org")
+                   ("789" . "/foo0.org"))))
+      (expect (org-sql--classify-transactions on-disk in-db)
+              :to-equal
+              '((noops
+                 (:hash "123" :disk-path "/bar.org" :db-path "/bar.org"))
+                (updates
+                 (:hash "654" :disk-path "/bam.org" :db-path "/bam0.org"))
+                (inserts
+                 (:hash "456" :disk-path "/foo.org" :db-path nil))
+                (deletes
+                 (:hash "789" :disk-path nil :db-path "/foo0.org"))))))
+
+  (let ((pragma "pragma defer_foreign_keys=on;begin transaction;")
+        (commit "commit;"))
+    (it "transaction (insert new file)"
+      (let* ((org-sql-files (list test-files))
+             (test-file (f-join test-files "test.org"))
+             (test-md5 "106e9f12c9e4ff3333425115d148fbd4")
+             (schema-cmd "CREATE TABLE files (file_path TEXT,md5 TEXT);")
+             (files (format "insert into files (file_path,md5,size) values ('%s','%s',6);"
+                            test-file test-md5))
+             (headlines (format "insert into headlines (file_path,headline_offset,tree_path,headline_text,keyword,effort,scheduled_offset,deadline_offset,closed_offset,priority,archived,commented,content) values ('%s',1,'/','foo',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL);"
+                                test-file)))
+        (expect (org-sql--cmd org-sql-sqlite-path schema-cmd)
+                :to-equal "")
+        (expect (org-sql--get-transactions)
+                :to-equal (concat pragma files headlines commit))))
+
+    (it "transaction (delete file)"
+      (let* ((test-file (f-join test-files "nil.org"))
+             (schema-cmd "CREATE TABLE files (file_path TEXT,md5 TEXT);")
+             (insert-cmd "insert into files (file_path,md5) values ('foo.org','123');")
+             (delete "delete from files where file_path='foo.org';"))
+        (expect (org-sql--cmd org-sql-sqlite-path schema-cmd)
+                :to-equal "")
+        (expect (org-sql--cmd org-sql-sqlite-path insert-cmd)
+                :to-equal "")
+        (expect (org-sql--get-transactions)
+                :to-equal (concat pragma delete commit))))
+
+    (it "transaction (update file)"
+      (let* ((org-sql-files (list test-files))
+             (test-file (f-join test-files "test.org"))
+             (test-md5 "106e9f12c9e4ff3333425115d148fbd4")
+             (schema-cmd "CREATE TABLE files (file_path TEXT,md5 TEXT);")
+             (insert-cmd (format "insert into files (file_path,md5) values ('foo','%s');"
+                                 test-md5))
+             (files (format "update files set file_path='%s' where md5='%s';"
+                            test-file test-md5)))
+        (expect (org-sql--cmd org-sql-sqlite-path schema-cmd)
+                :to-equal "")
+        (expect (org-sql--cmd org-sql-sqlite-path insert-cmd)
+                :to-equal "")
+        (expect (org-sql--get-transactions)
+                :to-equal (concat pragma files commit))))))
 
 (describe "SQL metalangage spec"
   (before-all
