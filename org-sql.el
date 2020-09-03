@@ -62,10 +62,16 @@ to store them. This is in addition to any properties specifified by
 (eval-and-compile
   (defconst org-sql--metaschema
     '((files
+       (desc "Each row stores metadata for one tracked org file")
        (columns
-        (:file_path :type text)
-        (:md5 :type text :constraints (notnull))
-        (:size :type integer :constraints (notnull)))
+        (:file_path :desc "path to the org file"
+                    :type text)
+        (:md5 :desc "md5 checksum of the org file"
+              :type text
+              :constraints (notnull))
+        (:size :desc "size of the org file in bytes"
+               :type integer
+               :constraints (notnull)))
        ;; (:time_modified :type integer)
        ;; (:time_created :type integer)
        ;; (:time_accessed :type integer))
@@ -73,20 +79,35 @@ to store them. This is in addition to any properties specifified by
         (primary :keys (:file_path asc))))
 
       (headlines
+       (desc "Each row stores one headline in a given org file and its metadata")
        (columns
-        (:file_path :type text)
-        (:headline_offset :type integer)
-        (:tree_path :type text)
-        (:headline_text :type text :constraints (notnull))
-        (:keyword :type text)
-        (:effort :type integer)
-        (:scheduled_offset :type integer)
-        (:deadline_offset :type integer)
-        (:closed_offset :type integer)
-        (:priority :type char)
-        (:archived :type boolean)
-        (:commented :type boolean)
-        (:content :type text))
+        (:file_path :desc "path to file containin the headline"
+                    :type text)
+        (:headline_offset :desc "file offset of the headline's first character"
+                          :type integer)
+        (:tree_path :desc "outline tree path of the headline"
+                    :type text)
+        (:headline_text :desc "raw text of the headline"
+                        :type text
+                        :constraints (notnull))
+        (:keyword :desc "the TODO state keyword"
+                  :type text)
+        (:effort :desc "the value of the Effort property in minutes"
+                 :type integer)
+        (:scheduled_offset :desc "file offset of the SCHEDULED timestamp (or NULL if none)"
+                           :type integer)
+        (:deadline_offset :desc "file offset of the DEADLINE timestamp (or NULL if none)"
+                          :type integer)
+        (:closed_offset :desc "file offset of the CLOSED timestamp (or NULL if none)"
+                        :type integer)
+        (:priority :desc "character value of the priority"
+                   :type char)
+        (:archived :desc "true if the headline has an archive tag"
+                   :type boolean)
+        (:commented :desc "true if the headline has a comment keyword"
+                    :type boolean)
+        (:content :desc "the headline contents (currently unused)"
+                  :type text))
        (constraints
         (primary :keys (:file_path asc :headline_offset asc))
         (foreign :ref files
@@ -96,11 +117,16 @@ to store them. This is in addition to any properties specifified by
                  :on_update cascade)))
 
       (tags
+       (desc "Each row stores one tag")
        (columns
-        (:file_path :type text)
-        (:headline_offset :type integer)
-        (:tag :type text)
-        (:inherited :type boolean))
+        (:file_path :desc "path to the file containing the tag"
+                    :type text)
+        (:headline_offset :desc "file offset of the headline with this tag"
+                          :type integer)
+        (:tag :desc "the text value of this tag"
+              :type text)
+        (:inherited :desc "true if this tag is inherited"
+                    :type boolean))
        (constraints
         (primary :keys (:file_path nil :headline_offset nil :tag nil :inherited nil))
         (foreign :ref headlines
@@ -110,13 +136,20 @@ to store them. This is in addition to any properties specifified by
                  :on_update cascade)))
 
       (properties
+       (desc "Each row stores one property")
        (columns
-        (:file_path :type text)
-        (:headline_offset :type integer)
-        (:property_offset :type integer)
-        (:key_text :type text :constraints (notnull))
-        (:val_text :type text :constraints (notnull))
-        (:inherited :type boolean))
+        (:file_path :desc "path to the file containing this property"
+                    :type text)
+        (:headline_offset :desc "file offset of the headline with this property"
+                          :type integer)
+        (:property_offset :desc "file offset of this property in the org file"
+                          :type integer)
+        (:key_text :desc "this property's key"
+                   :type text :constraints (notnull))
+        (:val_text :desc "this property's value"
+                   :type text :constraints (notnull))
+        (:inherited :desc "true if this property is inherited (currently unused)"
+                    :type boolean))
        (constraints
         (primary :keys (:file_path asc :property_offset asc))
         (foreign :ref headlines
@@ -126,13 +159,20 @@ to store them. This is in addition to any properties specifified by
                  :on_update cascade)))
 
       (clocking
+       (desc "Each row stores one clock entry")
        (columns
-        (:file_path :type text)
-        (:headline_offset :type integer)
-        (:clock_offset :type integer)
-        (:time_start :type integer)
-        (:time_end :type integer)
-        (:clock_note :type text))
+        (:file_path :desc "path to the file containing this clock"
+                    :type text)
+        (:headline_offset :desc "offset of the headline with this clock"
+                          :type integer)
+        (:clock_offset :desc "file offset of this clock"
+                       :type integer)
+        (:time_start :desc "timestamp for the start of this clock"
+                     :type integer)
+        (:time_end :desc "timestamp for the end of this clock"
+                   :type integer)
+        (:clock_note :desc "the note entry beneath this clock"
+                     :type text))
        (constraints
         (primary :keys (:file_path asc :clock_offset asc))
         (foreign :ref headlines
@@ -142,14 +182,22 @@ to store them. This is in addition to any properties specifified by
                  :on_update cascade)))
 
       (logbook
+       (desc "Each row stores one logbook entry (except for clocks)")
        (columns
-        (:file_path :type text)
-        (:headline_offset :type integer)
-        (:entry_offset :type integer)
-        (:entry_type :type text)
-        (:time_logged :type integer)
-        (:header :type text)
-        (:note :type text))
+        (:file_path :desc "path to the file containing this entry"
+                    :type text)
+        (:headline_offset :desc "offset of the headline with this entry"
+                          :type integer)
+        (:entry_offset :desc "offset of this logbook entry"
+                       :type integer)
+        (:entry_type :desc "type of this entry (see `org-log-note-headlines')"
+                     :type text)
+        (:time_logged :desc "timestamp for when this entry was taken"
+                      :type integer)
+        (:header :desc "the first line of this entry (usually standardized)"
+                 :type text)
+        (:note :desc "the text of this entry underneath the header"
+               :type text))
        (constraints
         (primary :keys (:file_path asc :entry_offset asc))
         (foreign :ref headlines
@@ -159,11 +207,16 @@ to store them. This is in addition to any properties specifified by
                  :on_update cascade)))
 
       (state_changes
+       (desc "Each row stores additional metadata for a state change logbook entry")
        (columns
-        (:file_path :type text)
-        (:entry_offset :type integer)
-        (:state_old :type text :constraints (notnull))
-        (:state_new :type text :constraints (notnull)))
+        (:file_path :desc "path to the file containing this entry"
+                    :type text)
+        (:entry_offset :desc "offset of the logbook entry for this state change"
+                       :type integer)
+        (:state_old :desc "former todo state keyword"
+                    :type text :constraints (notnull))
+        (:state_new :desc "updated todo state keyword"
+                    :type text :constraints (notnull)))
        (constraints
         (primary :keys (:file_path asc :entry_offset asc))
         (foreign :ref logbook
@@ -173,10 +226,14 @@ to store them. This is in addition to any properties specifified by
                  :on_update cascade)))
 
       (planning_changes
+       (desc "Each row stores additional metadata for a planning change logbook entry")
        (columns
-        (:file_path :type text)
-        (:entry_offset :type integer)
-        (:timestamp_offset :type integer :constraints (notnull)))
+        (:file_path :desc "path to the file containing this entry"
+                    :type text)
+        (:entry_offset :desc "offset of the logbook entry for this planning change"
+                       :type integer)
+        (:timestamp_offset :desc "offset of the former timestamp"
+                           :type integer :constraints (notnull)))
        (constraints
         (primary :keys (:file_path asc :entry_offset asc))
         (foreign :ref timestamp
@@ -191,13 +248,20 @@ to store them. This is in addition to any properties specifified by
                  :on_update cascade)))
 
       (links
+       (desc "Each rows stores one link")
        (columns
-        (:file_path :type text)
-        (:headline_offset :type integer)
-        (:link_offset :type integer)
-        (:link_path :type text)
-        (:link_text :type text)
-        (:link_type :type text))
+        (:file_path :desc "path to the file containing this link"
+                    :type text)
+        (:headline_offset :desc "offset of the headline with this link"
+                          :type integer)
+        (:link_offset :desc "file offset of this link"
+                      :type integer)
+        (:link_path :desc "target of this link (eg url, file path, etc)"
+                    :type text)
+        (:link_text :desc "text of this link"
+                    :type text)
+        (:link_type :desc "type of this link (eg http, mu4e, file, etc)"
+                    :type text))
        (constraints
         (primary :keys (:file_path asc :link_offset asc))
         (foreign :ref headlines
@@ -207,22 +271,38 @@ to store them. This is in addition to any properties specifified by
                  :on_update cascade)))
 
       (timestamp
+       (desc "Each row stores one timestamp")
        (columns
-        (:file_path :type text)
-        (:headline_offset :type integer)
-        (:timestamp_offset :type integer)
-        (:raw_value :type text :constraints (notnull))
-        (:type :type text)
-        (:warning_type :type text)
-        (:warning_value :type integer)
-        (:warning_unit :type text)
-        (:repeat_type :type text)
-        (:repeat_value :type integer)
-        (:repeat_unit :type text)
-        (:time :type integer :constraints (notnull))
-        (:time_end :type integer)
-        (:resolution :type text)
-        (:resolution_end :type text))
+        (:file_path :desc "path to the file containing this timestamp"
+                    :type text)
+        (:headline_offset :desc "offset of the headline containing this timestamp"
+                          :type integer)
+        (:timestamp_offset :desc "offset of this timestamp"
+                           :type integer)
+        (:raw_value :desc "text representation of this timestamp"
+                    :type text :constraints (notnull))
+        (:type :desc "type of this timestamp (`active' or `inactive')"
+               :type text)
+        (:warning_type :desc "warning type of this timestamp (`all' or `first')"
+                       :type text)
+        (:warning_value :desc "warning shift of this timestamp"
+                        :type integer)
+        (:warning_unit :desc "warning unit of this timestamp (`hour', `day', `week', `month', or `year')"
+                       :type text)
+        (:repeat_type :desc "repeater type of this timestamp (`catch-up', `restart', `cumulate')"
+                      :type text)
+        (:repeat_value :desc "repeater shift of this timestamp"
+                       :type integer)
+        (:repeat_unit :desc "repeater unit of this timestamp (`hour', `day', `week', `month', or `year')"
+                      :type text)
+        (:time :desc "the start time (or only time) of this timestamp"
+               :type integer :constraints (notnull))
+        (:time_end :desc "the end time of this timestamp"
+                   :type integer)
+        (:resolution :desc "`day' if the start (or only) time is in short format, else `minute'"
+                     :type text)
+        (:resolution_end :desc "`day' if the end time is in short format, else `minute'"
+                         :type text))
        (constraints
         (primary :keys (:file_path asc :timestamp_offset asc))
         (foreign :ref headlines
