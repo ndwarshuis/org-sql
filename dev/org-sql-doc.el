@@ -78,15 +78,19 @@
 
 (defun org-sql-doc-format-column (column-meta constraints-meta)
   (-let* (((column-name . meta) column-meta)
-          ((&plist :desc :type) meta)
+          ((&plist :desc :type :constraints) meta)
           ((&alist 'primary) constraints-meta)
           (primary-keys (-slice (plist-get primary :keys) 0 nil 2))
           (column-name* (org-sql--kw-to-colname column-name))
           (is-primary (if (memq column-name primary-keys) "x" ""))
+          (null-allowed (if (or (memq 'notnull constraints)
+                                (memq column-name primary-keys))
+                            ""
+                          "x"))
           (foreign (org-sql-doc-format-foreign column-name constraints-meta))
           (type* (symbol-name type))
           (desc* (org-sql-doc-format-quotes desc)))
-    (->> (list column-name* is-primary foreign type* desc*)
+    (->> (list column-name* is-primary foreign null-allowed type* desc*)
          (org-sql-doc-format-table-row))))
 
 (defun org-sql-doc-format-schema (table-meta)
@@ -98,6 +102,7 @@
           (table-headers (list "Column"
                                "Is Primary"
                                "Foreign Keys (parent - table)"
+                               "NULL Allowed"
                                "Type"
                                "Description"))
           (table-line (->> (-repeat (length table-headers) " - ")
