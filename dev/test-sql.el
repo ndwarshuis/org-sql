@@ -126,7 +126,7 @@ list then join the cdr of IN with newlines."
                     (primary :keys (:bar ASC))
                     (foreign :ref fubar
                              :keys (:bam)
-                             :parent_keys (:BAM)
+                             :parent-keys (:BAM)
                              :on_delete cascade
                              :on_update cascade)))))
       (expect (org-sql--meta-create-table meta) :to-equal test-res))))
