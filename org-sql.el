@@ -62,7 +62,7 @@ to store them. This is in addition to any properties specifified by
 (eval-and-compile
   (defconst org-sql--metaschema
     '((files
-       (desc "Each row stores metadata for one tracked org file")
+       (desc . "Each row stores metadata for one tracked org file")
        (columns
         (:file_path :desc "path to the org file"
                     :type text)
@@ -79,7 +79,7 @@ to store them. This is in addition to any properties specifified by
         (primary :keys (:file_path asc))))
 
       (headlines
-       (desc "Each row stores one headline in a given org file and its metadata")
+       (desc . "Each row stores one headline in a given org file and its metadata")
        (columns
         (:file_path :desc "path to file containin the headline"
                     :type text)
@@ -112,12 +112,12 @@ to store them. This is in addition to any properties specifified by
         (primary :keys (:file_path asc :headline_offset asc))
         (foreign :ref files
                  :keys (:file_path)
-                 :parent_keys (:file_path)
+                 :parent-keys (:file_path)
                  :on_delete cascade
                  :on_update cascade)))
 
       (tags
-       (desc "Each row stores one tag")
+       (desc . "Each row stores one tag")
        (columns
         (:file_path :desc "path to the file containing the tag"
                     :type text)
@@ -131,12 +131,12 @@ to store them. This is in addition to any properties specifified by
         (primary :keys (:file_path nil :headline_offset nil :tag nil :inherited nil))
         (foreign :ref headlines
                  :keys (:file_path :headline_offset)
-                 :parent_keys (:file_path :headline_offset)
+                 :parent-keys (:file_path :headline_offset)
                  :on_delete cascade
                  :on_update cascade)))
 
       (properties
-       (desc "Each row stores one property")
+       (desc . "Each row stores one property")
        (columns
         (:file_path :desc "path to the file containing this property"
                     :type text)
@@ -154,12 +154,12 @@ to store them. This is in addition to any properties specifified by
         (primary :keys (:file_path asc :property_offset asc))
         (foreign :ref headlines
                  :keys (:file_path :headline_offset)
-                 :parent_keys (:file_path :headline_offset)
+                 :parent-keys (:file_path :headline_offset)
                  :on_delete cascade
                  :on_update cascade)))
 
       (clocking
-       (desc "Each row stores one clock entry")
+       (desc . "Each row stores one clock entry")
        (columns
         (:file_path :desc "path to the file containing this clock"
                     :type text)
@@ -177,12 +177,12 @@ to store them. This is in addition to any properties specifified by
         (primary :keys (:file_path asc :clock_offset asc))
         (foreign :ref headlines
                  :keys (:file_path :headline_offset)
-                 :parent_keys (:file_path :headline_offset)
+                 :parent-keys (:file_path :headline_offset)
                  :on_delete cascade
                  :on_update cascade)))
 
       (logbook
-       (desc "Each row stores one logbook entry (except for clocks)")
+       (desc . "Each row stores one logbook entry (except for clocks)")
        (columns
         (:file_path :desc "path to the file containing this entry"
                     :type text)
@@ -202,12 +202,12 @@ to store them. This is in addition to any properties specifified by
         (primary :keys (:file_path asc :entry_offset asc))
         (foreign :ref headlines
                  :keys (:file_path :headline_offset)
-                 :parent_keys (:file_path :headline_offset)
+                 :parent-keys (:file_path :headline_offset)
                  :on_delete cascade
                  :on_update cascade)))
 
       (state_changes
-       (desc "Each row stores additional metadata for a state change logbook entry")
+       (desc . "Each row stores additional metadata for a state change logbook entry")
        (columns
         (:file_path :desc "path to the file containing this entry"
                     :type text)
@@ -221,12 +221,12 @@ to store them. This is in addition to any properties specifified by
         (primary :keys (:file_path asc :entry_offset asc))
         (foreign :ref logbook
                  :keys (:file_path :entry_offset)
-                 :parent_keys (:file_path :entry_offset)
+                 :parent-keys (:file_path :entry_offset)
                  :on_delete cascade
                  :on_update cascade)))
 
       (planning_changes
-       (desc "Each row stores additional metadata for a planning change logbook entry")
+       (desc . "Each row stores additional metadata for a planning change logbook entry")
        (columns
         (:file_path :desc "path to the file containing this entry"
                     :type text)
@@ -238,17 +238,17 @@ to store them. This is in addition to any properties specifified by
         (primary :keys (:file_path asc :entry_offset asc))
         (foreign :ref timestamp
                  :keys (:file_path :timestamp_offset)
-                 :parent_keys (:file_path :timestamp_offset)
+                 :parent-keys (:file_path :timestamp_offset)
                  :on_delete cascade
                  :on_update cascade)
         (foreign :ref logbook
                  :keys (:file_path :entry_offset)
-                 :parent_keys (:file_path :entry_offset)
+                 :parent-keys (:file_path :entry_offset)
                  :on_delete cascade
                  :on_update cascade)))
 
       (links
-       (desc "Each rows stores one link")
+       (desc . "Each rows stores one link")
        (columns
         (:file_path :desc "path to the file containing this link"
                     :type text)
@@ -266,12 +266,12 @@ to store them. This is in addition to any properties specifified by
         (primary :keys (:file_path asc :link_offset asc))
         (foreign :ref headlines
                  :keys (:file_path :headline_offset)
-                 :parent_keys (:file_path :headline_offset)
+                 :parent-keys (:file_path :headline_offset)
                  :on_delete cascade
                  :on_update cascade)))
 
       (timestamp
-       (desc "Each row stores one timestamp")
+       (desc . "Each row stores one timestamp")
        (columns
         (:file_path :desc "path to the file containing this timestamp"
                     :type text)
@@ -307,7 +307,7 @@ to store them. This is in addition to any properties specifified by
         (primary :keys (:file_path asc :timestamp_offset asc))
         (foreign :ref headlines
                  :keys (:file_path :headline_offset)
-                 :parent_keys (:file_path :headline_offset)
+                 :parent-keys (:file_path :headline_offset)
                  :on_delete cascade
                  :on_update cascade))))
     "Internal schema representation as a pure symbolic list."))
@@ -356,9 +356,9 @@ to store them. This is in addition to any properties specifified by
                (format "PRIMARY KEY (%s)"))))
        (format-foreign
         (meta)
-        (-let* (((&plist :ref :keys :parent_keys :on_delete :on_update) meta)
+        (-let* (((&plist :ref :keys :parent-keys :on_delete :on_update) meta)
                 (keys* (->> keys (-map #'org-sql--kw-to-colname) (s-join ",")))
-                (parent-keys* (->> parent_keys
+                (parent-keys* (->> parent-keys
                                    (-map #'org-sql--kw-to-colname)
                                    (s-join ",")))
                 (foreign-str (format "FOREIGN KEY (%s) REFERENCES %s (%s)"

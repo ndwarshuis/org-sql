@@ -1,4 +1,4 @@
-;;; org-sql-doc.el --- Build documentation for org-sql
+;;; org-sql-doc.el --- Build documentation for org-sql -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2020 Nathan Dwarshuis
 
@@ -56,24 +56,84 @@
 ;;             (format "The following functions don't have examples:\n%s")
 ;;             (print)))
 
+(defun org-sql-doc-format-quotes (s)
+  (s-replace-regexp "`\\([^[:space:]]+\\)'" "`\\1`" s))
+
+(defun org-sql-doc-format-table-row (members)
+  (format "| %s |" (s-join " | " members)))
+
+(defun org-sql-doc-format-foreign (column-name constraints-meta)
+  (cl-flet
+      ((find-format
+        (foreign-meta)
+        (-let (((&plist :ref :keys :parent-keys) foreign-meta))
+          (-some--> (--find-index (eq it column-name) keys)
+            (nth it parent-keys)
+            (org-sql--kw-to-colname it)
+            (format "%s - %s" it ref)))))
+    (->> (--filter (eq 'foreign (car it)) constraints-meta)
+         (--map (find-format (cdr it)))
+         (-non-nil)
+         (s-join ", "))))
+
+(defun org-sql-doc-format-column (column-meta constraints-meta)
+  (-let* (((column-name . meta) column-meta)
+          ((&plist :desc :type) meta)
+          ((&alist 'primary) constraints-meta)
+          (primary-keys (-slice (plist-get primary :keys) 0 nil 2))
+          (column-name* (org-sql--kw-to-colname column-name))
+          (is-primary (if (memq column-name primary-keys) "x" ""))
+          (foreign (org-sql-doc-format-foreign column-name constraints-meta))
+          (type* (symbol-name type))
+          (desc* (org-sql-doc-format-quotes desc)))
+    (->> (list column-name* is-primary foreign type* desc*)
+         (org-sql-doc-format-table-row))))
+
+(defun org-sql-doc-format-schema (table-meta)
+  (-let* (((table-name . meta) table-meta)
+          ((&alist 'desc 'columns 'constraints) meta)
+          (header (->> (symbol-name table-name)
+                       (s-capitalize)
+                       (format "### %s")))
+          (table-headers (list "Column"
+                               "Is Primary"
+                               "Foreign Keys (parent - table)"
+                               "Type"
+                               "Description"))
+          (table-line (->> (-repeat (length table-headers) " - ")
+                           (org-sql-doc-format-table-row)))
+          (table-headers* (org-sql-doc-format-table-row table-headers))
+          (table-rows (->> columns
+                           (--map (org-sql-doc-format-column it constraints))
+                           (s-join "\n"))))
+    (->> (list header
+               ""
+               desc
+               ""
+               table-headers*
+               table-line
+               table-rows)
+         (s-join "\n"))))
+
 (defun goto-and-replace-all (s replacement)
   (while (progn (goto-char (point-min)) (search-forward s nil t))
     (delete-char (- (length s)))
     (insert replacement)))
 
+(defun goto-and-remove (s)
+  (goto-char (point-min))
+  (search-forward s)
+  (delete-char (- (length s))))
+
 (defun create-docs-file ()
-  ;; (let ((org-ml-dev-examples-list (nreverse org-ml-dev-examples-list)))
-    (with-temp-file "./README.md"
-      (insert-file-contents-literally "./readme-template.md")
+  (with-temp-file "./README.md"
+    (insert-file-contents-literally "./readme-template.md")
 
-      ;; (goto-and-remove "[[ function-list ]]")
-      ;; (insert (mapconcat 'function-summary org-ml-dev-examples-list "\n"))
+    (goto-and-remove "[[ schema-docs ]]")
+    (insert (->> org-sql--metaschema
+                 (-map #'org-sql-doc-format-schema)
+                 (s-join "\n\n")))
 
-      ;; (goto-and-remove "[[ function-docs ]]")
-      ;; (insert (mapconcat 'function-to-md org-ml-dev-examples-list "\n"))
-
-      (goto-and-replace-all "[[ version ]]" (org-sql-get-package-version))))
-
-      ;; (simplify-quotes))))
+    (goto-and-replace-all "[[ version ]]" (org-sql-get-package-version))))
 
 ;;; org-sql-doc.el ends here
