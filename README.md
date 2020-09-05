@@ -205,8 +205,8 @@ Each row stores one headline in a given org file and its metadata
 | deadline_offset |  |  | x | integer | file offset of the DEADLINE timestamp |
 | closed_offset |  |  | x | integer | file offset of the CLOSED timestamp |
 | priority |  |  | x | char | character value of the priority |
-| archived |  |  | x | boolean | true if the headline has an archive tag |
-| commented |  |  | x | boolean | true if the headline has a comment keyword |
+| is_archived |  |  | x | boolean | true if the headline has an archive tag |
+| is_commented |  |  | x | boolean | true if the headline has a comment keyword |
 | content |  |  | x | text | the headline contents (currently unused) |
 
 ### tags
@@ -218,7 +218,7 @@ Each row stores one tag
 | file_path | x | file_path - headlines |  | text | path to the file containing the tag |
 | headline_offset | x | headline_offset - headlines |  | integer | file offset of the headline with this tag |
 | tag | x |  |  | text | the text value of this tag |
-| inherited | x |  |  | boolean | true if this tag is inherited |
+| is_inherited | x |  |  | boolean | true if this tag is inherited |
 
 ### properties
 
@@ -231,7 +231,7 @@ Each row stores one property
 | property_offset | x |  |  | integer | file offset of this property in the org file |
 | key_text |  |  |  | text | this property's key |
 | val_text |  |  |  | text | this property's value |
-| inherited |  |  | x | boolean | true if this property is inherited (currently unused) |
+| is_inherited |  |  | x | boolean | true if this property is inherited (currently unused) |
 
 ### clocks
 
@@ -304,17 +304,17 @@ Each row stores one timestamp
 | headline_offset |  | headline_offset - headlines | x | integer | offset of the headline containing this timestamp |
 | timestamp_offset | x |  |  | integer | offset of this timestamp |
 | raw_value |  |  |  | text | text representation of this timestamp |
-| type |  |  | x | text | type of this timestamp (`active`, or `inactive`) |
+| is_active |  |  | x | boolean | true if the timestamp is active |
 | warning_type |  |  | x | text | warning type of this timestamp (`all`, or `first`) |
 | warning_value |  |  | x | integer | warning shift of this timestamp |
 | warning_unit |  |  | x | text | warning unit of this timestamp  (`hour`, `day`, `week`, `month`, or `year`) |
 | repeat_type |  |  | x | text | repeater type of this timestamp (`catch-up`, `restart`, or `cumulate`) |
 | repeat_value |  |  | x | integer | repeater shift of this timestamp |
 | repeat_unit |  |  | x | text | repeater unit of this timestamp (`hour`, `day`, `week`, `month`, or `year`) |
-| time |  |  |  | integer | the start time (or only time) of this timestamp |
+| time_start |  |  |  | integer | the start time (or only time) of this timestamp |
 | time_end |  |  | x | integer | the end time of this timestamp |
-| resolution |  |  | x | text | the format of the starting time (`day`, or `minute`) |
-| resolution_end |  |  | x | text | for the format of the ending time (`day`, or `minute`) |
+| start_is_long |  |  | x | boolean | true if the start time is in long format |
+| end_is_long |  |  | x | text | true if the end time is in long format |
 
 <!-- 0.0.1 -->
 

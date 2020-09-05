@@ -102,9 +102,9 @@ to store them. This is in addition to any properties specifified by
                         :type integer)
         (:priority :desc "character value of the priority"
                    :type char)
-        (:archived :desc "true if the headline has an archive tag"
+        (:is_archived :desc "true if the headline has an archive tag"
                    :type boolean)
-        (:commented :desc "true if the headline has a comment keyword"
+        (:is_commented :desc "true if the headline has a comment keyword"
                     :type boolean)
         (:content :desc "the headline contents (currently unused)"
                   :type text))
@@ -125,10 +125,10 @@ to store them. This is in addition to any properties specifified by
                           :type integer)
         (:tag :desc "the text value of this tag"
               :type text)
-        (:inherited :desc "true if this tag is inherited"
+        (:is_inherited :desc "true if this tag is inherited"
                     :type boolean))
        (constraints
-        (primary :keys (:file_path nil :headline_offset nil :tag nil :inherited nil))
+        (primary :keys (:file_path nil :headline_offset nil :tag nil :is_inherited nil))
         (foreign :ref headlines
                  :keys (:file_path :headline_offset)
                  :parent-keys (:file_path :headline_offset)
@@ -150,7 +150,7 @@ to store them. This is in addition to any properties specifified by
         (:val_text :desc "this property's value"
                    :type text
                    :constraints (notnull))
-        (:inherited :desc "true if this property is inherited (currently unused)"
+        (:is_inherited :desc "true if this property is inherited (currently unused)"
                     :type boolean))
        (constraints
         (primary :keys (:file_path asc :property_offset asc))
@@ -285,9 +285,8 @@ to store them. This is in addition to any properties specifified by
         (:raw_value :desc "text representation of this timestamp"
                     :type text
                     :constraints (notnull))
-        (:type :desc "type of this timestamp"
-               :type text
-               :allowed (active inactive))
+        (:is_active :desc "true if the timestamp is active"
+                    :type boolean)
         (:warning_type :desc "warning type of this timestamp"
                        :type text
                        :allowed (all first))
@@ -304,17 +303,15 @@ to store them. This is in addition to any properties specifified by
         (:repeat_unit :desc "repeater unit of this timestamp"
                       :type text
                       :allowed (hour day week month year))
-        (:time :desc "the start time (or only time) of this timestamp"
-               :type integer
-               :constraints (notnull))
+        (:time_start :desc "the start time (or only time) of this timestamp"
+                     :type integer
+                     :constraints (notnull))
         (:time_end :desc "the end time of this timestamp"
                    :type integer)
-        (:resolution :desc "the format of the starting time"
-                     :type text
-                     :allowed (day minute))
-        (:resolution_end :desc "for the format of the ending time"
-                         :type text
-                         :allowed (day minute)))
+        (:start_is_long :desc "true if the start time is in long format"
+                        :type boolean)
+        (:end_is_long :desc "true if the end time is in long format"
+                      :type text))
        (constraints
         (primary :keys (:file_path asc :timestamp_offset asc))
         (foreign :ref headlines
@@ -1085,7 +1082,7 @@ and ARGS. FUN adds OBJ to ACC and returns new ACC."
               :key_text (org-ml-get-property :key np)
               :val_text (org-ml-get-property :value np)
               ;; TODO add inherited flag
-              :inherited nil)))
+              :is_inherited nil)))
         (org-sql--extract acc #'from node-props)))))
 
 (defun org-sql--extract-tags (acc headline fp)
@@ -1098,7 +1095,7 @@ and ARGS. FUN adds OBJ to ACC and returns new ACC."
             :file_path fp
             :headline_offset (org-ml-get-property :begin headline)
             :tag tag
-            :inherited inherited))
+            :is_inherited inherited))
          (filter-ignored
           (tags)
           (-difference tags org-sql-ignored-tags)))
@@ -1139,25 +1136,24 @@ this function."
       ((get-resolution
         (time)
         ;; TODO this should be public in org-ml
-        (when time
-          (if (org-ml--time-is-long time) 'minute 'day))))
+        (when time (org-ml--time-is-long time))))
     (let ((start (org-ml-timestamp-get-start-time ts))
           (end (org-ml-timestamp-get-end-time ts)))
       (org-sql--cons acc timestamps
         :file_path fp
         :headline_offset (org-ml-get-property :begin headline)
         :timestamp_offset (org-ml-get-property :begin ts)
-        :type (if (org-ml-timestamp-is-active ts) 'active 'inactive)
+        :is_active (org-ml-timestamp-is-active ts)
         :warning_type (org-ml-get-property :warning-type ts)
         :warning_value (org-ml-get-property :warning-value ts)
         :warning_unit (org-ml-get-property :warning-unit ts)
         :repeat_type (org-ml-get-property :repeater-type ts)
         :repeat_value (org-ml-get-property :repeater-value ts)
         :repeat_unit (org-ml-get-property :repeater-unit ts)
-        :time (org-ml-time-to-unixtime start)
-        :resolution (get-resolution start)
+        :time_start (org-ml-time-to-unixtime start)
+        :start_is_long (get-resolution start)
         :time_end (-some-> end (org-ml-time-to-unixtime))
-        :resolution_end (get-resolution end)
+        :end_is_long (get-resolution end)
         :raw_value (org-ml-get-property :raw-value ts)))))
 
 (defun org-sql--extract-hl-contents (acc headline fp)
@@ -1196,8 +1192,8 @@ this function."
           :closed_offset (-some->> closed (org-ml-get-property :begin))
           :priority (-some->> (org-ml-get-property :priority headline)
                       (byte-to-string))
-          :archived (org-ml-get-property :archivedp headline)
-          :commented (org-ml-get-property :commentedp headline)
+          :is_archived (org-ml-get-property :archivedp headline)
+          :is_commented (org-ml-get-property :commentedp headline)
           :content nil)
         (org-sql--extract #'org-sql--extract-ts planning-timestamps headline fp)
         (org-sql--extract-hl-contents headline fp))))
