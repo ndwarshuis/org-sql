@@ -179,7 +179,7 @@ The databases are arranged as follows according to their foreign key contraints:
 
 ## Schema
 
-### Files
+### files
 
 Each row stores metadata for one tracked org file
 
@@ -189,7 +189,7 @@ Each row stores metadata for one tracked org file
 | md5 |  |  |  | text | md5 checksum of the org file |
 | size |  |  |  | integer | size of the org file in bytes |
 
-### Headlines
+### headlines
 
 Each row stores one headline in a given org file and its metadata
 
@@ -209,7 +209,7 @@ Each row stores one headline in a given org file and its metadata
 | commented |  |  | x | boolean | true if the headline has a comment keyword |
 | content |  |  | x | text | the headline contents (currently unused) |
 
-### Tags
+### tags
 
 Each row stores one tag
 
@@ -220,7 +220,7 @@ Each row stores one tag
 | tag | x |  |  | text | the text value of this tag |
 | inherited | x |  |  | boolean | true if this tag is inherited |
 
-### Properties
+### properties
 
 Each row stores one property
 
@@ -233,7 +233,7 @@ Each row stores one property
 | val_text |  |  |  | text | this property's value |
 | inherited |  |  | x | boolean | true if this property is inherited (currently unused) |
 
-### Clocking
+### clocks
 
 Each row stores one clock entry
 
@@ -246,7 +246,7 @@ Each row stores one clock entry
 | time_end |  |  | x | integer | timestamp for the end of this clock |
 | clock_note |  |  | x | text | the note entry beneath this clock |
 
-### Logbook
+### logbook_entries
 
 Each row stores one logbook entry (except for clocks)
 
@@ -260,28 +260,28 @@ Each row stores one logbook entry (except for clocks)
 | header |  |  | x | text | the first line of this entry (usually standardized) |
 | note |  |  | x | text | the text of this entry underneath the header |
 
-### State_changes
+### state_changes
 
 Each row stores additional metadata for a state change logbook entry
 
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - logbook |  | text | path to the file containing this entry |
-| entry_offset | x | entry_offset - logbook |  | integer | offset of the logbook entry for this state change |
+| file_path | x | file_path - logbook_entries |  | text | path to the file containing this entry |
+| entry_offset | x | entry_offset - logbook_entries |  | integer | offset of the logbook entry for this state change |
 | state_old |  |  |  | text | former todo state keyword |
 | state_new |  |  |  | text | updated todo state keyword |
 
-### Planning_changes
+### planning_changes
 
 Each row stores additional metadata for a planning change logbook entry
 
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - timestamp, file_path - logbook |  | text | path to the file containing this entry |
-| entry_offset | x | entry_offset - logbook |  | integer | offset of the logbook entry for this planning change |
-| timestamp_offset |  | timestamp_offset - timestamp |  | integer | offset of the former timestamp |
+| file_path | x | file_path - timestamps, file_path - logbook_entries |  | text | path to the file containing this entry |
+| entry_offset | x | entry_offset - logbook_entries |  | integer | offset of the logbook entry for this planning change |
+| timestamp_offset |  | timestamp_offset - timestamps |  | integer | offset of the former timestamp |
 
-### Links
+### links
 
 Each rows stores one link
 
@@ -294,7 +294,7 @@ Each rows stores one link
 | link_text |  |  | x | text | text of this link |
 | link_type |  |  | x | text | type of this link (eg http, mu4e, file, etc) |
 
-### Timestamp
+### timestamps
 
 Each row stores one timestamp
 

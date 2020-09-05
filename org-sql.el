@@ -160,7 +160,7 @@ to store them. This is in addition to any properties specifified by
                  :on_delete cascade
                  :on_update cascade)))
 
-      (clocking
+      (clocks
        (desc . "Each row stores one clock entry")
        (columns
         (:file_path :desc "path to the file containing this clock"
@@ -183,7 +183,7 @@ to store them. This is in addition to any properties specifified by
                  :on_delete cascade
                  :on_update cascade)))
 
-      (logbook
+      (logbook_entries
        (desc . "Each row stores one logbook entry (except for clocks)")
        (columns
         (:file_path :desc "path to the file containing this entry"
@@ -221,7 +221,7 @@ to store them. This is in addition to any properties specifified by
                     :type text :constraints (notnull)))
        (constraints
         (primary :keys (:file_path asc :entry_offset asc))
-        (foreign :ref logbook
+        (foreign :ref logbook_entries
                  :keys (:file_path :entry_offset)
                  :parent-keys (:file_path :entry_offset)
                  :on_delete cascade
@@ -239,12 +239,12 @@ to store them. This is in addition to any properties specifified by
                            :constraints (notnull)))
        (constraints
         (primary :keys (:file_path asc :entry_offset asc))
-        (foreign :ref timestamp
+        (foreign :ref timestamps
                  :keys (:file_path :timestamp_offset)
                  :parent-keys (:file_path :timestamp_offset)
                  :on_delete cascade
                  :on_update cascade)
-        (foreign :ref logbook
+        (foreign :ref logbook_entries
                  :keys (:file_path :entry_offset)
                  :parent-keys (:file_path :entry_offset)
                  :on_delete cascade
@@ -273,7 +273,7 @@ to store them. This is in addition to any properties specifified by
                  :on_delete cascade
                  :on_update cascade)))
 
-      (timestamp
+      (timestamps
        (desc . "Each row stores one timestamp")
        (columns
         (:file_path :desc "path to the file containing this timestamp"
@@ -408,12 +408,12 @@ to store them. This is in addition to any properties specifified by
     "CREATE TABLE headlines (file_path TEXT, headline_offset INTEGER, tree_path TEXT, headline_text TEXT NOT NULL, keyword TEXT, effort INTEGER, scheduled_offset INTEGER, deadline_offset INTEGER, closed_offset INTEGER, priority CHAR, archived BOOLEAN, commented BOOLEAN, content TEXT, PRIMARY KEY (file_path ASC, headline_offset ASC), FOREIGN KEY (file_path) REFERENCES files (file_path) ON UPDATE CASCADE ON DELETE CASCADE);"
     "CREATE TABLE tags (file_path TEXT,headline_offset INTEGER,tag TEXT,inherited BOOLEAN,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path, headline_offset, tag, inherited));"
     "CREATE TABLE properties (file_path TEXT,headline_offset INTEGER,property_offset INTEGER,key_text TEXT NOT NULL,val_text TEXT NOT NULL,inherited BOOLEAN,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, property_offset ASC));"
-    "CREATE TABLE clocking (file_path TEXT,headline_offset INTEGER,clock_offset INTEGER,time_start INTEGER,time_end INTEGER,clock_note TEXT,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset)ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, clock_offset ASC));"
-    "CREATE TABLE logbook (file_path TEXT,headline_offset INTEGER,entry_offset INTEGER,entry_type TEXT,time_logged INTEGER,header TEXT,note TEXT,FOREIGN KEY (file_path, headline_offset)REFERENCES headlines (file_path, headline_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, entry_offset ASC));"
-    "CREATE TABLE state_changes (file_path TEXT,entry_offset INTEGER,state_old TEXT NOT NULL,state_new TEXT NOT NULL,FOREIGN KEY (file_path, entry_offset) REFERENCES logbook (file_path, entry_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, entry_offset ASC));"
-    "CREATE TABLE planning_changes (file_path TEXT, entry_offset INTEGER, timestamp_offset INTEGER NOT NULL, FOREIGN KEY (file_path, entry_offset) REFERENCES logbook (file_path, entry_offset) ON DELETE CASCADE ON UPDATE CASCADE, PRIMARY KEY (file_path ASC, entry_offset ASC), FOREIGN KEY (file_path, timestamp_offset) REFERENCES timestamp (file_path, timestamp_offset) ON DELETE CASCADE ON UPDATE CASCADE);"
+    "CREATE TABLE clocks (file_path TEXT,headline_offset INTEGER,clock_offset INTEGER,time_start INTEGER,time_end INTEGER,clock_note TEXT,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset)ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, clock_offset ASC));"
+    "CREATE TABLE logbook_entries (file_path TEXT,headline_offset INTEGER,entry_offset INTEGER,entry_type TEXT,time_logged INTEGER,header TEXT,note TEXT,FOREIGN KEY (file_path, headline_offset)REFERENCES headlines (file_path, headline_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, entry_offset ASC));"
+    "CREATE TABLE state_changes (file_path TEXT,entry_offset INTEGER,state_old TEXT NOT NULL,state_new TEXT NOT NULL,FOREIGN KEY (file_path, entry_offset) REFERENCES logbook_entries (file_path, entry_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, entry_offset ASC));"
+    "CREATE TABLE planning_changes (file_path TEXT, entry_offset INTEGER, timestamp_offset INTEGER NOT NULL, FOREIGN KEY (file_path, entry_offset) REFERENCES logbook_entries (file_path, entry_offset) ON DELETE CASCADE ON UPDATE CASCADE, PRIMARY KEY (file_path ASC, entry_offset ASC), FOREIGN KEY (file_path, timestamp_offset) REFERENCES timestamp (file_path, timestamp_offset) ON DELETE CASCADE ON UPDATE CASCADE);"
     "CREATE TABLE links (file_path TEXT,headline_offset INTEGER,link_offset INTEGER,link_path TEXT,link_text TEXT,link_type TEXT,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, link_offset ASC));"
-    "CREATE TABLE timestamp (file_path TEXT, headline_offset INTEGER, timestamp_offset INTEGER, raw_value TEXT NOT NULL, type TEXT, warning_type TEXT, warning_value INTEGER, warning_unit TEXT, repeat_type TEXT, repeat_value INTEGER, repeat_unit TEXT, time INTEGER NOT NULL, time_end INTEGER, resolution TEXT, resolution_end TEXT, PRIMARY KEY (file_path, timestamp_offset), FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON DELETE CASCADE ON UPDATE CASCADE);")
+    "CREATE TABLE timestamps (file_path TEXT, headline_offset INTEGER, timestamp_offset INTEGER, raw_value TEXT NOT NULL, type TEXT, warning_type TEXT, warning_value INTEGER, warning_unit TEXT, repeat_type TEXT, repeat_value INTEGER, repeat_unit TEXT, time INTEGER NOT NULL, time_end INTEGER, resolution TEXT, resolution_end TEXT, PRIMARY KEY (file_path, timestamp_offset), FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON DELETE CASCADE ON UPDATE CASCADE);")
   "Table schemas for the org database.")
 
 (defconst org-sql--default-pragma
@@ -1001,7 +1001,7 @@ and ARGS. FUN adds OBJ to ACC and returns new ACC."
   "Add data from logbook clock ENTRY to accumulator ACC."
   (-let (((&plist :offset :note-text) (cdr entry))
          ((&plist :state-old start :state-new end) (cdr entry)))
-    (org-sql--cons acc clocking
+    (org-sql--cons acc clocks
       :file_path fp
       :headline_offset (org-element-property :begin headline)
       :clock_offset offset
@@ -1017,7 +1017,7 @@ and ARGS. FUN adds OBJ to ACC and returns new ACC."
   "Add general logbook ENTRY to ACC."
   (-let* (((entry-type . entry-plist) entry)
           ((&plist :offset :header-text :note-text) entry-plist))
-    (org-sql--cons acc logbook
+    (org-sql--cons acc logbook_entries
       :file_path fp
       :headline_offset (org-ml-get-property :begin headline)
       :entry_offset offset
@@ -1143,7 +1143,7 @@ this function."
           (if (org-ml--time-is-long time) 'minute 'day))))
     (let ((start (org-ml-timestamp-get-start-time ts))
           (end (org-ml-timestamp-get-end-time ts)))
-      (org-sql--cons acc timestamp
+      (org-sql--cons acc timestamps
         :file_path fp
         :headline_offset (org-ml-get-property :begin headline)
         :timestamp_offset (org-ml-get-property :begin ts)

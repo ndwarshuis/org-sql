@@ -106,7 +106,6 @@
   (-let* (((table-name . meta) table-meta)
           ((&alist 'desc 'columns 'constraints) meta)
           (header (->> (symbol-name table-name)
-                       (s-capitalize)
                        (format "### %s")))
           (table-headers (list "Column"
                                "Is Primary"
