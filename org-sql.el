@@ -103,9 +103,11 @@ to store them. This is in addition to any properties specifified by
         (:priority :desc "character value of the priority"
                    :type char)
         (:is_archived :desc "true if the headline has an archive tag"
-                   :type boolean)
+                   :type boolean
+                   :constraints (notnull))
         (:is_commented :desc "true if the headline has a comment keyword"
-                    :type boolean)
+                    :type boolean
+                   :constraints (notnull))
         (:content :desc "the headline contents (currently unused)"
                   :type text))
        (constraints
@@ -122,11 +124,13 @@ to store them. This is in addition to any properties specifified by
         (:file_path :desc "path to the file containing the tag"
                     :type text)
         (:headline_offset :desc "file offset of the headline with this tag"
-                          :type integer)
+                          :type integer
+                        :constraints (notnull))
         (:tag :desc "the text value of this tag"
               :type text)
         (:is_inherited :desc "true if this tag is inherited"
-                    :type boolean))
+                    :type boolean
+                    :constraints (notnull)))
        (constraints
         (primary :keys (:file_path nil :headline_offset nil :tag nil :is_inherited nil))
         (foreign :ref headlines
@@ -141,7 +145,8 @@ to store them. This is in addition to any properties specifified by
         (:file_path :desc "path to the file containing this property"
                     :type text)
         (:headline_offset :desc "file offset of the headline with this property"
-                          :type integer)
+                          :type integer
+                        :constraints (notnull))
         (:property_offset :desc "file offset of this property in the org file"
                           :type integer)
         (:key_text :desc "this property's key"
@@ -151,7 +156,8 @@ to store them. This is in addition to any properties specifified by
                    :type text
                    :constraints (notnull))
         (:is_inherited :desc "true if this property is inherited (currently unused)"
-                    :type boolean))
+                    :type boolean
+                   :constraints (notnull)))
        (constraints
         (primary :keys (:file_path asc :property_offset asc))
         (foreign :ref headlines
@@ -166,7 +172,8 @@ to store them. This is in addition to any properties specifified by
         (:file_path :desc "path to the file containing this clock"
                     :type text)
         (:headline_offset :desc "offset of the headline with this clock"
-                          :type integer)
+                         :type integer
+                        :constraints (notnull))
         (:clock_offset :desc "file offset of this clock"
                        :type integer)
         (:time_start :desc "timestamp for the start of this clock"
@@ -189,7 +196,8 @@ to store them. This is in addition to any properties specifified by
         (:file_path :desc "path to the file containing this entry"
                     :type text)
         (:headline_offset :desc "offset of the headline with this entry"
-                          :type integer)
+                          :type integer
+                        :constraints (notnull))
         (:entry_offset :desc "offset of this logbook entry"
                        :type integer)
         (:entry_type :desc "type of this entry (see `org-log-note-headlines')"
@@ -216,9 +224,11 @@ to store them. This is in addition to any properties specifified by
         (:entry_offset :desc "offset of the logbook entry for this state change"
                        :type integer)
         (:state_old :desc "former todo state keyword"
-                    :type text :constraints (notnull))
+                    :type text
+                    :constraints (notnull))
         (:state_new :desc "updated todo state keyword"
-                    :type text :constraints (notnull)))
+                    :type text
+                    :constraints (notnull)))
        (constraints
         (primary :keys (:file_path asc :entry_offset asc))
         (foreign :ref logbook_entries
@@ -256,15 +266,18 @@ to store them. This is in addition to any properties specifified by
         (:file_path :desc "path to the file containing this link"
                     :type text)
         (:headline_offset :desc "offset of the headline with this link"
-                          :type integer)
+                          :type integer
+                          :constraints (notnull))
         (:link_offset :desc "file offset of this link"
                       :type integer)
         (:link_path :desc "target of this link (eg url, file path, etc)"
-                    :type text)
+                    :type text
+                    :constraints (notnull))
         (:link_text :desc "text of this link"
                     :type text)
         (:link_type :desc "type of this link (eg http, mu4e, file, etc)"
-                    :type text))
+                    :type text
+                    :constraints (notnull)))
        (constraints
         (primary :keys (:file_path asc :link_offset asc))
         (foreign :ref headlines
@@ -279,14 +292,16 @@ to store them. This is in addition to any properties specifified by
         (:file_path :desc "path to the file containing this timestamp"
                     :type text)
         (:headline_offset :desc "offset of the headline containing this timestamp"
-                          :type integer)
+                          :type integer
+                          :constraints (notnull))
         (:timestamp_offset :desc "offset of this timestamp"
                            :type integer)
         (:raw_value :desc "text representation of this timestamp"
                     :type text
                     :constraints (notnull))
         (:is_active :desc "true if the timestamp is active"
-                    :type boolean)
+                    :type boolean
+                    :constraints (notnull))
         (:warning_type :desc "warning type of this timestamp"
                        :type text
                        :allowed (all first))
@@ -309,9 +324,10 @@ to store them. This is in addition to any properties specifified by
         (:time_end :desc "the end time of this timestamp"
                    :type integer)
         (:start_is_long :desc "true if the start time is in long format"
-                        :type boolean)
+                        :type boolean
+                        :constraints (notnull))
         (:end_is_long :desc "true if the end time is in long format"
-                      :type text))
+                      :type boolean))
        (constraints
         (primary :keys (:file_path asc :timestamp_offset asc))
         (foreign :ref headlines
@@ -319,7 +335,7 @@ to store them. This is in addition to any properties specifified by
                  :parent-keys (:file_path :headline_offset)
                  :on_delete cascade
                  :on_update cascade))))
-    "Internal schema representation as a pure symbolic list."))
+      "Internal schema representation as a pure symbolic list."))
 
 (defun org-sql--meta-format-column-constraints (constraints-meta)
   "Return formatted column constraints for CONSTRAINTS-META."

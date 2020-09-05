@@ -205,8 +205,8 @@ Each row stores one headline in a given org file and its metadata
 | deadline_offset |  |  | x | integer | file offset of the DEADLINE timestamp |
 | closed_offset |  |  | x | integer | file offset of the CLOSED timestamp |
 | priority |  |  | x | char | character value of the priority |
-| is_archived |  |  | x | boolean | true if the headline has an archive tag |
-| is_commented |  |  | x | boolean | true if the headline has a comment keyword |
+| is_archived |  |  |  | boolean | true if the headline has an archive tag |
+| is_commented |  |  |  | boolean | true if the headline has a comment keyword |
 | content |  |  | x | text | the headline contents (currently unused) |
 
 ### tags
@@ -227,11 +227,11 @@ Each row stores one property
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
 | file_path | x | file_path - headlines |  | text | path to the file containing this property |
-| headline_offset |  | headline_offset - headlines | x | integer | file offset of the headline with this property |
+| headline_offset |  | headline_offset - headlines |  | integer | file offset of the headline with this property |
 | property_offset | x |  |  | integer | file offset of this property in the org file |
 | key_text |  |  |  | text | this property's key |
 | val_text |  |  |  | text | this property's value |
-| is_inherited |  |  | x | boolean | true if this property is inherited (currently unused) |
+| is_inherited |  |  |  | boolean | true if this property is inherited (currently unused) |
 
 ### clocks
 
@@ -240,7 +240,7 @@ Each row stores one clock entry
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
 | file_path | x | file_path - headlines |  | text | path to the file containing this clock |
-| headline_offset |  | headline_offset - headlines | x | integer | offset of the headline with this clock |
+| headline_offset |  | headline_offset - headlines |  | integer | offset of the headline with this clock |
 | clock_offset | x |  |  | integer | file offset of this clock |
 | time_start |  |  | x | integer | timestamp for the start of this clock |
 | time_end |  |  | x | integer | timestamp for the end of this clock |
@@ -253,7 +253,7 @@ Each row stores one logbook entry (except for clocks)
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
 | file_path | x | file_path - headlines |  | text | path to the file containing this entry |
-| headline_offset |  | headline_offset - headlines | x | integer | offset of the headline with this entry |
+| headline_offset |  | headline_offset - headlines |  | integer | offset of the headline with this entry |
 | entry_offset | x |  |  | integer | offset of this logbook entry |
 | entry_type |  |  | x | text | type of this entry (see `org-log-note-headlines`) |
 | time_logged |  |  | x | integer | timestamp for when this entry was taken |
@@ -288,11 +288,11 @@ Each rows stores one link
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
 | file_path | x | file_path - headlines |  | text | path to the file containing this link |
-| headline_offset |  | headline_offset - headlines | x | integer | offset of the headline with this link |
+| headline_offset |  | headline_offset - headlines |  | integer | offset of the headline with this link |
 | link_offset | x |  |  | integer | file offset of this link |
-| link_path |  |  | x | text | target of this link (eg url, file path, etc) |
+| link_path |  |  |  | text | target of this link (eg url, file path, etc) |
 | link_text |  |  | x | text | text of this link |
-| link_type |  |  | x | text | type of this link (eg http, mu4e, file, etc) |
+| link_type |  |  |  | text | type of this link (eg http, mu4e, file, etc) |
 
 ### timestamps
 
@@ -301,10 +301,10 @@ Each row stores one timestamp
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
 | file_path | x | file_path - headlines |  | text | path to the file containing this timestamp |
-| headline_offset |  | headline_offset - headlines | x | integer | offset of the headline containing this timestamp |
+| headline_offset |  | headline_offset - headlines |  | integer | offset of the headline containing this timestamp |
 | timestamp_offset | x |  |  | integer | offset of this timestamp |
 | raw_value |  |  |  | text | text representation of this timestamp |
-| is_active |  |  | x | boolean | true if the timestamp is active |
+| is_active |  |  |  | boolean | true if the timestamp is active |
 | warning_type |  |  | x | text | warning type of this timestamp (`all`, or `first`) |
 | warning_value |  |  | x | integer | warning shift of this timestamp |
 | warning_unit |  |  | x | text | warning unit of this timestamp  (`hour`, `day`, `week`, `month`, or `year`) |
@@ -313,8 +313,8 @@ Each row stores one timestamp
 | repeat_unit |  |  | x | text | repeater unit of this timestamp (`hour`, `day`, `week`, `month`, or `year`) |
 | time_start |  |  |  | integer | the start time (or only time) of this timestamp |
 | time_end |  |  | x | integer | the end time of this timestamp |
-| start_is_long |  |  | x | boolean | true if the start time is in long format |
-| end_is_long |  |  | x | text | true if the end time is in long format |
+| start_is_long |  |  |  | boolean | true if the start time is in long format |
+| end_is_long |  |  | x | boolean | true if the end time is in long format |
 
 <!-- 0.0.1 -->
 
