@@ -94,11 +94,11 @@ to store them. This is in addition to any properties specifified by
                   :type text)
         (:effort :desc "the value of the Effort property in minutes"
                  :type integer)
-        (:scheduled_offset :desc "file offset of the SCHEDULED timestamp (or NULL if none)"
+        (:scheduled_offset :desc "file offset of the SCHEDULED timestamp"
                            :type integer)
-        (:deadline_offset :desc "file offset of the DEADLINE timestamp (or NULL if none)"
+        (:deadline_offset :desc "file offset of the DEADLINE timestamp"
                           :type integer)
-        (:closed_offset :desc "file offset of the CLOSED timestamp (or NULL if none)"
+        (:closed_offset :desc "file offset of the CLOSED timestamp"
                         :type integer)
         (:priority :desc "character value of the priority"
                    :type char)
@@ -145,9 +145,11 @@ to store them. This is in addition to any properties specifified by
         (:property_offset :desc "file offset of this property in the org file"
                           :type integer)
         (:key_text :desc "this property's key"
-                   :type text :constraints (notnull))
+                   :type text
+                   :constraints (notnull))
         (:val_text :desc "this property's value"
-                   :type text :constraints (notnull))
+                   :type text
+                   :constraints (notnull))
         (:inherited :desc "true if this property is inherited (currently unused)"
                     :type boolean))
        (constraints
@@ -233,7 +235,8 @@ to store them. This is in addition to any properties specifified by
         (:entry_offset :desc "offset of the logbook entry for this planning change"
                        :type integer)
         (:timestamp_offset :desc "offset of the former timestamp"
-                           :type integer :constraints (notnull)))
+                           :type integer
+                           :constraints (notnull)))
        (constraints
         (primary :keys (:file_path asc :entry_offset asc))
         (foreign :ref timestamp
@@ -280,29 +283,38 @@ to store them. This is in addition to any properties specifified by
         (:timestamp_offset :desc "offset of this timestamp"
                            :type integer)
         (:raw_value :desc "text representation of this timestamp"
-                    :type text :constraints (notnull))
-        (:type :desc "type of this timestamp (`active' or `inactive')"
-               :type text)
-        (:warning_type :desc "warning type of this timestamp (`all' or `first')"
-                       :type text)
+                    :type text
+                    :constraints (notnull))
+        (:type :desc "type of this timestamp"
+               :type text
+               :allowed (active inactive))
+        (:warning_type :desc "warning type of this timestamp"
+                       :type text
+                       :allowed (all first))
         (:warning_value :desc "warning shift of this timestamp"
                         :type integer)
-        (:warning_unit :desc "warning unit of this timestamp (`hour', `day', `week', `month', or `year')"
-                       :type text)
-        (:repeat_type :desc "repeater type of this timestamp (`catch-up', `restart', `cumulate')"
-                      :type text)
+        (:warning_unit :desc "warning unit of this timestamp "
+                       :type text
+                       :allowed (hour day week month year))
+        (:repeat_type :desc "repeater type of this timestamp"
+                      :type text
+                      :allowed (catch-up restart cumulate))
         (:repeat_value :desc "repeater shift of this timestamp"
                        :type integer)
-        (:repeat_unit :desc "repeater unit of this timestamp (`hour', `day', `week', `month', or `year')"
-                      :type text)
+        (:repeat_unit :desc "repeater unit of this timestamp"
+                      :type text
+                      :allowed (hour day week month year))
         (:time :desc "the start time (or only time) of this timestamp"
-               :type integer :constraints (notnull))
+               :type integer
+               :constraints (notnull))
         (:time_end :desc "the end time of this timestamp"
                    :type integer)
-        (:resolution :desc "`day' if the start (or only) time is in short format, else `minute'"
-                     :type text)
-        (:resolution_end :desc "`day' if the end time is in short format, else `minute'"
-                         :type text))
+        (:resolution :desc "the format of the starting time"
+                     :type text
+                     :allowed (day minute))
+        (:resolution_end :desc "for the format of the ending time"
+                         :type text
+                         :allowed (day minute)))
        (constraints
         (primary :keys (:file_path asc :timestamp_offset asc))
         (foreign :ref headlines

@@ -201,9 +201,9 @@ Each row stores one headline in a given org file and its metadata
 | headline_text |  |  |  | text | raw text of the headline |
 | keyword |  |  | x | text | the TODO state keyword |
 | effort |  |  | x | integer | the value of the Effort property in minutes |
-| scheduled_offset |  |  | x | integer | file offset of the SCHEDULED timestamp (or NULL if none) |
-| deadline_offset |  |  | x | integer | file offset of the DEADLINE timestamp (or NULL if none) |
-| closed_offset |  |  | x | integer | file offset of the CLOSED timestamp (or NULL if none) |
+| scheduled_offset |  |  | x | integer | file offset of the SCHEDULED timestamp |
+| deadline_offset |  |  | x | integer | file offset of the DEADLINE timestamp |
+| closed_offset |  |  | x | integer | file offset of the CLOSED timestamp |
 | priority |  |  | x | char | character value of the priority |
 | archived |  |  | x | boolean | true if the headline has an archive tag |
 | commented |  |  | x | boolean | true if the headline has a comment keyword |
@@ -304,17 +304,17 @@ Each row stores one timestamp
 | headline_offset |  | headline_offset - headlines | x | integer | offset of the headline containing this timestamp |
 | timestamp_offset | x |  |  | integer | offset of this timestamp |
 | raw_value |  |  |  | text | text representation of this timestamp |
-| type |  |  | x | text | type of this timestamp (`active` or `inactive`) |
-| warning_type |  |  | x | text | warning type of this timestamp (`all` or `first`) |
+| type |  |  | x | text | type of this timestamp (`active`, or `inactive`) |
+| warning_type |  |  | x | text | warning type of this timestamp (`all`, or `first`) |
 | warning_value |  |  | x | integer | warning shift of this timestamp |
-| warning_unit |  |  | x | text | warning unit of this timestamp (`hour`, `day`, `week`, `month`, or `year`) |
-| repeat_type |  |  | x | text | repeater type of this timestamp (`catch-up`, `restart`, `cumulate`) |
+| warning_unit |  |  | x | text | warning unit of this timestamp  (`hour`, `day`, `week`, `month`, or `year`) |
+| repeat_type |  |  | x | text | repeater type of this timestamp (`catch-up`, `restart`, or `cumulate`) |
 | repeat_value |  |  | x | integer | repeater shift of this timestamp |
 | repeat_unit |  |  | x | text | repeater unit of this timestamp (`hour`, `day`, `week`, `month`, or `year`) |
 | time |  |  |  | integer | the start time (or only time) of this timestamp |
 | time_end |  |  | x | integer | the end time of this timestamp |
-| resolution |  |  | x | text | `day` if the start (or only) time is in short format, else `minute` |
-| resolution_end |  |  | x | text | `day` if the end time is in short format, else `minute` |
+| resolution |  |  | x | text | the format of the starting time (`day`, or `minute`) |
+| resolution_end |  |  | x | text | for the format of the ending time (`day`, or `minute`) |
 
 <!-- 0.0.1 -->
 

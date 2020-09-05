@@ -62,6 +62,13 @@
 (defun org-sql-doc-format-table-row (members)
   (format "| %s |" (s-join " | " members)))
 
+(defun org-sql-doc-format-allowed-values (members)
+  (when members
+    (-let* ((members* (--map (format "`%s`" it) members))
+            ((rest last) (-split-at (1- (length members*)) members*))
+            (rest* (s-join ", " rest)))
+      (format "%s, or %s" rest* (car last)))))
+
 (defun org-sql-doc-format-foreign (column-name constraints-meta)
   (cl-flet
       ((find-format
@@ -78,7 +85,7 @@
 
 (defun org-sql-doc-format-column (column-meta constraints-meta)
   (-let* (((column-name . meta) column-meta)
-          ((&plist :desc :type :constraints) meta)
+          ((&plist :desc :type :constraints :allowed) meta)
           ((&alist 'primary) constraints-meta)
           (primary-keys (-slice (plist-get primary :keys) 0 nil 2))
           (column-name* (org-sql--kw-to-colname column-name))
@@ -89,8 +96,10 @@
                           "x"))
           (foreign (org-sql-doc-format-foreign column-name constraints-meta))
           (type* (symbol-name type))
-          (desc* (org-sql-doc-format-quotes desc)))
-    (->> (list column-name* is-primary foreign null-allowed type* desc*)
+          (allowed* (org-sql-doc-format-allowed-values allowed))
+          (desc* (org-sql-doc-format-quotes desc))
+          (desc-full (if allowed* (format "%s (%s)" desc* allowed*) desc*)))
+    (->> (list column-name* is-primary foreign null-allowed type* desc-full)
          (org-sql-doc-format-table-row))))
 
 (defun org-sql-doc-format-schema (table-meta)
