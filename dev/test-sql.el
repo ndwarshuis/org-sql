@@ -188,7 +188,7 @@ list then join the cdr of IN with newlines."
              (schema-cmd "CREATE TABLE files (file_path TEXT,md5 TEXT);")
              (files (format "insert into files (file_path,md5,size) values ('%s','%s',6);"
                             test-file test-md5))
-             (headlines (format "insert into headlines (file_path,headline_offset,tree_path,headline_text,keyword,effort,scheduled_offset,deadline_offset,closed_offset,priority,is_archived,is_commented,content) values ('%s',1,'/','foo',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL);"
+             (headlines (format "insert into headlines (file_path,headline_offset,headline_text,keyword,effort,scheduled_offset,deadline_offset,closed_offset,priority,is_archived,is_commented,content) values ('%s',1,'foo',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL);insert into headline_closures (headline_offset,parent_offset,depth) values (1,1,0);"
                                 test-file)))
         (expect (org-sql--cmd org-sql-sqlite-path schema-cmd)
                 :to-equal "")
@@ -234,9 +234,11 @@ list then join the cdr of IN with newlines."
 
   (it "single headline"
     (expect-sql "* headline"
-      `((headlines :file_path ,testing-filepath
+      `((headline_closures :headline_offset 1
+                           :parent_offset 1
+                           :depth 0)
+        (headlines :file_path ,testing-filepath
                    :headline_offset 1
-                   :tree_path "/"
                    :headline_text "headline"
                    :keyword nil
                    :effort nil
@@ -252,9 +254,11 @@ list then join the cdr of IN with newlines."
     ;; NOTE reverse order
     (expect-sql (list "* headline"
                       "* another headline")
-      `((headlines :file_path ,testing-filepath
+      `((headline_closures :headline_offset 12
+                           :parent_offset 12
+                           :depth 0)
+        (headlines :file_path ,testing-filepath
                    :headline_offset 12
-                   :tree_path "/"
                    :headline_text "another headline"
                    :keyword nil
                    :effort nil
@@ -265,9 +269,11 @@ list then join the cdr of IN with newlines."
                    :is_archived nil
                    :is_commented nil
                    :content nil)
+        (headline_closures :headline_offset 1
+                           :parent_offset 1
+                           :depth 0)
         (headlines :file_path ,testing-filepath
                    :headline_offset 1
-                   :tree_path "/"
                    :headline_text "headline"
                    :keyword nil
                    :effort nil
@@ -284,9 +290,11 @@ list then join the cdr of IN with newlines."
                       ":PROPERTIES:"
                       ":Effort: 0:30"
                       ":END:")
-      `((headlines :file_path ,testing-filepath
+      `((headline_closures :headline_offset 1
+                           :parent_offset 1
+                           :depth 0)
+        (headlines :file_path ,testing-filepath
                    :headline_offset 1
-                   :tree_path "/"
                    :headline_text "another headline"
                    :keyword "TODO"
                    :effort 30
@@ -301,9 +309,14 @@ list then join the cdr of IN with newlines."
   (it "nested headline"
     (expect-sql (list "* headline"
                       "** nested headline")
-      `((headlines :file_path ,testing-filepath
+      `((headline_closures :headline_offset 12
+                           :parent_offset 12
+                           :depth 0)
+        (headline_closures :headline_offset 12
+                           :parent_offset 1
+                           :depth 1)
+        (headlines :file_path ,testing-filepath
                    :headline_offset 12
-                   :tree_path "/headline"
                    :headline_text "nested headline"
                    :keyword nil
                    :effort nil
@@ -314,9 +327,11 @@ list then join the cdr of IN with newlines."
                    :is_archived nil
                    :is_commented nil
                    :content nil)
+        (headline_closures :headline_offset 1
+                           :parent_offset 1
+                           :depth 0)
         (headlines :file_path ,testing-filepath
                    :headline_offset 1
-                   :tree_path "/"
                    :headline_text "headline"
                    :keyword nil
                    :effort nil
@@ -331,9 +346,11 @@ list then join the cdr of IN with newlines."
 
   (it "archived headline"
     (expect-sql "* headline :ARCHIVE:"
-      `((headlines :file_path ,testing-filepath
+      `((headline_closures :headline_offset 1
+                           :parent_offset 1
+                           :depth 0)
+        (headlines :file_path ,testing-filepath
                    :headline_offset 1
-                   :tree_path "/"
                    :headline_text "headline"
                    :keyword nil
                    :effort nil
@@ -364,9 +381,11 @@ list then join the cdr of IN with newlines."
                       :time_end nil
                       :end_is_long nil
                       :raw_value ,ts)
+          (headline_closures :headline_offset 1
+                             :parent_offset 1
+                             :depth 0)
           (headlines :file_path ,testing-filepath
                      :headline_offset 1
-                     :tree_path "/"
                      :headline_text "headline"
                      :keyword nil
                      :effort nil
@@ -430,9 +449,11 @@ list then join the cdr of IN with newlines."
                       :time_end nil
                       :end_is_long nil
                       :raw_value ,ts0)
+          (headline_closures :headline_offset 1
+                             :parent_offset 1
+                             :depth 0)
           (headlines :file_path ,testing-filepath
                      :headline_offset 1
-                     :tree_path "/"
                      :headline_text "headline"
                      :keyword nil
                      :effort nil

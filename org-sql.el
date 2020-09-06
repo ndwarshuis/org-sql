@@ -85,8 +85,8 @@ to store them. This is in addition to any properties specifified by
                     :type text)
         (:headline_offset :desc "file offset of the headline's first character"
                           :type integer)
-        (:tree_path :desc "outline tree path of the headline"
-                    :type text)
+        ;; (:tree_path :desc "outline tree path of the headline"
+        ;;             :type text)
         (:headline_text :desc "raw text of the headline"
                         :type text
                         :constraints (notnull))
@@ -117,6 +117,24 @@ to store them. This is in addition to any properties specifified by
                  :parent-keys (:file_path)
                  :on_delete cascade
                  :on_update cascade)))
+
+      (headline_closures
+       (desc . "Each row stores the ancestor and depth of a headline relationship (eg closure table)")
+       (columns
+        (:headline_offset :desc "offset of this headline"
+                          :type integer)
+        (:parent_offset :desc "offset of this headline's parent"
+                        :type integer)
+        (:depth :desc "levels between this headline and the referred parent"
+                :type integer))
+       (constraints
+        (primary :keys (:headline_offset asc :parent_offset asc))
+        (foreign :ref headlines
+                 :keys (:headline_offset :parent_offset)
+                 :parent-keys (:headline_offset :headline_offset)
+                 :on_delete cascade
+                 :on_update cascade)))
+
 
       (tags
        (desc . "Each row stores one tag")
@@ -731,10 +749,13 @@ throw an error if the string is not recognized."
 
 Return a string formatted as /level1/level2/.../levelN for each
 level in HEADLINE's path (not including the current headline)."
-  (->> (org-ml-headline-get-path headline)
-       (-drop-last 1)
-       (s-join "/")
-       (format "/%s")))
+  (cl-labels
+      ((get-path
+        (acc node)
+        (if (or (null node) (eq 'org-data (car node))) acc
+          (get-path (cons (org-ml-get-property :begin node) acc)
+                    (org-ml-get-property :parent node)))))
+    (get-path nil headline)))
         
 (defun org-sql--headline-get-archive-itags (headline)
   "Return archive itags from HEADLINE or nil if none."
@@ -1188,6 +1209,21 @@ this function."
         (org-sql--extract acc #'org-sql--extract-ts timestamps headline fp))
     acc))
 
+(defun org-sql--extract-hl-closures (acc headline)
+  (let ((offset (org-ml-get-property :begin headline)))
+    (cl-flet
+        ((add-closure
+          (acc parent-offset depth)
+          (org-sql--cons acc headline_closures
+            :headline_offset offset
+            :parent_offset parent-offset
+            :depth depth)))
+      (->> (org-sql--headline-get-path headline)
+           (reverse)
+           (--map-indexed (list it it-index))
+           (reverse)
+           (--reduce-from (apply #'add-closure acc it) acc)))))
+
 (defun org-sql--extract-hl-meta (acc headline fp)
   "Add general data from HEADLINE to accumulator ACC."
   (-let* (((&plist :closed :scheduled :deadline)
@@ -1198,7 +1234,7 @@ this function."
     (-> (org-sql--cons acc headlines
           :file_path fp
           :headline_offset (org-ml-get-property :begin headline)
-          :tree_path (org-sql--headline-get-path headline)
+          ;; :tree_path (org-sql--headline-get-path headline)
           :headline_text (org-ml-get-property :raw-value headline)
           :keyword (org-ml-get-property :todo-keyword headline)
           :effort (-some-> (org-ml-headline-get-node-property "Effort" headline)
@@ -1211,6 +1247,7 @@ this function."
           :is_archived (org-ml-get-property :archivedp headline)
           :is_commented (org-ml-get-property :commentedp headline)
           :content nil)
+        (org-sql--extract-hl-closures headline)
         (org-sql--extract #'org-sql--extract-ts planning-timestamps headline fp)
         (org-sql--extract-hl-contents headline fp))))
 

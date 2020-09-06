@@ -197,7 +197,6 @@ Each row stores one headline in a given org file and its metadata
 |  -  |  -  |  -  |  -  |  -  |  -  |
 | file_path | x | file_path - files |  | text | path to file containin the headline |
 | headline_offset | x |  |  | integer | file offset of the headline's first character |
-| tree_path |  |  | x | text | outline tree path of the headline |
 | headline_text |  |  |  | text | raw text of the headline |
 | keyword |  |  | x | text | the TODO state keyword |
 | effort |  |  | x | integer | the value of the Effort property in minutes |
@@ -208,6 +207,16 @@ Each row stores one headline in a given org file and its metadata
 | is_archived |  |  |  | boolean | true if the headline has an archive tag |
 | is_commented |  |  |  | boolean | true if the headline has a comment keyword |
 | content |  |  | x | text | the headline contents (currently unused) |
+
+### headline_closures
+
+Each row stores the ancestor and depth of a headline relationship (eg closure table)
+
+| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type | Description |
+|  -  |  -  |  -  |  -  |  -  |  -  |
+| headline_offset | x | headline_offset - headlines |  | integer | offset of this headline |
+| parent_offset | x | headline_offset - headlines |  | integer | offset of this headline's parent |
+| depth |  |  | x | integer | levels between this headline and the referred parent |
 
 ### tags
 
