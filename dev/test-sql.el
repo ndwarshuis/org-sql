@@ -188,8 +188,8 @@ list then join the cdr of IN with newlines."
              (schema-cmd "CREATE TABLE files (file_path TEXT,md5 TEXT);")
              (files (format "insert into files (file_path,md5,size) values ('%s','%s',6);"
                             test-file test-md5))
-             (headlines (format "insert into headlines (file_path,headline_offset,headline_text,keyword,effort,priority,is_archived,is_commented,content) values ('%s',1,'foo',NULL,NULL,NULL,NULL,NULL,NULL);insert into headline_closures (headline_offset,parent_offset,depth) values (1,1,0);"
-                                test-file)))
+             (headlines (format "insert into headlines (file_path,headline_offset,headline_text,keyword,effort,priority,is_archived,is_commented,content) values ('%s',1,'foo',NULL,NULL,NULL,NULL,NULL,NULL);insert into headline_closures (file_path,headline_offset,parent_offset,depth) values ('%s',1,1,0);"
+                                test-file test-file)))
         (expect (org-sql--cmd org-sql-sqlite-path schema-cmd)
                 :to-equal "")
         (expect (org-sql--get-transactions)
@@ -234,7 +234,8 @@ list then join the cdr of IN with newlines."
 
   (it "single headline"
     (expect-sql "* headline"
-      `((headline_closures :headline_offset 1
+      `((headline_closures :file_path ,testing-filepath
+                           :headline_offset 1
                            :parent_offset 1
                            :depth 0)
         (headlines :file_path ,testing-filepath
@@ -251,7 +252,8 @@ list then join the cdr of IN with newlines."
     ;; NOTE reverse order
     (expect-sql (list "* headline"
                       "* another headline")
-      `((headline_closures :headline_offset 12
+      `((headline_closures :file_path ,testing-filepath
+                           :headline_offset 12
                            :parent_offset 12
                            :depth 0)
         (headlines :file_path ,testing-filepath
@@ -263,7 +265,8 @@ list then join the cdr of IN with newlines."
                    :is_archived nil
                    :is_commented nil
                    :content nil)
-        (headline_closures :headline_offset 1
+        (headline_closures :file_path ,testing-filepath
+                           :headline_offset 1
                            :parent_offset 1
                            :depth 0)
         (headlines :file_path ,testing-filepath
@@ -281,7 +284,8 @@ list then join the cdr of IN with newlines."
                       ":PROPERTIES:"
                       ":Effort: 0:30"
                       ":END:")
-      `((headline_closures :headline_offset 1
+      `((headline_closures :file_path ,testing-filepath
+                           :headline_offset 1
                            :parent_offset 1
                            :depth 0)
         (headlines :file_path ,testing-filepath
@@ -297,10 +301,12 @@ list then join the cdr of IN with newlines."
   (it "nested headline"
     (expect-sql (list "* headline"
                       "** nested headline")
-      `((headline_closures :headline_offset 12
+      `((headline_closures :file_path ,testing-filepath
+                           :headline_offset 12
                            :parent_offset 12
                            :depth 0)
-        (headline_closures :headline_offset 12
+        (headline_closures :file_path ,testing-filepath
+                           :headline_offset 12
                            :parent_offset 1
                            :depth 1)
         (headlines :file_path ,testing-filepath
@@ -312,7 +318,8 @@ list then join the cdr of IN with newlines."
                    :is_archived nil
                    :is_commented nil
                    :content nil)
-        (headline_closures :headline_offset 1
+        (headline_closures :file_path ,testing-filepath
+                           :headline_offset 1
                            :parent_offset 1
                            :depth 0)
         (headlines :file_path ,testing-filepath
@@ -328,7 +335,8 @@ list then join the cdr of IN with newlines."
 
   (it "archived headline"
     (expect-sql "* headline :ARCHIVE:"
-      `((headline_closures :headline_offset 1
+      `((headline_closures :file_path ,testing-filepath
+                           :headline_offset 1
                            :parent_offset 1
                            :depth 0)
         (headlines :file_path ,testing-filepath
@@ -364,7 +372,8 @@ list then join the cdr of IN with newlines."
                             :headline_offset 1
                             :planning_type closed
                             :timestamp_offset 20)
-          (headline_closures :headline_offset 1
+          (headline_closures :file_path ,testing-filepath
+                             :headline_offset 1
                              :parent_offset 1
                              :depth 0)
           (headlines :file_path ,testing-filepath
@@ -441,7 +450,8 @@ list then join the cdr of IN with newlines."
                             :headline_offset 1
                             :planning_type closed
                             :timestamp_offset 75)
-          (headline_closures :headline_offset 1
+          (headline_closures :file_path ,testing-filepath
+                             :headline_offset 1
                              :parent_offset 1
                              :depth 0)
           (headlines :file_path ,testing-filepath

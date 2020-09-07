@@ -118,10 +118,11 @@ to store them. This is in addition to any properties specifified by
                  :on_delete cascade
                  :on_update cascade)))
 
-      ;; TODO this need file path
       (headline_closures
        (desc . "Each row stores the ancestor and depth of a headline relationship (eg closure table)")
        (columns
+        (:file_path :desc "path to the file containing this headline"
+                    :type text)
         (:headline_offset :desc "offset of this headline"
                           :type integer)
         (:parent_offset :desc "offset of this headline's parent"
@@ -129,10 +130,10 @@ to store them. This is in addition to any properties specifified by
         (:depth :desc "levels between this headline and the referred parent"
                 :type integer))
        (constraints
-        (primary :keys (:headline_offset asc :parent_offset asc))
+        (primary :keys (:file_path asc :headline_offset asc :parent_offset asc))
         (foreign :ref headlines
-                 :keys (:headline_offset :parent_offset)
-                 :parent-keys (:headline_offset :headline_offset)
+                 :keys (:file_path :headline_offset :parent_offset)
+                 :parent-keys (:file_path :headline_offset :headline_offset)
                  :on_delete cascade
                  :on_update cascade)))
 
@@ -1249,12 +1250,13 @@ this function."
                (-reduce-from #'add-planning-maybe acc))))
     acc))
 
-(defun org-sql--extract-hl-closures (acc headline)
+(defun org-sql--extract-hl-closures (acc headline fp)
   (let ((offset (org-ml-get-property :begin headline)))
     (cl-flet
         ((add-closure
           (acc parent-offset depth)
           (org-sql--cons acc headline_closures
+            :file_path fp
             :headline_offset offset
             :parent_offset parent-offset
             :depth depth)))
@@ -1282,7 +1284,7 @@ this function."
         :is_archived (org-ml-get-property :archivedp headline)
         :is_commented (org-ml-get-property :commentedp headline)
         :content nil)
-      (org-sql--extract-hl-closures headline)
+      (org-sql--extract-hl-closures headline fp)
       (org-sql--extract-hl-planning headline fp)
       ;; (org-sql--extract #'org-sql--extract-ts planning-timestamps headline fp)
       (org-sql--extract-hl-contents headline fp)))

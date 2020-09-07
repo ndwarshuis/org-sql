@@ -211,6 +211,7 @@ Each row stores the ancestor and depth of a headline relationship (eg closure ta
 
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
+| file_path | x | file_path - headlines |  | text | path to the file containing this headline |
 | headline_offset | x | headline_offset - headlines |  | integer | offset of this headline |
 | parent_offset | x | headline_offset - headlines |  | integer | offset of this headline's parent |
 | depth |  |  | x | integer | levels between this headline and the referred parent |
