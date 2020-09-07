@@ -283,7 +283,8 @@ list then join the cdr of IN with newlines."
     (expect-sql (list "* TODO [#A] COMMENT another headline"
                       ":PROPERTIES:"
                       ":Effort: 0:30"
-                      ":END:")
+                      ":END:"
+                      "this /should/ appear")
       `((headline_closures :file_path ,testing-filepath
                            :headline_offset 1
                            :parent_offset 1
@@ -296,7 +297,7 @@ list then join the cdr of IN with newlines."
                    :priority "A"
                    :is_archived nil
                    :is_commented t
-                   :content nil))))
+                   :content "this /should/ appear\n"))))
 
   (it "nested headline"
     (expect-sql (list "* headline"

@@ -108,7 +108,7 @@ to store them. This is in addition to any properties specifified by
         (:is_commented :desc "true if the headline has a comment keyword"
                     :type boolean
                    :constraints (notnull))
-        (:content :desc "the headline contents (currently unused)"
+        (:content :desc "the headline contents"
                   :type text))
        (constraints
         (primary :keys (:file_path asc :headline_offset asc))
@@ -1266,19 +1266,22 @@ this function."
         :end_is_long (get-resolution end)
         :raw_value (org-ml-get-property :raw-value ts)))))
 
+(defun org-sql--headline-get-contents (headline)
+  (-some->> (org-ml-headline-get-section headline)
+    ;; TODO need a function in org-ml that returns non-meta
+    ;; TODO this only works when `org-log-into-drawer' is defined
+    (--remove (org-ml-is-any-type '(planning property-drawer) it))
+    (--remove (and (org-ml-is-type 'drawer it)
+                   (equal (org-element-property :drawer-name it)
+                          org-log-into-drawer)))))
+
 (defun org-sql--extract-hl-contents (acc headline fp)
   "Add contents from partitioned header HEADLINE to accumulator ACC."
-  ;; TODO this only works when `org-log-into-drawer' is defined
   (-if-let (pattern (-some--> org-sql-included-contents-timestamp-types
                       (--map `(:type ',it) it)
                       `(:any * (:and timestamp (:or ,@it)))))
-      (let ((timestamps
-             (-some->> (org-ml-headline-get-section headline)
-               ;; TODO need a function in org-ml that returns non-meta
-               (--remove (org-ml-is-any-type '(planning property-drawer) it))
-               (--remove (equal (org-element-property :drawer-name it)
-                                org-log-into-drawer))
-               (org-ml-match pattern))))
+      (let ((timestamps (-some->> (org-sql--headline-get-contents headline)
+                          (org-ml-match pattern))))
         (org-sql--extract acc #'org-sql--extract-ts timestamps headline fp))
     acc))
 
@@ -1335,7 +1338,9 @@ this function."
                     (byte-to-string))
         :is_archived (org-ml-get-property :archivedp headline)
         :is_commented (org-ml-get-property :commentedp headline)
-        :content nil)
+        :content (-some->> (org-sql--headline-get-contents headline)
+                   (-map #'org-ml-to-string)
+                   (s-join "")))
       (org-sql--extract-hl-closures headline fp)
       (org-sql--extract-hl-planning headline fp)
       ;; (org-sql--extract #'org-sql--extract-ts planning-timestamps headline fp)

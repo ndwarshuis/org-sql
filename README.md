@@ -203,7 +203,7 @@ Each row stores one headline in a given org file and its metadata
 | priority |  |  | x | char | character value of the priority |
 | is_archived |  |  |  | boolean | true if the headline has an archive tag |
 | is_commented |  |  |  | boolean | true if the headline has a comment keyword |
-| content |  |  | x | text | the headline contents (currently unused) |
+| content |  |  | x | text | the headline contents |
 
 ### headline_closures
 
