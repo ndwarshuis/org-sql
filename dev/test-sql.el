@@ -687,36 +687,51 @@ list then join the cdr of IN with newlines."
   ;; property table
 
   (it "single property"
-    (expect-sql-tbls (properties) (list "* parent"
-                                        ":PROPERTIES:"
-                                        ":key: val"
-                                        ":END:")
-      `((properties :file_path ,testing-filepath
-                    :headline_offset 1
+    (expect-sql-tbls (properties headline_properties)
+        (list "* parent"
+              ":PROPERTIES:"
+              ":key: val"
+              ":END:")
+      `((headline_properties :file_path ,testing-filepath
+                             :headline_offset 1
+                             :property_offset 23)
+        (properties :file_path ,testing-filepath
                     :property_offset 23
                     :key_text "key"
-                    :val_text "val"
-                    ;; TODO shouldn't this only be 0/1?
-                    :is_inherited nil))))
+                    :val_text "val"))))
 
   (it "multiple properties"
-    (expect-sql-tbls (properties) (list "* parent"
-                                        ":PROPERTIES:"
-                                        ":p1: ragtime dandies"
-                                        ":p2: this time its personal"
-                                        ":END:")
-      `((properties :file_path ,testing-filepath
-                    :headline_offset 1
+    (expect-sql-tbls (properties headline_properties)
+        (list "* parent"
+              ":PROPERTIES:"
+              ":p1: ragtime dandies"
+              ":p2: this time its personal"
+              ":END:")
+      `((headline_properties :file_path ,testing-filepath
+                             :headline_offset 1
+                             :property_offset 44)
+        (properties :file_path ,testing-filepath
                     :property_offset 44
                     :key_text "p2"
-                    :val_text "this time its personal"
-                    :is_inherited nil)
+                    :val_text "this time its personal")
+        (headline_properties :file_path ,testing-filepath
+                             :headline_offset 1
+                             :property_offset 23)
         (properties :file_path ,testing-filepath
-                    :headline_offset 1
                     :property_offset 23
                     :key_text "p1"
-                    :val_text "ragtime dandies"
-                    :is_inherited nil))))
+                    :val_text "ragtime dandies"))))
+
+  (it "single file property"
+    (expect-sql-tbls (properties file_properties)
+        (list "#+PROPERTY: FOO bar"
+              "* parent")
+      `((file_properties :file_path ,testing-filepath
+                         :property_offset 1)
+        (properties :file_path ,testing-filepath
+                    :property_offset 1
+                    :key_text "FOO"
+                    :val_text "bar"))))
 
   ;; ;; TODO add inherited properties once they exist
 

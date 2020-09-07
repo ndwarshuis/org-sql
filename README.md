@@ -245,11 +245,28 @@ Each row stores one property
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
 | file_path | x | file_path - headlines |  | text | path to the file containing this property |
-| headline_offset |  | headline_offset - headlines |  | integer | file offset of the headline with this property |
 | property_offset | x |  |  | integer | file offset of this property in the org file |
 | key_text |  |  |  | text | this property's key |
 | val_text |  |  |  | text | this property's value |
-| is_inherited |  |  |  | boolean | true if this property is inherited (currently unused) |
+
+### file_properties
+
+Each row stores a property at the file level
+
+| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type | Description |
+|  -  |  -  |  -  |  -  |  -  |  -  |
+| file_path | x | file_path - files, file_path - properties |  | text | path to file containin the property |
+| property_offset | x | property_offset - properties |  | integer | file offset of this property in the org file |
+
+### headline_properties
+
+Each row stores a property at the headline level
+
+| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type | Description |
+|  -  |  -  |  -  |  -  |  -  |  -  |
+| file_path | x | file_path - headlines |  | text | path to file containin the property |
+| property_offset | x |  |  | integer | file offset of this property in the org file |
+| headline_offset |  | headline_offset - headlines |  | integer | file offset of the headline with this property |
 
 ### clocks
 

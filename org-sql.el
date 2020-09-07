@@ -183,9 +183,6 @@ to store them. This is in addition to any properties specifified by
        (columns
         (:file_path :desc "path to the file containing this property"
                     :type text)
-        (:headline_offset :desc "file offset of the headline with this property"
-                          :type integer
-                        :constraints (notnull))
         (:property_offset :desc "file offset of this property in the org file"
                           :type integer)
         (:key_text :desc "this property's key"
@@ -193,9 +190,6 @@ to store them. This is in addition to any properties specifified by
                    :constraints (notnull))
         (:val_text :desc "this property's value"
                    :type text
-                   :constraints (notnull))
-        (:is_inherited :desc "true if this property is inherited (currently unused)"
-                    :type boolean
                    :constraints (notnull)))
        (constraints
         (primary :keys (:file_path asc :property_offset asc))
@@ -205,6 +199,44 @@ to store them. This is in addition to any properties specifified by
                  :on_delete cascade
                  :on_update cascade)))
 
+      (file_properties
+       (desc . "Each row stores a property at the file level")
+       (columns
+        (:file_path :desc "path to file containin the property"
+                    :type text)
+        (:property_offset :desc "file offset of this property in the org file"
+                          :type integer))
+       (constraints
+        (primary :keys (:file_path asc :property_offset asc))
+        (foreign :ref files
+                 :keys (:file_path)
+                 :parent-keys (:file_path)
+                 :on_delete cascade
+                 :on_update cascade)
+        (foreign :ref properties
+                 :keys (:file_path :property_offset)
+                 :parent-keys (:file_path :property_offset)
+                 :on_delete cascade
+                 :on_update cascade)))
+
+      (headline_properties
+       (desc . "Each row stores a property at the headline level")
+       (columns
+        (:file_path :desc "path to file containin the property"
+                    :type text)
+        (:property_offset :desc "file offset of this property in the org file"
+                          :type integer)
+        (:headline_offset :desc "file offset of the headline with this property"
+                          :type integer
+                          :constraints (notnull)))
+       (constraints
+        (primary :keys (:file_path asc :property_offset asc))
+        (foreign :ref headlines
+                 :keys (:file_path :headline_offset)
+                 :parent-keys (:file_path :headline_offset)
+                 :on_delete cascade
+                 :on_update cascade)))
+      
       (clocks
        (desc . "Each row stores one clock entry")
        (columns
@@ -1122,26 +1154,31 @@ and ARGS. FUN adds OBJ to ACC and returns new ACC."
          (org-sql--flatten-lb-entries)
          (-reduce-from #'extract-entry acc))))
 
-(defun org-sql--extract-properties (acc headline fp)
+(defun org-sql--extract-hl-properties (acc headline fp)
   "Add properties data from HEADLINE to accumulator ACC."
   (if (eq 'all org-sql-ignored-properties) acc
-    (let ((node-props
-           (->> (org-ml-headline-get-node-properties headline)
-                (--remove (member (org-ml-get-property :key it)
-                                  (append org-sql--ignored-properties-default
-                                          org-sql-ignored-properties))))))
-      (cl-flet
-          ((from
-            (acc np)
-            (org-sql--cons acc properties
-              :file_path fp
-              :headline_offset (org-ml-get-property :begin headline)
-              :property_offset (org-ml-get-property :begin np)
-              :key_text (org-ml-get-property :key np)
-              :val_text (org-ml-get-property :value np)
-              ;; TODO add inherited flag
-              :is_inherited nil)))
-        (org-sql--extract acc #'from node-props)))))
+    (cl-flet
+        ((is-ignored
+          (node-property)
+          (member (org-ml-get-property :key node-property)
+                  ;; TODO only do this once
+                  (append org-sql--ignored-properties-default
+                          org-sql-ignored-properties)))
+         (from
+          (acc np)
+          (let ((offset (org-ml-get-property :begin np)))
+            (--> (org-sql--cons acc properties
+                   :file_path fp
+                   :property_offset offset
+                   :key_text (org-ml-get-property :key np)
+                   :val_text (org-ml-get-property :value np))
+                 (org-sql--cons it headline_properties
+                   :file_path fp
+                   :headline_offset (org-ml-get-property :begin headline)
+                   :property_offset offset)))))
+      (->> (org-ml-headline-get-node-properties headline)
+           (-remove #'is-ignored)
+           (org-sql--extract acc #'from)))))
 
 (defun org-sql--extract-tags (acc headline fp)
   "Extract tags data from HEADLINE and add to accumulator ACC."
@@ -1298,18 +1335,41 @@ FP is the path to the file containing the headlines."
         (-> (org-sql--extract-hl-meta acc hl fp)
             (org-sql--extract-links hl fp)
             (org-sql--extract-tags hl fp)
-            (org-sql--extract-properties hl fp)
+            (org-sql--extract-hl-properties hl fp)
             (org-sql--extract-logbook hl fp)
             (org-sql--extract-hl (org-ml-headline-get-subheadlines hl) fp))))
     (org-sql--extract acc #'from headlines)))
 
+(defun org-sql--extract-file-properties (acc top-section fp)
+  (cl-flet
+      ((add-property
+        (acc keyword)
+        (-let ((offset (org-ml-get-property :begin keyword))
+               ((key value) (--> (org-ml-get-property :value keyword)
+                                 (s-split-up-to " " it 1))))
+          (--> (org-sql--cons acc properties
+                 :file_path fp
+                 :property_offset offset
+                 :key_text key
+                 :val_text value)
+               (org-sql--cons it file_properties
+                 :file_path fp
+                 :property_offset offset)))))
+    (->> (--filter (org-ml-is-type 'keyword it) top-section)
+         (--filter (equal (org-ml-get-property :key it) "PROPERTY"))
+         (-reduce-from #'add-property acc))))
+
 (defun org-sql--extract-buffer (acc fp)
   "Extracts all headlines from the current buffer to ACC.
 FP is the filepath where the buffer lives."
-  (let ((headlines (--> (org-element-parse-buffer)
-                        (org-element-contents it)
-                        (if (assoc 'section it) (cdr it) it))))
-    (org-sql--extract-hl acc headlines fp)))
+  (let* ((tree (->> (org-element-parse-buffer)
+                    (org-ml-get-children)))
+         ;; TODO these should probably be part of org-ml
+         (top-section (-some->> (assoc 'section tree)
+                        (org-ml-get-children)))
+         (headlines (if top-section (cdr tree) tree)))
+    (-> (org-sql--extract-file-properties acc top-section fp)
+        (org-sql--extract-hl headlines fp))))
 
 (defun org-sql--extract-file (fp md5 acc)
   "Extract the file at FP.
