@@ -227,7 +227,16 @@ Each row stores the metadata for headline planning timestamps.
 | planning_type | x |  |  | text | the type of this planning entry (`closed`, `scheduled`, or `deadline`) |
 | timestamp_offset |  | timestamp_offset - timestamps |  | integer | file offset of this entries timestamp |
 
-### tags
+### file_tags
+
+Each row stores one tag at the file level
+
+| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type | Description |
+|  -  |  -  |  -  |  -  |  -  |  -  |
+| file_path | x | file_path - files |  | text | path to the file containing the tag |
+| tag | x |  |  | text | the text value of this tag |
+
+### headline_tags
 
 Each row stores one tag
 
@@ -236,7 +245,7 @@ Each row stores one tag
 | file_path | x | file_path - headlines |  | text | path to the file containing the tag |
 | headline_offset | x | headline_offset - headlines |  | integer | file offset of the headline with this tag |
 | tag | x |  |  | text | the text value of this tag |
-| is_inherited | x |  |  | boolean | true if this tag is inherited |
+| is_inherited | x |  |  | boolean | true if this tag is from the ITAGS property |
 
 ### properties
 

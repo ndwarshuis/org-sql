@@ -467,57 +467,71 @@ list then join the cdr of IN with newlines."
   ;; tags table
 
   (it "single tag"
-    (expect-sql-tbls (tags) "* headline :sometag:"
-      `((tags :file_path ,testing-filepath
-              :headline_offset 1
-              :tag "sometag"
-              :is_inherited nil))))
+    (expect-sql-tbls (headline_tags) "* headline :sometag:"
+      `((headline_tags :file_path ,testing-filepath
+                       :headline_offset 1
+                       :tag "sometag"
+                       :is_inherited nil))))
 
   (it "multiple tags"
-    (expect-sql-tbls (tags) (list "* headline :onetag:"
-                                  "* headline :twotag:")
-      `((tags :file_path ,testing-filepath
-              :headline_offset 21
-              :tag "twotag"
-              :is_inherited nil)
-        (tags :file_path ,testing-filepath
-              :headline_offset 1
-              :tag "onetag"
-              :is_inherited nil))))
+    (expect-sql-tbls (headline_tags) (list "* headline :onetag:"
+                                           "* headline :twotag:")
+      `((headline_tags :file_path ,testing-filepath
+                       :headline_offset 21
+                       :tag "twotag"
+                       :is_inherited nil)
+        (headline_tags :file_path ,testing-filepath
+                       :headline_offset 1
+                       :tag "onetag"
+                       :is_inherited nil))))
 
-  (it "inherited tag"
+  (it "single tag (child headline)"
     (setq org-sql-use-tag-inheritance t)
-    (expect-sql-tbls (tags) (list "* parent :onetag:"
-                                  "** nested")
-      `((tags :file_path ,testing-filepath
-              :headline_offset 19
-              :tag "onetag"
-              :is_inherited t)
-        (tags :file_path ,testing-filepath
-              :headline_offset 1
-              :tag "onetag"
-              :is_inherited nil))))
+    (expect-sql-tbls (headline_tags) (list "* parent :onetag:"
+                                           "** nested")
+      `((headline_tags :file_path ,testing-filepath
+                       :headline_offset 1
+                       :tag "onetag"
+                       :is_inherited nil))))
 
   (it "inherited tag (ARCHIVE_ITAGS)"
     ;; TODO clean up the variable settings elsewhere
-    (expect-sql-tbls (tags) (list "* parent"
-                                  ":PROPERTIES:"
-                                  ":ARCHIVE_ITAGS: sometag"
-                                  ":END:")
-      `((tags :file_path ,testing-filepath
-              :headline_offset 1
-              :tag "sometag"
-              :is_inherited t))))
+    (expect-sql-tbls (headline_tags) (list "* parent"
+                                           ":PROPERTIES:"
+                                           ":ARCHIVE_ITAGS: sometag"
+                                           ":END:")
+      `((headline_tags :file_path ,testing-filepath
+                       :headline_offset 1
+                       :tag "sometag"
+                       :is_inherited t))))
 
   (it "inherited tag (option off)"
     ;; TODO clean up the variable settings elsewhere
     (setq org-sql-use-tag-inheritance nil)
-    (expect-sql-tbls (tags) (list "* parent :onetag:"
-                                  "** nested")
-      `((tags :file_path ,testing-filepath
-              :headline_offset 1
-              :tag "onetag"
-              :is_inherited nil))))
+    (expect-sql-tbls (headline_tags) (list "* parent :onetag:"
+                                           "** nested")
+      `((headline_tags :file_path ,testing-filepath
+                       :headline_offset 1
+                       :tag "onetag"
+                       :is_inherited nil))))
+  
+  (it "single file tag"
+    (expect-sql-tbls (file_tags) (list "#+FILETAGS: foo"
+                                       "* headline")
+      `((file_tags :file_path ,testing-filepath
+                   :tag "foo"))))
+
+  (it "multiple file tags"
+    (expect-sql-tbls (file_tags) (list "#+FILETAGS: foo bar"
+                                       "#+FILETAGS: bang"
+                                       "#+FILETAGS: bar"
+                                       "* headline")
+      `((file_tags :file_path ,testing-filepath
+                   :tag "bang")
+        (file_tags :file_path ,testing-filepath
+                   :tag "bar")
+        (file_tags :file_path ,testing-filepath
+                   :tag "foo"))))
 
   ;;  ;; timestamp table
 

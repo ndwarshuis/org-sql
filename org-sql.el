@@ -158,7 +158,22 @@ to store them. This is in addition to any properties specifified by
                  :on_delete cascade
                  :on_update cascade)))
 
-      (tags
+      (file_tags
+       (desc . "Each row stores one tag at the file level")
+       (columns
+        (:file_path :desc "path to the file containing the tag"
+                    :type text)
+        (:tag :desc "the text value of this tag"
+              :type text))
+       (constraints
+        (primary :keys (:file_path asc :tag asc))
+        (foreign :ref files
+                 :keys (:file_path)
+                 :parent-keys (:file_path)
+                 :on_delete cascade
+                 :on_update cascade)))
+
+      (headline_tags
        (desc . "Each row stores one tag")
        (columns
         (:file_path :desc "path to the file containing the tag"
@@ -167,7 +182,7 @@ to store them. This is in addition to any properties specifified by
                           :type integer)
         (:tag :desc "the text value of this tag"
               :type text)
-        (:is_inherited :desc "true if this tag is inherited"
+        (:is_inherited :desc "true if this tag is from the ITAGS property"
                     :type boolean
                     :constraints (notnull)))
        (constraints
@@ -1186,7 +1201,7 @@ and ARGS. FUN adds OBJ to ACC and returns new ACC."
     (cl-flet
         ((from
           (acc tag inherited)
-          (org-sql--cons acc tags
+          (org-sql--cons acc headline_tags
             :file_path fp
             :headline_offset (org-ml-get-property :begin headline)
             :tag tag
@@ -1195,10 +1210,10 @@ and ARGS. FUN adds OBJ to ACC and returns new ACC."
           (tags)
           (-difference tags org-sql-ignored-tags)))
       (let ((tags (filter-ignored (org-sql--headline-get-tags headline)))
-            (i-tags (--> (org-sql--headline-get-archive-itags headline)
-                         (if (not org-sql-use-tag-inheritance) it
-                           (org-sql--element-parent-tags it headline))
-                         (filter-ignored it))))
+            (i-tags (->> (org-sql--headline-get-archive-itags headline)
+                         ;; (if (not org-sql-use-tag-inheritance) it
+                         ;;   (org-sql--element-parent-tags it headline))
+                         (filter-ignored))))
         (-> (org-sql--extract acc #'from tags nil)
             (org-sql--extract #'from i-tags t))))))
 
@@ -1340,6 +1355,19 @@ FP is the path to the file containing the headlines."
             (org-sql--extract-hl (org-ml-headline-get-subheadlines hl) fp))))
     (org-sql--extract acc #'from headlines)))
 
+(defun org-sql--extract-file-tags (acc top-section fp)
+  (cl-flet
+      ((add-tag
+        (acc tag)
+        (org-sql--cons acc file_tags
+          :file_path fp
+          :tag tag)))
+    (->> (--filter (org-ml-is-type 'keyword it) top-section)
+         (--filter (equal (org-ml-get-property :key it) "FILETAGS"))
+         (--mapcat (s-split " " (org-ml-get-property :value it)))
+         (-uniq)
+         (-reduce-from #'add-tag acc))))
+
 (defun org-sql--extract-file-properties (acc top-section fp)
   (cl-flet
       ((add-property
@@ -1369,6 +1397,7 @@ FP is the filepath where the buffer lives."
                         (org-ml-get-children)))
          (headlines (if top-section (cdr tree) tree)))
     (-> (org-sql--extract-file-properties acc top-section fp)
+        (org-sql--extract-file-tags top-section fp)
         (org-sql--extract-hl headlines fp))))
 
 (defun org-sql--extract-file (fp md5 acc)
