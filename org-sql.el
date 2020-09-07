@@ -94,12 +94,12 @@ to store them. This is in addition to any properties specifified by
                   :type text)
         (:effort :desc "the value of the Effort property in minutes"
                  :type integer)
-        (:scheduled_offset :desc "file offset of the SCHEDULED timestamp"
-                           :type integer)
-        (:deadline_offset :desc "file offset of the DEADLINE timestamp"
-                          :type integer)
-        (:closed_offset :desc "file offset of the CLOSED timestamp"
-                        :type integer)
+        ;; (:scheduled_offset :desc "file offset of the SCHEDULED timestamp"
+        ;;                    :type integer)
+        ;; (:deadline_offset :desc "file offset of the DEADLINE timestamp"
+        ;;                   :type integer)
+        ;; (:closed_offset :desc "file offset of the CLOSED timestamp"
+        ;;                 :type integer)
         (:priority :desc "character value of the priority"
                    :type char)
         (:is_archived :desc "true if the headline has an archive tag"
@@ -118,6 +118,7 @@ to store them. This is in addition to any properties specifified by
                  :on_delete cascade
                  :on_update cascade)))
 
+      ;; TODO this need file path
       (headline_closures
        (desc . "Each row stores the ancestor and depth of a headline relationship (eg closure table)")
        (columns
@@ -135,6 +136,26 @@ to store them. This is in addition to any properties specifified by
                  :on_delete cascade
                  :on_update cascade)))
 
+      (planning_entries
+       (desc . "Each row stores the metadata for headline planning timestamps.")
+       (columns
+        (:file_path :desc "path to the file containing the entry"
+                    :type text)
+        (:headline_offset :desc "file offset of the headline with this tag"
+                          :type integer)
+        (:planning_type :desc "the type of this planning entry"
+                        :type text
+                        :allowed (closed scheduled deadline))
+        (:timestamp_offset :desc "file offset of this entries timestamp"
+                           :type integer
+                           :constraints (notnull)))
+       (constraints
+        (primary :keys (:file_path asc :headline_offset asc :planning_type asc))
+        (foreign :ref timestamps
+                 :keys (:file_path :timestamp_offset)
+                 :parent-keys (:file_path :timestamp_offset)
+                 :on_delete cascade
+                 :on_update cascade)))
 
       (tags
        (desc . "Each row stores one tag")
@@ -142,8 +163,7 @@ to store them. This is in addition to any properties specifified by
         (:file_path :desc "path to the file containing the tag"
                     :type text)
         (:headline_offset :desc "file offset of the headline with this tag"
-                          :type integer
-                        :constraints (notnull))
+                          :type integer)
         (:tag :desc "the text value of this tag"
               :type text)
         (:is_inherited :desc "true if this tag is inherited"
@@ -1209,6 +1229,26 @@ this function."
         (org-sql--extract acc #'org-sql--extract-ts timestamps headline fp))
     acc))
 
+(defun org-sql--extract-hl-planning (acc headline fp)
+  (-if-let (planning (org-ml-headline-get-planning headline))
+      (let ((offset (org-ml-get-property :begin headline)))
+        (cl-flet
+            ((add-planning-maybe
+              (acc type)
+              (-if-let (ts (org-ml-get-property type planning))
+                  (-> (org-sql--cons acc planning_entries
+                        :file_path fp
+                        :headline_offset offset
+                        :planning_type (->> (symbol-name type)
+                                            (s-chop-prefix ":")
+                                            (intern))
+                        :timestamp_offset (org-ml-get-property :begin ts))
+                      (org-sql--extract-ts ts headline fp))
+                acc)))
+          (->> (list :closed :deadline :scheduled)
+               (-reduce-from #'add-planning-maybe acc))))
+    acc))
+
 (defun org-sql--extract-hl-closures (acc headline)
   (let ((offset (org-ml-get-property :begin headline)))
     (cl-flet
@@ -1226,30 +1266,26 @@ this function."
 
 (defun org-sql--extract-hl-meta (acc headline fp)
   "Add general data from HEADLINE to accumulator ACC."
-  (-let* (((&plist :closed :scheduled :deadline)
-           (->> (org-ml-headline-get-planning headline)
-                ;; TODO make this function public
-                (org-ml--get-all-properties)))
-          (planning-timestamps (-non-nil (list scheduled deadline closed))))
-    (-> (org-sql--cons acc headlines
-          :file_path fp
-          :headline_offset (org-ml-get-property :begin headline)
-          ;; :tree_path (org-sql--headline-get-path headline)
-          :headline_text (org-ml-get-property :raw-value headline)
-          :keyword (org-ml-get-property :todo-keyword headline)
-          :effort (-some-> (org-ml-headline-get-node-property "Effort" headline)
-                    (org-sql--effort-to-int))
-          :scheduled_offset (-some->> scheduled (org-ml-get-property :begin))
-          :deadline_offset (-some->> deadline (org-ml-get-property :begin))
-          :closed_offset (-some->> closed (org-ml-get-property :begin))
-          :priority (-some->> (org-ml-get-property :priority headline)
-                      (byte-to-string))
-          :is_archived (org-ml-get-property :archivedp headline)
-          :is_commented (org-ml-get-property :commentedp headline)
-          :content nil)
-        (org-sql--extract-hl-closures headline)
-        (org-sql--extract #'org-sql--extract-ts planning-timestamps headline fp)
-        (org-sql--extract-hl-contents headline fp))))
+  (-> (org-sql--cons acc headlines
+        :file_path fp
+        :headline_offset (org-ml-get-property :begin headline)
+        ;; :tree_path (org-sql--headline-get-path headline)
+        :headline_text (org-ml-get-property :raw-value headline)
+        :keyword (org-ml-get-property :todo-keyword headline)
+        :effort (-some-> (org-ml-headline-get-node-property "Effort" headline)
+                  (org-sql--effort-to-int))
+        ;; :scheduled_offset (-some->> scheduled (org-ml-get-property :begin))
+        ;; :deadline_offset (-some->> deadline (org-ml-get-property :begin))
+        ;; :closed_offset (-some->> closed (org-ml-get-property :begin))
+        :priority (-some->> (org-ml-get-property :priority headline)
+                    (byte-to-string))
+        :is_archived (org-ml-get-property :archivedp headline)
+        :is_commented (org-ml-get-property :commentedp headline)
+        :content nil)
+      (org-sql--extract-hl-closures headline)
+      (org-sql--extract-hl-planning headline fp)
+      ;; (org-sql--extract #'org-sql--extract-ts planning-timestamps headline fp)
+      (org-sql--extract-hl-contents headline fp)))
 
 (defun org-sql--extract-hl (acc headlines fp)
   "Extract data from HEADLINES and add to accumulator ACC.

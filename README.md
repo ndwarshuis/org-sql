@@ -200,9 +200,6 @@ Each row stores one headline in a given org file and its metadata
 | headline_text |  |  |  | text | raw text of the headline |
 | keyword |  |  | x | text | the TODO state keyword |
 | effort |  |  | x | integer | the value of the Effort property in minutes |
-| scheduled_offset |  |  | x | integer | file offset of the SCHEDULED timestamp |
-| deadline_offset |  |  | x | integer | file offset of the DEADLINE timestamp |
-| closed_offset |  |  | x | integer | file offset of the CLOSED timestamp |
 | priority |  |  | x | char | character value of the priority |
 | is_archived |  |  |  | boolean | true if the headline has an archive tag |
 | is_commented |  |  |  | boolean | true if the headline has a comment keyword |
@@ -217,6 +214,17 @@ Each row stores the ancestor and depth of a headline relationship (eg closure ta
 | headline_offset | x | headline_offset - headlines |  | integer | offset of this headline |
 | parent_offset | x | headline_offset - headlines |  | integer | offset of this headline's parent |
 | depth |  |  | x | integer | levels between this headline and the referred parent |
+
+### planning_entries
+
+Each row stores the metadata for headline planning timestamps.
+
+| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type | Description |
+|  -  |  -  |  -  |  -  |  -  |  -  |
+| file_path | x | file_path - timestamps |  | text | path to the file containing the entry |
+| headline_offset | x |  |  | integer | file offset of the headline with this tag |
+| planning_type | x |  |  | text | the type of this planning entry (`closed`, `scheduled`, or `deadline`) |
+| timestamp_offset |  | timestamp_offset - timestamps |  | integer | file offset of this entries timestamp |
 
 ### tags
 

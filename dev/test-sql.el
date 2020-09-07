@@ -188,7 +188,7 @@ list then join the cdr of IN with newlines."
              (schema-cmd "CREATE TABLE files (file_path TEXT,md5 TEXT);")
              (files (format "insert into files (file_path,md5,size) values ('%s','%s',6);"
                             test-file test-md5))
-             (headlines (format "insert into headlines (file_path,headline_offset,headline_text,keyword,effort,scheduled_offset,deadline_offset,closed_offset,priority,is_archived,is_commented,content) values ('%s',1,'foo',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL);insert into headline_closures (headline_offset,parent_offset,depth) values (1,1,0);"
+             (headlines (format "insert into headlines (file_path,headline_offset,headline_text,keyword,effort,priority,is_archived,is_commented,content) values ('%s',1,'foo',NULL,NULL,NULL,NULL,NULL,NULL);insert into headline_closures (headline_offset,parent_offset,depth) values (1,1,0);"
                                 test-file)))
         (expect (org-sql--cmd org-sql-sqlite-path schema-cmd)
                 :to-equal "")
@@ -242,9 +242,6 @@ list then join the cdr of IN with newlines."
                    :headline_text "headline"
                    :keyword nil
                    :effort nil
-                   :scheduled_offset nil
-                   :deadline_offset nil
-                   :closed_offset nil
                    :priority nil
                    :is_archived nil
                    :is_commented nil
@@ -262,9 +259,6 @@ list then join the cdr of IN with newlines."
                    :headline_text "another headline"
                    :keyword nil
                    :effort nil
-                   :scheduled_offset nil
-                   :deadline_offset nil
-                   :closed_offset nil
                    :priority nil
                    :is_archived nil
                    :is_commented nil
@@ -277,9 +271,6 @@ list then join the cdr of IN with newlines."
                    :headline_text "headline"
                    :keyword nil
                    :effort nil
-                   :scheduled_offset nil
-                   :deadline_offset nil
-                   :closed_offset nil
                    :priority nil
                    :is_archived nil
                    :is_commented nil
@@ -298,9 +289,6 @@ list then join the cdr of IN with newlines."
                    :headline_text "another headline"
                    :keyword "TODO"
                    :effort 30
-                   :scheduled_offset nil
-                   :deadline_offset nil
-                   :closed_offset nil
                    :priority "A"
                    :is_archived nil
                    :is_commented t
@@ -320,9 +308,6 @@ list then join the cdr of IN with newlines."
                    :headline_text "nested headline"
                    :keyword nil
                    :effort nil
-                   :scheduled_offset nil
-                   :deadline_offset nil
-                   :closed_offset nil
                    :priority nil
                    :is_archived nil
                    :is_commented nil
@@ -335,9 +320,6 @@ list then join the cdr of IN with newlines."
                    :headline_text "headline"
                    :keyword nil
                    :effort nil
-                   :scheduled_offset nil
-                   :deadline_offset nil
-                   :closed_offset nil
                    :priority nil
                    :is_archived nil
                    :is_commented nil
@@ -354,9 +336,6 @@ list then join the cdr of IN with newlines."
                    :headline_text "headline"
                    :keyword nil
                    :effort nil
-                   :scheduled_offset nil
-                   :deadline_offset nil
-                   :closed_offset nil
                    :priority nil
                    :is_archived t
                    :is_commented nil
@@ -381,6 +360,10 @@ list then join the cdr of IN with newlines."
                       :time_end nil
                       :end_is_long nil
                       :raw_value ,ts)
+          (planning_entries :file_path ,testing-filepath
+                            :headline_offset 1
+                            :planning_type closed
+                            :timestamp_offset 20)
           (headline_closures :headline_offset 1
                              :parent_offset 1
                              :depth 0)
@@ -389,9 +372,6 @@ list then join the cdr of IN with newlines."
                      :headline_text "headline"
                      :keyword nil
                      :effort nil
-                     :scheduled_offset nil
-                     :deadline_offset nil
-                     :closed_offset 20
                      :priority nil
                      :is_archived nil
                      :is_commented nil
@@ -406,19 +386,23 @@ list then join the cdr of IN with newlines."
                 (format "SCHEDULED: %s DEADLINE: %s CLOSED: %s" ts0 ts1 ts2))
         `((timestamps :file_path ,testing-filepath
                       :headline_offset 1
-                      :timestamp_offset 75
-                      :is_active nil
+                      :timestamp_offset 23
+                      :is_active t
                       :warning_type nil
                       :warning_value nil
                       :warning_unit nil
                       :repeat_type nil
                       :repeat_value nil
                       :repeat_unit nil
-                      :time_start ,(org-ts-to-unixtime ts2)
+                      :time_start ,(org-ts-to-unixtime ts0)
                       :start_is_long nil
                       :time_end nil
                       :end_is_long nil
-                      :raw_value ,ts2)
+                      :raw_value ,ts0)
+          (planning_entries :file_path ,testing-filepath
+                            :headline_offset 1
+                            :planning_type scheduled
+                            :timestamp_offset 23)
           (timestamps :file_path ,testing-filepath
                       :headline_offset 1
                       :timestamp_offset 50
@@ -434,21 +418,29 @@ list then join the cdr of IN with newlines."
                       :time_end nil
                       :end_is_long nil
                       :raw_value ,ts1)
+          (planning_entries :file_path ,testing-filepath
+                            :headline_offset 1
+                            :planning_type deadline
+                            :timestamp_offset 50)
           (timestamps :file_path ,testing-filepath
                       :headline_offset 1
-                      :timestamp_offset 23
-                      :is_active t
+                      :timestamp_offset 75
+                      :is_active nil
                       :warning_type nil
                       :warning_value nil
                       :warning_unit nil
                       :repeat_type nil
                       :repeat_value nil
                       :repeat_unit nil
-                      :time_start ,(org-ts-to-unixtime ts0)
+                      :time_start ,(org-ts-to-unixtime ts2)
                       :start_is_long nil
                       :time_end nil
                       :end_is_long nil
-                      :raw_value ,ts0)
+                      :raw_value ,ts2)
+          (planning_entries :file_path ,testing-filepath
+                            :headline_offset 1
+                            :planning_type closed
+                            :timestamp_offset 75)
           (headline_closures :headline_offset 1
                              :parent_offset 1
                              :depth 0)
@@ -457,9 +449,6 @@ list then join the cdr of IN with newlines."
                      :headline_text "headline"
                      :keyword nil
                      :effort nil
-                     :scheduled_offset 23
-                     :deadline_offset 50
-                     :closed_offset 75
                      :priority nil
                      :is_archived nil
                      :is_commented nil
