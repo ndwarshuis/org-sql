@@ -17,6 +17,10 @@
 
 ;;; Commentary:
 
+;; These functions build parts of the document for org-sql. The readme template
+;; is used as a base, and information that depends precisely on code is compiled
+;; to documentation here
+
 ;;; Code:
 
 (defvar org-sql-dev-path
