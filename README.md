@@ -1,4 +1,4 @@
-# Org-SQL
+# Org-SQL ![Github Workflow Status](https://img.shields.io/github/workflow/status/ndwarshuis/org-sql/CI) ![MELPA VERSION](https://melpa.org/packages/org-sql-badge.svg)
 
 This is a SQL backend for Emacs Org-Mode. It scans through text files formatted
 in org-mode, parses them, and adds key information such as todo keywords,
