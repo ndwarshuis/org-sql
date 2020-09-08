@@ -81,8 +81,8 @@ list then join the cdr of IN with newlines."
                    :keyword nil
                    :effort nil
                    :priority nil
-                   :is_archived nil
-                   :is_commented nil
+                   :is_archived 0
+                   :is_commented 0
                    :content nil))))
 
   (it "two headlines"
@@ -99,8 +99,8 @@ list then join the cdr of IN with newlines."
                    :keyword nil
                    :effort nil
                    :priority nil
-                   :is_archived nil
-                   :is_commented nil
+                   :is_archived 0
+                   :is_commented 0
                    :content nil)
         (headline_closures :file_path ,testing-filepath
                            :headline_offset 1
@@ -112,8 +112,8 @@ list then join the cdr of IN with newlines."
                    :keyword nil
                    :effort nil
                    :priority nil
-                   :is_archived nil
-                   :is_commented nil
+                   :is_archived 0
+                   :is_commented 0
                    :content nil))))
 
   (it "fancy headline"
@@ -132,8 +132,8 @@ list then join the cdr of IN with newlines."
                    :keyword "TODO"
                    :effort 30
                    :priority "A"
-                   :is_archived nil
-                   :is_commented t
+                   :is_archived 0
+                   :is_commented 1
                    :content "this /should/ appear\n"))))
 
   (it "nested headline"
@@ -153,8 +153,8 @@ list then join the cdr of IN with newlines."
                    :keyword nil
                    :effort nil
                    :priority nil
-                   :is_archived nil
-                   :is_commented nil
+                   :is_archived 0
+                   :is_commented 0
                    :content nil)
         (headline_closures :file_path ,testing-filepath
                            :headline_offset 1
@@ -166,8 +166,8 @@ list then join the cdr of IN with newlines."
                    :keyword nil
                    :effort nil
                    :priority nil
-                   :is_archived nil
-                   :is_commented nil
+                   :is_archived 0
+                   :is_commented 0
                    :content nil))))
 
 
@@ -183,8 +183,8 @@ list then join the cdr of IN with newlines."
                    :keyword nil
                    :effort nil
                    :priority nil
-                   :is_archived t
-                   :is_commented nil
+                   :is_archived 1
+                   :is_commented 0
                    :content nil))))
 
   (it "closed headline"
@@ -194,7 +194,7 @@ list then join the cdr of IN with newlines."
         `((timestamps :file_path ,testing-filepath
                       :headline_offset 1
                       :timestamp_offset 20
-                      :is_active nil
+                      :is_active 0
                       :warning_type nil
                       :warning_value nil
                       :warning_unit nil
@@ -202,7 +202,7 @@ list then join the cdr of IN with newlines."
                       :repeat_value nil
                       :repeat_unit nil
                       :time_start ,(org-ts-to-unixtime ts)
-                      :start_is_long nil
+                      :start_is_long 0
                       :time_end nil
                       :end_is_long nil
                       :raw_value ,ts)
@@ -220,8 +220,8 @@ list then join the cdr of IN with newlines."
                      :keyword nil
                      :effort nil
                      :priority nil
-                     :is_archived nil
-                     :is_commented nil
+                     :is_archived 0
+                     :is_commented 0
                      :content nil)))))
 
   (it "scheduled/closed/deadlined headline"
@@ -234,7 +234,7 @@ list then join the cdr of IN with newlines."
         `((timestamps :file_path ,testing-filepath
                       :headline_offset 1
                       :timestamp_offset 23
-                      :is_active t
+                      :is_active 1
                       :warning_type nil
                       :warning_value nil
                       :warning_unit nil
@@ -242,7 +242,7 @@ list then join the cdr of IN with newlines."
                       :repeat_value nil
                       :repeat_unit nil
                       :time_start ,(org-ts-to-unixtime ts0)
-                      :start_is_long nil
+                      :start_is_long 0
                       :time_end nil
                       :end_is_long nil
                       :raw_value ,ts0)
@@ -253,7 +253,7 @@ list then join the cdr of IN with newlines."
           (timestamps :file_path ,testing-filepath
                       :headline_offset 1
                       :timestamp_offset 50
-                      :is_active t
+                      :is_active 1
                       :warning_type nil
                       :warning_value nil
                       :warning_unit nil
@@ -261,7 +261,7 @@ list then join the cdr of IN with newlines."
                       :repeat_value nil
                       :repeat_unit nil
                       :time_start ,(org-ts-to-unixtime ts1)
-                      :start_is_long nil
+                      :start_is_long 0
                       :time_end nil
                       :end_is_long nil
                       :raw_value ,ts1)
@@ -272,7 +272,7 @@ list then join the cdr of IN with newlines."
           (timestamps :file_path ,testing-filepath
                       :headline_offset 1
                       :timestamp_offset 75
-                      :is_active nil
+                      :is_active 0
                       :warning_type nil
                       :warning_value nil
                       :warning_unit nil
@@ -280,7 +280,7 @@ list then join the cdr of IN with newlines."
                       :repeat_value nil
                       :repeat_unit nil
                       :time_start ,(org-ts-to-unixtime ts2)
-                      :start_is_long nil
+                      :start_is_long 0
                       :time_end nil
                       :end_is_long nil
                       :raw_value ,ts2)
@@ -298,8 +298,8 @@ list then join the cdr of IN with newlines."
                      :keyword nil
                      :effort nil
                      :priority nil
-                     :is_archived nil
-                     :is_commented nil
+                     :is_archived 0
+                     :is_commented 0
                      :content nil)))))
 
   ;; tags table
@@ -309,7 +309,7 @@ list then join the cdr of IN with newlines."
       `((headline_tags :file_path ,testing-filepath
                        :headline_offset 1
                        :tag "sometag"
-                       :is_inherited nil))))
+                       :is_inherited 0))))
 
   (it "multiple tags"
     (expect-sql-tbls (headline_tags) (list "* headline :onetag:"
@@ -317,11 +317,11 @@ list then join the cdr of IN with newlines."
       `((headline_tags :file_path ,testing-filepath
                        :headline_offset 21
                        :tag "twotag"
-                       :is_inherited nil)
+                       :is_inherited 0)
         (headline_tags :file_path ,testing-filepath
                        :headline_offset 1
                        :tag "onetag"
-                       :is_inherited nil))))
+                       :is_inherited 0))))
 
   (it "single tag (child headline)"
     (setq org-sql-use-tag-inheritance t)
@@ -330,7 +330,7 @@ list then join the cdr of IN with newlines."
       `((headline_tags :file_path ,testing-filepath
                        :headline_offset 1
                        :tag "onetag"
-                       :is_inherited nil))))
+                       :is_inherited 0))))
 
   (it "inherited tag (ARCHIVE_ITAGS)"
     ;; TODO clean up the variable settings elsewhere
@@ -341,7 +341,7 @@ list then join the cdr of IN with newlines."
       `((headline_tags :file_path ,testing-filepath
                        :headline_offset 1
                        :tag "sometag"
-                       :is_inherited t))))
+                       :is_inherited 1))))
 
   (it "inherited tag (option off)"
     ;; TODO clean up the variable settings elsewhere
@@ -351,7 +351,7 @@ list then join the cdr of IN with newlines."
       `((headline_tags :file_path ,testing-filepath
                        :headline_offset 1
                        :tag "onetag"
-                       :is_inherited nil))))
+                       :is_inherited 0))))
   
   (it "single file tag"
     (expect-sql-tbls (file_tags) (list "#+FILETAGS: foo"
@@ -381,7 +381,7 @@ list then join the cdr of IN with newlines."
         `((timestamps :file_path ,testing-filepath
                       :headline_offset 1
                       :timestamp_offset 18
-                      :is_active t
+                      :is_active 1
                       :warning_type nil
                       :warning_value nil
                       :warning_unit nil
@@ -389,7 +389,7 @@ list then join the cdr of IN with newlines."
                       :repeat_value nil
                       :repeat_unit nil
                       :time_start ,(org-ts-to-unixtime ts)
-                      :start_is_long nil
+                      :start_is_long 0
                       :time_end nil
                       :end_is_long nil
                       :raw_value ,ts)))))
@@ -402,7 +402,7 @@ list then join the cdr of IN with newlines."
         `((timestamps :file_path ,testing-filepath
                       :headline_offset 1
                       :timestamp_offset 18
-                      :is_active t
+                      :is_active 1
                       :warning_type nil
                       :warning_value nil
                       :warning_unit nil
@@ -410,7 +410,7 @@ list then join the cdr of IN with newlines."
                       :repeat_value nil
                       :repeat_unit nil
                       :time_start ,(org-ts-to-unixtime ts)
-                      :start_is_long t
+                      :start_is_long 1
                       :time_end nil
                       :end_is_long nil
                       :raw_value ,ts)))))
@@ -423,7 +423,7 @@ list then join the cdr of IN with newlines."
         `((timestamps :file_path ,testing-filepath
                       :headline_offset 1
                       :timestamp_offset 20
-                      :is_active t
+                      :is_active 1
                       :warning_type nil
                       :warning_value nil
                       :warning_unit nil
@@ -431,7 +431,7 @@ list then join the cdr of IN with newlines."
                       :repeat_value 2
                       :repeat_unit day
                       :time_start ,(org-ts-to-unixtime ts)
-                      :start_is_long nil
+                      :start_is_long 0
                       :time_end nil
                       :end_is_long nil
                       :raw_value ,ts)))))
@@ -444,7 +444,7 @@ list then join the cdr of IN with newlines."
         `((timestamps :file_path ,testing-filepath
                       :headline_offset 1
                       :timestamp_offset 20
-                      :is_active t
+                      :is_active 1
                       :warning_type all
                       :warning_value 2
                       :warning_unit day
@@ -452,7 +452,7 @@ list then join the cdr of IN with newlines."
                       :repeat_value nil
                       :repeat_unit nil
                       :time_start ,(org-ts-to-unixtime ts)
-                      :start_is_long nil
+                      :start_is_long 0
                       :time_end nil
                       :end_is_long nil
                       :raw_value ,ts)))))
@@ -468,7 +468,7 @@ list then join the cdr of IN with newlines."
         `((timestamps :file_path ,testing-filepath
                       :headline_offset 1
                       :timestamp_offset 20
-                      :is_active t
+                      :is_active 1
                       :warning_type nil
                       :warning_value nil
                       :warning_unit nil
@@ -476,9 +476,9 @@ list then join the cdr of IN with newlines."
                       :repeat_value nil
                       :repeat_unit nil
                       :time_start ,(org-ts-to-unixtime ts0)
-                      :start_is_long nil
+                      :start_is_long 0
                       :time_end ,(org-ts-to-unixtime ts1)
-                      :end_is_long nil
+                      :end_is_long 0
                       :raw_value ,ts)))))
 
   ;; link table
@@ -695,7 +695,7 @@ list then join the cdr of IN with newlines."
         `((timestamps :file_path ,testing-filepath
                       :headline_offset 1
                       :timestamp_offset 40
-                      :is_active nil
+                      :is_active 0
                       :warning_type nil
                       :warning_value nil
                       :warning_unit nil
@@ -703,7 +703,7 @@ list then join the cdr of IN with newlines."
                       :repeat_value nil
                       :repeat_unit nil
                       :time_start ,(org-ts-to-unixtime ts0)
-                      :start_is_long t
+                      :start_is_long 1
                       :time_end nil
                       :end_is_long nil
                       :raw_value ,ts0)
@@ -731,7 +731,7 @@ list then join the cdr of IN with newlines."
         `((timestamps :file_path ,testing-filepath
                       :headline_offset 1
                       :timestamp_offset 41
-                      :is_active nil
+                      :is_active 0
                       :warning_type nil
                       :warning_value nil
                       :warning_unit nil
@@ -739,7 +739,7 @@ list then join the cdr of IN with newlines."
                       :repeat_value nil
                       :repeat_unit nil
                       :time_start ,(org-ts-to-unixtime ts0)
-                      :start_is_long t
+                      :start_is_long 1
                       :time_end nil
                       :end_is_long nil
                       :raw_value ,ts0)
@@ -767,7 +767,7 @@ list then join the cdr of IN with newlines."
         `((timestamps :file_path ,testing-filepath
                       :headline_offset 1
                       :timestamp_offset 42
-                      :is_active nil
+                      :is_active 0
                       :warning_type nil
                       :warning_value nil
                       :warning_unit nil
@@ -775,7 +775,7 @@ list then join the cdr of IN with newlines."
                       :repeat_value nil
                       :repeat_unit nil
                       :time_start ,(org-ts-to-unixtime ts0)
-                      :start_is_long t
+                      :start_is_long 1
                       :time_end nil
                       :end_is_long nil
                       :raw_value ,ts0)
@@ -803,7 +803,7 @@ list then join the cdr of IN with newlines."
         `((timestamps :file_path ,testing-filepath
                       :headline_offset 1
                       :timestamp_offset 45
-                      :is_active nil
+                      :is_active 0
                       :warning_type nil
                       :warning_value nil
                       :warning_unit nil
@@ -811,7 +811,7 @@ list then join the cdr of IN with newlines."
                       :repeat_value nil
                       :repeat_unit nil
                       :time_start ,(org-ts-to-unixtime ts0)
-                      :start_is_long t
+                      :start_is_long 1
                       :time_end nil
                       :end_is_long nil
                       :raw_value ,ts0)

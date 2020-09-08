@@ -147,7 +147,7 @@
              (schema-cmd "CREATE TABLE files (file_path TEXT,md5 TEXT);")
              (files (format "insert into files (file_path,md5,size) values ('%s','%s',6);"
                             test-file test-md5))
-             (headlines (format "insert into headlines (file_path,headline_offset,headline_text,keyword,effort,priority,is_archived,is_commented,content) values ('%s',1,'foo',NULL,NULL,NULL,NULL,NULL,NULL);insert into headline_closures (file_path,headline_offset,parent_offset,depth) values ('%s',1,1,0);"
+             (headlines (format "insert into headlines (file_path,headline_offset,headline_text,keyword,effort,priority,is_archived,is_commented,content) values ('%s',1,'foo',NULL,NULL,NULL,0,0,NULL);insert into headline_closures (file_path,headline_offset,parent_offset,depth) values ('%s',1,1,0);"
                                 test-file test-file)))
         (expect (org-sql--cmd org-sql-sqlite-path schema-cmd)
                 :to-equal "")

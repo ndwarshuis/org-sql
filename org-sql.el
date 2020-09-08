@@ -57,8 +57,6 @@ It is assumed these are used elsewhere and thus it would be redundant
 to store them. This is in addition to any properties specifified by
 `nd/org-sql-ignored-properties'.")
 
-;; TODO this assumes that columns b/t foreign keys and refs are the same name
-;; TODO add compile check to make sure the columns in the constraints exist
 (eval-and-compile
   (defconst org-sql--metaschema
     '((files
@@ -72,9 +70,6 @@ to store them. This is in addition to any properties specifified by
         (:size :desc "size of the org file in bytes"
                :type integer
                :constraints (notnull)))
-       ;; (:time_modified :type integer)
-       ;; (:time_created :type integer)
-       ;; (:time_accessed :type integer))
        (constraints
         (primary :keys (:file_path asc))))
 
@@ -85,8 +80,6 @@ to store them. This is in addition to any properties specifified by
                     :type text)
         (:headline_offset :desc "file offset of the headline's first character"
                           :type integer)
-        ;; (:tree_path :desc "outline tree path of the headline"
-        ;;             :type text)
         (:headline_text :desc "raw text of the headline"
                         :type text
                         :constraints (notnull))
@@ -94,20 +87,14 @@ to store them. This is in addition to any properties specifified by
                   :type text)
         (:effort :desc "the value of the Effort property in minutes"
                  :type integer)
-        ;; (:scheduled_offset :desc "file offset of the SCHEDULED timestamp"
-        ;;                    :type integer)
-        ;; (:deadline_offset :desc "file offset of the DEADLINE timestamp"
-        ;;                   :type integer)
-        ;; (:closed_offset :desc "file offset of the CLOSED timestamp"
-        ;;                 :type integer)
         (:priority :desc "character value of the priority"
                    :type char)
         (:is_archived :desc "true if the headline has an archive tag"
-                   :type boolean
-                   :constraints (notnull))
+                      :type boolean
+                      :constraints (notnull))
         (:is_commented :desc "true if the headline has a comment keyword"
-                    :type boolean
-                   :constraints (notnull))
+                       :type boolean
+                       :constraints (notnull))
         (:content :desc "the headline contents"
                   :type text))
        (constraints
@@ -132,8 +119,13 @@ to store them. This is in addition to any properties specifified by
        (constraints
         (primary :keys (:file_path asc :headline_offset asc :parent_offset asc))
         (foreign :ref headlines
-                 :keys (:file_path :headline_offset :parent_offset)
-                 :parent-keys (:file_path :headline_offset :headline_offset)
+                 :keys (:file_path :headline_offset)
+                 :parent-keys (:file_path :headline_offset)
+                 :on_delete cascade
+                 :on_update cascade)
+        (foreign :ref headlines
+                 :keys (:file_path :parent_offset)
+                 :parent-keys (:file_path :headline_offset)
                  :on_delete cascade
                  :on_update cascade)))
 
@@ -183,8 +175,8 @@ to store them. This is in addition to any properties specifified by
         (:tag :desc "the text value of this tag"
               :type text)
         (:is_inherited :desc "true if this tag is from the ITAGS property"
-                    :type boolean
-                    :constraints (notnull)))
+                       :type boolean
+                       :constraints (notnull)))
        (constraints
         (primary :keys (:file_path nil :headline_offset nil :tag nil :is_inherited nil))
         (foreign :ref headlines
@@ -208,9 +200,9 @@ to store them. This is in addition to any properties specifified by
                    :constraints (notnull)))
        (constraints
         (primary :keys (:file_path asc :property_offset asc))
-        (foreign :ref headlines
-                 :keys (:file_path :headline_offset)
-                 :parent-keys (:file_path :headline_offset)
+        (foreign :ref files
+                 :keys (:file_path)
+                 :parent-keys (:file_path)
                  :on_delete cascade
                  :on_update cascade)))
 
@@ -258,8 +250,8 @@ to store them. This is in addition to any properties specifified by
         (:file_path :desc "path to the file containing this clock"
                     :type text)
         (:headline_offset :desc "offset of the headline with this clock"
-                         :type integer
-                        :constraints (notnull))
+                          :type integer
+                          :constraints (notnull))
         (:clock_offset :desc "file offset of this clock"
                        :type integer)
         (:time_start :desc "timestamp for the start of this clock"
@@ -283,7 +275,7 @@ to store them. This is in addition to any properties specifified by
                     :type text)
         (:headline_offset :desc "offset of the headline with this entry"
                           :type integer
-                        :constraints (notnull))
+                          :constraints (notnull))
         (:entry_offset :desc "offset of this logbook entry"
                        :type integer)
         (:entry_type :desc "type of this entry (see `org-log-note-headlines')"
@@ -421,7 +413,69 @@ to store them. This is in addition to any properties specifified by
                  :parent-keys (:file_path :headline_offset)
                  :on_delete cascade
                  :on_update cascade))))
-      "Internal schema representation as a pure symbolic list."))
+    "Internal schema representation as a pure symbolic list."))
+
+;; ensure integrity of the metaschema
+
+(eval-when-compile
+  (defun org-sql--metaschema-has-valid-keys (tbl-schema)
+    (-let* (((tbl-name . meta) tbl-schema)
+            ((&alist 'constraints 'columns) meta)
+            (column-names (-map #'car columns)))
+      (cl-flet
+          ((get-keys
+            (constraint)
+            (-let* (((type . plist) constraint)
+                    ((&plist :keys) plist))
+              ;; this assumes the only two options are primary and foreign
+              (cons type (if (eq type 'primary) (-slice keys 0 nil 2) keys))))
+           (test-keys
+            (type keys)
+            (-some->> (-difference keys column-names)
+              (-map #'symbol-name)
+              (s-join ", ")
+              (error "Mismatched %s keys in table '%s': %s" type tbl-name))))
+        (--> (--filter (memq (car it) '(primary foreign)) constraints)
+             (-map #'get-keys it)
+             (--each it (test-keys (car it) (cdr it)))))))
+
+  (defun org-sql--metaschema-has-valid-parent-keys (tbl-schema)
+    (cl-flet
+        ((is-valid
+          (foreign-meta tbl-name)
+          (-let* (((&plist :parent-keys :ref) foreign-meta)
+                  (parent-meta (alist-get ref org-sql--metaschema))
+                  (parent-columns (-map #'car (alist-get 'columns parent-meta)))
+                  (parent-primary (--> (alist-get 'constraints parent-meta)
+                                       (alist-get 'primary it)
+                                       (plist-get it :keys)
+                                       (-slice it 0 nil 2))))
+            ;; any parent keys must have corresponding columns in the referred
+            ;; table
+            (-some->> (-difference parent-keys parent-columns)
+              (-map #'symbol-name)
+              (s-join ", ")
+              (error "Mismatched foreign keys between %s and %s: %s" tbl-name ref))
+            ;; This isn't strictly a requirement (but still good practice); make
+            ;; sure the foreign key refer to the primary key in the parent table
+            (when (or (-difference parent-keys parent-primary)
+                      (-difference parent-primary parent-keys))
+              (error "Mismatched foreign and primary keys between %s and %s" tbl-name ref)))))
+      (-let* (((tbl-name . meta) tbl-schema)
+              (foreign (->> (alist-get 'constraints meta)
+                            (--filter (eq (car it) 'foreign))
+                            (-map #'cdr))))
+        (--each foreign (is-valid it tbl-name)))))
+
+  (-each org-sql--metaschema #'org-sql--metaschema-has-valid-keys)
+  (-each org-sql--metaschema #'org-sql--metaschema-has-valid-parent-keys))
+
+;; TODO this name is too specific
+;; TODO this now seems redundant
+(defun org-sql--kw-to-colname (kw)
+  "Return string representation of KW for column in sql database."
+  (if (keywordp kw) (--> kw (symbol-name it) (substring it 1))
+    (error "Not a keyword: %s" kw)))
 
 (defun org-sql--meta-format-column-constraints (constraints-meta)
   "Return formatted column constraints for CONSTRAINTS-META."
@@ -501,19 +555,11 @@ to store them. This is in addition to any properties specifified by
                            (s-join ","))))
     (format "CREATE TABLE %s (%s);" tbl-name column-str)))
 
-;; TODO, make a formating function to convert a lisp obj to schema
-(defconst org-sql--schemas
-  '("CREATE TABLE files (file_path TEXT PRIMARY KEY ASC,md5 TEXT NOT NULL,size INTEGER NOT NULL,time_modified INTEGER,time_created INTEGER,time_accessed INTEGER);"
-    "CREATE TABLE headlines (file_path TEXT, headline_offset INTEGER, tree_path TEXT, headline_text TEXT NOT NULL, keyword TEXT, effort INTEGER, scheduled_offset INTEGER, deadline_offset INTEGER, closed_offset INTEGER, priority CHAR, archived BOOLEAN, commented BOOLEAN, content TEXT, PRIMARY KEY (file_path ASC, headline_offset ASC), FOREIGN KEY (file_path) REFERENCES files (file_path) ON UPDATE CASCADE ON DELETE CASCADE);"
-    "CREATE TABLE tags (file_path TEXT,headline_offset INTEGER,tag TEXT,inherited BOOLEAN,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path, headline_offset, tag, inherited));"
-    "CREATE TABLE properties (file_path TEXT,headline_offset INTEGER,property_offset INTEGER,key_text TEXT NOT NULL,val_text TEXT NOT NULL,inherited BOOLEAN,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, property_offset ASC));"
-    "CREATE TABLE clocks (file_path TEXT,headline_offset INTEGER,clock_offset INTEGER,time_start INTEGER,time_end INTEGER,clock_note TEXT,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset)ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, clock_offset ASC));"
-    "CREATE TABLE logbook_entries (file_path TEXT,headline_offset INTEGER,entry_offset INTEGER,entry_type TEXT,time_logged INTEGER,header TEXT,note TEXT,FOREIGN KEY (file_path, headline_offset)REFERENCES headlines (file_path, headline_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, entry_offset ASC));"
-    "CREATE TABLE state_changes (file_path TEXT,entry_offset INTEGER,state_old TEXT NOT NULL,state_new TEXT NOT NULL,FOREIGN KEY (file_path, entry_offset) REFERENCES logbook_entries (file_path, entry_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, entry_offset ASC));"
-    "CREATE TABLE planning_changes (file_path TEXT, entry_offset INTEGER, timestamp_offset INTEGER NOT NULL, FOREIGN KEY (file_path, entry_offset) REFERENCES logbook_entries (file_path, entry_offset) ON DELETE CASCADE ON UPDATE CASCADE, PRIMARY KEY (file_path ASC, entry_offset ASC), FOREIGN KEY (file_path, timestamp_offset) REFERENCES timestamp (file_path, timestamp_offset) ON DELETE CASCADE ON UPDATE CASCADE);"
-    "CREATE TABLE links (file_path TEXT,headline_offset INTEGER,link_offset INTEGER,link_path TEXT,link_text TEXT,link_type TEXT,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, link_offset ASC));"
-    "CREATE TABLE timestamps (file_path TEXT, headline_offset INTEGER, timestamp_offset INTEGER, raw_value TEXT NOT NULL, type TEXT, warning_type TEXT, warning_value INTEGER, warning_unit TEXT, repeat_type TEXT, repeat_value INTEGER, repeat_unit TEXT, time INTEGER NOT NULL, time_end INTEGER, resolution TEXT, resolution_end TEXT, PRIMARY KEY (file_path, timestamp_offset), FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON DELETE CASCADE ON UPDATE CASCADE);")
-  "Table schemas for the org database.")
+
+(eval-and-compile
+  (defconst org-sql--schemas
+    (-map #'org-sql--meta-create-table org-sql--metaschema)
+    "Table schemas for the org database."))
 
 (defconst org-sql--default-pragma
   '(:foreign_keys on)
@@ -682,13 +728,6 @@ any other symbols to their symbol name."
     ((pred keywordp) (org-sql--kw-to-colname s))
     ((pred symbolp) (org-sql--escape-text (symbol-name s)))
     (e (error "Cannot convert to string: %s" e))))
-
-;; TODO this name is too specific
-;; TODO this now seems redundant
-(defun org-sql--kw-to-colname (kw)
-  "Return string representation of KW for column in sql database."
-  (if (keywordp kw) (--> kw (symbol-name it) (substring it 1))
-    (error "Not a keyword: %s" kw)))
 
 (defun org-sql--plist-concat (sep plist)
   "Concatenate a PLIST to string to be used in a SQL statement.
@@ -1172,55 +1211,57 @@ and ARGS. FUN adds OBJ to ACC and returns new ACC."
 (defun org-sql--extract-hl-properties (acc headline fp)
   "Add properties data from HEADLINE to accumulator ACC."
   (if (eq 'all org-sql-ignored-properties) acc
-    (cl-flet
-        ((is-ignored
-          (node-property)
-          (member (org-ml-get-property :key node-property)
-                  ;; TODO only do this once
-                  (append org-sql--ignored-properties-default
-                          org-sql-ignored-properties)))
-         (from
-          (acc np)
-          (let ((offset (org-ml-get-property :begin np)))
-            (--> (org-sql--cons acc properties
-                   :file_path fp
-                   :property_offset offset
-                   :key_text (org-ml-get-property :key np)
-                   :val_text (org-ml-get-property :value np))
-                 (org-sql--cons it headline_properties
-                   :file_path fp
-                   :headline_offset (org-ml-get-property :begin headline)
-                   :property_offset offset)))))
-      (->> (org-ml-headline-get-node-properties headline)
-           (-remove #'is-ignored)
-           (org-sql--extract acc #'from)))))
+    ;; TODO only do this once
+    (let ((ignore-list (append org-sql--ignored-properties-default
+                               org-sql-ignored-properties))
+          (headline-offset (org-ml-get-property :begin headline)))
+      (cl-flet
+          ((is-ignored
+            (node-property)
+            (member (org-ml-get-property :key node-property) ignore-list))
+           (from
+            (acc np)
+            (let ((property-offset (org-ml-get-property :begin np)))
+              (--> (org-sql--cons acc properties
+                     :file_path fp
+                     :property_offset property-offset
+                     :key_text (org-ml-get-property :key np)
+                     :val_text (org-ml-get-property :value np))
+                   (org-sql--cons it headline_properties
+                     :file_path fp
+                     :headline_offset headline-offset
+                     :property_offset property-offset)))))
+        (->> (org-ml-headline-get-node-properties headline)
+             (-remove #'is-ignored)
+             (org-sql--extract acc #'from))))))
 
 (defun org-sql--extract-tags (acc headline fp)
   "Extract tags data from HEADLINE and add to accumulator ACC."
   (if (eq 'all org-sql-ignored-tags) acc
-    (cl-flet
-        ((from
-          (acc tag inherited)
-          (org-sql--cons acc headline_tags
-            :file_path fp
-            :headline_offset (org-ml-get-property :begin headline)
-            :tag tag
-            :is_inherited inherited))
-         (filter-ignored
-          (tags)
-          (-difference tags org-sql-ignored-tags)))
-      (let ((tags (filter-ignored (org-sql--headline-get-tags headline)))
-            (i-tags (->> (org-sql--headline-get-archive-itags headline)
-                         ;; (if (not org-sql-use-tag-inheritance) it
-                         ;;   (org-sql--element-parent-tags it headline))
-                         (filter-ignored))))
-        (-> (org-sql--extract acc #'from tags nil)
-            (org-sql--extract #'from i-tags t))))))
+    (let ((offset (org-ml-get-property :begin headline)))
+      (cl-flet
+          ((from
+            (acc tag inherited)
+            (org-sql--cons acc headline_tags
+              :file_path fp
+              :headline_offset offset
+              :tag tag
+              :is_inherited (if inherited 1 0)))
+           (filter-ignored
+            (tags)
+            (-difference tags org-sql-ignored-tags)))
+        (let ((tags (filter-ignored (org-sql--headline-get-tags headline)))
+              (i-tags (when org-sql-use-tag-inheritance
+                        (->> (org-sql--headline-get-archive-itags headline)
+                             (filter-ignored)))))
+          (-> (org-sql--extract acc #'from tags nil)
+              (org-sql--extract #'from i-tags t)))))))
 
 (defun org-sql--extract-links (acc headline fp)
   "Add link data from headline HEADLINE to accumulator ACC."
   (if (eq 'all org-sql-ignored-link-types) acc
-    (let ((links (->> (org-ml-match '(:any * link) headline)
+    (let ((offset (org-ml-get-property :begin headline))
+          (links (->> (org-ml-match '(:any * link) headline)
                       (--remove (member (org-ml-get-property :type it)
                                         org-sql-ignored-link-types)))))
       (cl-flet
@@ -1228,7 +1269,7 @@ and ARGS. FUN adds OBJ to ACC and returns new ACC."
             (acc link)
             (org-sql--cons acc links
               :file_path fp
-              :headline_offset (org-ml-get-property :begin headline)
+              :headline_offset offset
               :link_offset (org-ml-get-property :begin link)
               :link_path (org-ml-get-property :path link)
               :link_text (->> (org-ml-get-children link)
@@ -1246,14 +1287,14 @@ this function."
       ((get-resolution
         (time)
         ;; TODO this should be public in org-ml
-        (when time (org-ml--time-is-long time))))
+        (when time (if (org-ml--time-is-long time) 1 0))))
     (let ((start (org-ml-timestamp-get-start-time ts))
           (end (org-ml-timestamp-get-end-time ts)))
       (org-sql--cons acc timestamps
         :file_path fp
         :headline_offset (org-ml-get-property :begin headline)
         :timestamp_offset (org-ml-get-property :begin ts)
-        :is_active (org-ml-timestamp-is-active ts)
+        :is_active (if (org-ml-timestamp-is-active ts) 1 0)
         :warning_type (org-ml-get-property :warning-type ts)
         :warning_value (org-ml-get-property :warning-value ts)
         :warning_unit (org-ml-get-property :warning-unit ts)
@@ -1323,28 +1364,20 @@ this function."
 
 (defun org-sql--extract-hl-meta (acc headline fp)
   "Add general data from HEADLINE to accumulator ACC."
-  (-> (org-sql--cons acc headlines
-        :file_path fp
-        :headline_offset (org-ml-get-property :begin headline)
-        ;; :tree_path (org-sql--headline-get-path headline)
-        :headline_text (org-ml-get-property :raw-value headline)
-        :keyword (org-ml-get-property :todo-keyword headline)
-        :effort (-some-> (org-ml-headline-get-node-property "Effort" headline)
-                  (org-sql--effort-to-int))
-        ;; :scheduled_offset (-some->> scheduled (org-ml-get-property :begin))
-        ;; :deadline_offset (-some->> deadline (org-ml-get-property :begin))
-        ;; :closed_offset (-some->> closed (org-ml-get-property :begin))
-        :priority (-some->> (org-ml-get-property :priority headline)
-                    (byte-to-string))
-        :is_archived (org-ml-get-property :archivedp headline)
-        :is_commented (org-ml-get-property :commentedp headline)
-        :content (-some->> (org-sql--headline-get-contents headline)
-                   (-map #'org-ml-to-string)
-                   (s-join "")))
-      (org-sql--extract-hl-closures headline fp)
-      (org-sql--extract-hl-planning headline fp)
-      ;; (org-sql--extract #'org-sql--extract-ts planning-timestamps headline fp)
-      (org-sql--extract-hl-contents headline fp)))
+  (org-sql--cons acc headlines
+    :file_path fp
+    :headline_offset (org-ml-get-property :begin headline)
+    :headline_text (org-ml-get-property :raw-value headline)
+    :keyword (org-ml-get-property :todo-keyword headline)
+    :effort (-some-> (org-ml-headline-get-node-property "Effort" headline)
+              (org-sql--effort-to-int))
+    :priority (-some->> (org-ml-get-property :priority headline)
+                (byte-to-string))
+    :is_archived (if (org-ml-get-property :archivedp headline) 1 0)
+    :is_commented (if (org-ml-get-property :commentedp headline) 1 0)
+    :content (-some->> (org-sql--headline-get-contents headline)
+               (-map #'org-ml-to-string)
+               (s-join ""))))
 
 (defun org-sql--extract-hl (acc headlines fp)
   "Extract data from HEADLINES and add to accumulator ACC.
@@ -1353,6 +1386,9 @@ FP is the path to the file containing the headlines."
       ((from
         (acc hl)
         (-> (org-sql--extract-hl-meta acc hl fp)
+            (org-sql--extract-hl-closures hl fp)
+            (org-sql--extract-hl-planning hl fp)
+            (org-sql--extract-hl-contents hl fp)
             (org-sql--extract-links hl fp)
             (org-sql--extract-tags hl fp)
             (org-sql--extract-hl-properties hl fp)
