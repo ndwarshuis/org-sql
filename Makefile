@@ -14,16 +14,16 @@ docs:
        -l dev/org-sql-doc.el \
        -f create-docs-file
 
-unit:
-	${CASK} exec buttercup -L . -l dev/org-sql-test-internal.el
+stateless:
+	${CASK} exec buttercup -L . -l dev/org-sql-test-stateless.el
 
-sqlite:
-	${CASK} exec buttercup -L . -l dev/org-sql-test-sqlite.el
+stateful:
+	${CASK} exec buttercup -L . -l dev/org-sql-test-stateful.el
 
 compile:
 	${CASK} build
-	${MAKE} unit
-	${MAKE} sqlite
+	${MAKE} stateless
+	${MAKE} stateful
 
 clean-elc:
 	${CASK} clean-elc

@@ -45,22 +45,34 @@ list then join the cdr of IN with newlines."
 
 (defconst testing-filepath "/tmp/dummy")
 
+(defconst testing-md5 "123456")
+
+(defconst testing-files-sml
+  `(files :file_path ,testing-filepath
+          :md5 ,testing-md5
+          :size nil))
+
 (defmacro expect-sql* (in tbl res-form)
   `(progn
      (insert (list-to-lines ,in))
      (let ((res ,res-form))
        (expect res :to-equal ,tbl))))
 
+(defun buffer-get-sml ()
+  (->> (org-ml-parse-this-buffer)
+       (org-sql--to-fstate testing-filepath testing-md5 nil '("TODO" "DONE"))
+       (org-sql--fstate-to-mql-insert)))
+
 (defmacro expect-sql (in tbl)
   (declare (indent 1))
-  `(expect-sql* ,in ,tbl (org-sql--extract-buffer nil testing-filepath)))
+  `(expect-sql* ,in ,tbl (buffer-get-sml)))
 
 (defmacro expect-sql-tbls (names in tbl)
   (declare (indent 2))
-  `(expect-sql* ,in ,tbl (->> (org-sql--extract-buffer nil testing-filepath)
+  `(expect-sql* ,in ,tbl (->> (buffer-get-sml)
                               (--filter (member (car it) ',names)))))
 
-(describe "SQL metalangage spec"
+(describe "meta-query language insert spec"
   (before-all
     (org-mode))
 
@@ -71,10 +83,7 @@ list then join the cdr of IN with newlines."
 
   (it "single headline"
     (expect-sql "* headline"
-      `((headline_closures :file_path ,testing-filepath
-                           :headline_offset 1
-                           :parent_offset 1
-                           :depth 0)
+      `(,testing-files-sml
         (headlines :file_path ,testing-filepath
                    :headline_offset 1
                    :headline_text "headline"
@@ -83,19 +92,20 @@ list then join the cdr of IN with newlines."
                    :priority nil
                    :is_archived 0
                    :is_commented 0
-                   :content nil))))
+                   :content nil)
+        (headline_closures :file_path ,testing-filepath
+                           :headline_offset 1
+                           :parent_offset 1
+                           :depth 0))))
 
   (it "two headlines"
     ;; NOTE reverse order
     (expect-sql (list "* headline"
                       "* another headline")
-      `((headline_closures :file_path ,testing-filepath
-                           :headline_offset 12
-                           :parent_offset 12
-                           :depth 0)
+      `(,testing-files-sml
         (headlines :file_path ,testing-filepath
-                   :headline_offset 12
-                   :headline_text "another headline"
+                   :headline_offset 1
+                   :headline_text "headline"
                    :keyword nil
                    :effort nil
                    :priority nil
@@ -107,14 +117,18 @@ list then join the cdr of IN with newlines."
                            :parent_offset 1
                            :depth 0)
         (headlines :file_path ,testing-filepath
-                   :headline_offset 1
-                   :headline_text "headline"
+                   :headline_offset 12
+                   :headline_text "another headline"
                    :keyword nil
                    :effort nil
                    :priority nil
                    :is_archived 0
                    :is_commented 0
-                   :content nil))))
+                   :content nil)
+        (headline_closures :file_path ,testing-filepath
+                           :headline_offset 12
+                           :parent_offset 12
+                           :depth 0))))
 
   (it "fancy headline"
     (expect-sql (list "* TODO [#A] COMMENT another headline"
@@ -122,10 +136,7 @@ list then join the cdr of IN with newlines."
                       ":Effort: 0:30"
                       ":END:"
                       "this /should/ appear")
-      `((headline_closures :file_path ,testing-filepath
-                           :headline_offset 1
-                           :parent_offset 1
-                           :depth 0)
+      `(,testing-files-sml
         (headlines :file_path ,testing-filepath
                    :headline_offset 1
                    :headline_text "another headline"
@@ -134,19 +145,29 @@ list then join the cdr of IN with newlines."
                    :priority "A"
                    :is_archived 0
                    :is_commented 1
-                   :content "this /should/ appear\n"))))
+                   :content "this /should/ appear\n")
+        (headline_closures :file_path ,testing-filepath
+                           :headline_offset 1
+                           :parent_offset 1
+                           :depth 0))))
 
   (it "nested headline"
     (expect-sql (list "* headline"
                       "** nested headline")
-      `((headline_closures :file_path ,testing-filepath
-                           :headline_offset 12
-                           :parent_offset 12
-                           :depth 0)
+      `(,testing-files-sml
+        (headlines :file_path ,testing-filepath
+                   :headline_offset 1
+                   :headline_text "headline"
+                   :keyword nil
+                   :effort nil
+                   :priority nil
+                   :is_archived 0
+                   :is_commented 0
+                   :content nil)
         (headline_closures :file_path ,testing-filepath
-                           :headline_offset 12
+                           :headline_offset 1
                            :parent_offset 1
-                           :depth 1)
+                           :depth 0)
         (headlines :file_path ,testing-filepath
                    :headline_offset 12
                    :headline_text "nested headline"
@@ -157,26 +178,18 @@ list then join the cdr of IN with newlines."
                    :is_commented 0
                    :content nil)
         (headline_closures :file_path ,testing-filepath
-                           :headline_offset 1
+                           :headline_offset 12
                            :parent_offset 1
-                           :depth 0)
-        (headlines :file_path ,testing-filepath
-                   :headline_offset 1
-                   :headline_text "headline"
-                   :keyword nil
-                   :effort nil
-                   :priority nil
-                   :is_archived 0
-                   :is_commented 0
-                   :content nil))))
+                           :depth 1)
+        (headline_closures :file_path ,testing-filepath
+                           :headline_offset 12
+                           :parent_offset 12
+                           :depth 0))))
 
 
   (it "archived headline"
     (expect-sql "* headline :ARCHIVE:"
-      `((headline_closures :file_path ,testing-filepath
-                           :headline_offset 1
-                           :parent_offset 1
-                           :depth 0)
+      `(,testing-files-sml
         (headlines :file_path ,testing-filepath
                    :headline_offset 1
                    :headline_text "headline"
@@ -185,13 +198,35 @@ list then join the cdr of IN with newlines."
                    :priority nil
                    :is_archived 1
                    :is_commented 0
-                   :content nil))))
+                   :content nil)
+        (headline_closures :file_path ,testing-filepath
+                           :headline_offset 1
+                           :parent_offset 1
+                           :depth 0))))
 
   (it "closed headline"
     (let* ((ts "[2112-01-01 Thu]"))
       (expect-sql (list "* headline"
                         (format "CLOSED: %s" ts))
-        `((timestamps :file_path ,testing-filepath
+        `(,testing-files-sml
+          (headlines :file_path ,testing-filepath
+                     :headline_offset 1
+                     :headline_text "headline"
+                     :keyword nil
+                     :effort nil
+                     :priority nil
+                     :is_archived 0
+                     :is_commented 0
+                     :content nil)
+          (headline_closures :file_path ,testing-filepath
+                             :headline_offset 1
+                             :parent_offset 1
+                             :depth 0)
+          (planning_entries :file_path ,testing-filepath
+                            :headline_offset 1
+                            :planning_type closed
+                            :timestamp_offset 20)
+          (timestamps :file_path ,testing-filepath
                       :headline_offset 1
                       :timestamp_offset 20
                       :is_active 0
@@ -205,24 +240,7 @@ list then join the cdr of IN with newlines."
                       :start_is_long 0
                       :time_end nil
                       :end_is_long nil
-                      :raw_value ,ts)
-          (planning_entries :file_path ,testing-filepath
-                            :headline_offset 1
-                            :planning_type closed
-                            :timestamp_offset 20)
-          (headline_closures :file_path ,testing-filepath
-                             :headline_offset 1
-                             :parent_offset 1
-                             :depth 0)
-          (headlines :file_path ,testing-filepath
-                     :headline_offset 1
-                     :headline_text "headline"
-                     :keyword nil
-                     :effort nil
-                     :priority nil
-                     :is_archived 0
-                     :is_commented 0
-                     :content nil)))))
+                      :raw_value ,ts)))))
 
   (it "scheduled/closed/deadlined headline"
     (let ((ts0 "<2112-01-01 Thu>")
@@ -231,44 +249,24 @@ list then join the cdr of IN with newlines."
       (expect-sql
           (list "* headline"
                 (format "SCHEDULED: %s DEADLINE: %s CLOSED: %s" ts0 ts1 ts2))
-        `((timestamps :file_path ,testing-filepath
-                      :headline_offset 1
-                      :timestamp_offset 23
-                      :is_active 1
-                      :warning_type nil
-                      :warning_value nil
-                      :warning_unit nil
-                      :repeat_type nil
-                      :repeat_value nil
-                      :repeat_unit nil
-                      :time_start ,(org-ts-to-unixtime ts0)
-                      :start_is_long 0
-                      :time_end nil
-                      :end_is_long nil
-                      :raw_value ,ts0)
+        `(,testing-files-sml
+          (headlines :file_path ,testing-filepath
+                     :headline_offset 1
+                     :headline_text "headline"
+                     :keyword nil
+                     :effort nil
+                     :priority nil
+                     :is_archived 0
+                     :is_commented 0
+                     :content nil)
+          (headline_closures :file_path ,testing-filepath
+                             :headline_offset 1
+                             :parent_offset 1
+                             :depth 0)
           (planning_entries :file_path ,testing-filepath
                             :headline_offset 1
-                            :planning_type scheduled
-                            :timestamp_offset 23)
-          (timestamps :file_path ,testing-filepath
-                      :headline_offset 1
-                      :timestamp_offset 50
-                      :is_active 1
-                      :warning_type nil
-                      :warning_value nil
-                      :warning_unit nil
-                      :repeat_type nil
-                      :repeat_value nil
-                      :repeat_unit nil
-                      :time_start ,(org-ts-to-unixtime ts1)
-                      :start_is_long 0
-                      :time_end nil
-                      :end_is_long nil
-                      :raw_value ,ts1)
-          (planning_entries :file_path ,testing-filepath
-                            :headline_offset 1
-                            :planning_type deadline
-                            :timestamp_offset 50)
+                            :planning_type closed
+                            :timestamp_offset 75)
           (timestamps :file_path ,testing-filepath
                       :headline_offset 1
                       :timestamp_offset 75
@@ -286,21 +284,42 @@ list then join the cdr of IN with newlines."
                       :raw_value ,ts2)
           (planning_entries :file_path ,testing-filepath
                             :headline_offset 1
-                            :planning_type closed
-                            :timestamp_offset 75)
-          (headline_closures :file_path ,testing-filepath
-                             :headline_offset 1
-                             :parent_offset 1
-                             :depth 0)
-          (headlines :file_path ,testing-filepath
-                     :headline_offset 1
-                     :headline_text "headline"
-                     :keyword nil
-                     :effort nil
-                     :priority nil
-                     :is_archived 0
-                     :is_commented 0
-                     :content nil)))))
+                            :planning_type deadline
+                            :timestamp_offset 50)
+          (timestamps :file_path ,testing-filepath
+                      :headline_offset 1
+                      :timestamp_offset 50
+                      :is_active 1
+                      :warning_type nil
+                      :warning_value nil
+                      :warning_unit nil
+                      :repeat_type nil
+                      :repeat_value nil
+                      :repeat_unit nil
+                      :time_start ,(org-ts-to-unixtime ts1)
+                      :start_is_long 0
+                      :time_end nil
+                      :end_is_long nil
+                      :raw_value ,ts1)
+          (planning_entries :file_path ,testing-filepath
+                            :headline_offset 1
+                            :planning_type scheduled
+                            :timestamp_offset 23)
+          (timestamps :file_path ,testing-filepath
+                      :headline_offset 1
+                      :timestamp_offset 23
+                      :is_active 1
+                      :warning_type nil
+                      :warning_value nil
+                      :warning_unit nil
+                      :repeat_type nil
+                      :repeat_value nil
+                      :repeat_unit nil
+                      :time_start ,(org-ts-to-unixtime ts0)
+                      :start_is_long 0
+                      :time_end nil
+                      :end_is_long nil
+                      :raw_value ,ts0)))))
 
   ;; tags table
 
@@ -315,12 +334,12 @@ list then join the cdr of IN with newlines."
     (expect-sql-tbls (headline_tags) (list "* headline :onetag:"
                                            "* headline :twotag:")
       `((headline_tags :file_path ,testing-filepath
-                       :headline_offset 21
-                       :tag "twotag"
-                       :is_inherited 0)
-        (headline_tags :file_path ,testing-filepath
                        :headline_offset 1
                        :tag "onetag"
+                       :is_inherited 0)
+        (headline_tags :file_path ,testing-filepath
+                       :headline_offset 21
+                       :tag "twotag"
                        :is_inherited 0))))
 
   (it "single tag (child headline)"
@@ -365,13 +384,13 @@ list then join the cdr of IN with newlines."
                                        "#+FILETAGS: bar"
                                        "* headline")
       `((file_tags :file_path ,testing-filepath
-                   :tag "bang")
+                   :tag "foo")
         (file_tags :file_path ,testing-filepath
                    :tag "bar")
         (file_tags :file_path ,testing-filepath
-                   :tag "foo"))))
+                   :tag "bang"))))
 
-  ;;  ;; timestamp table
+  ;; timestamp table
 
   (it "closed timestamp"
     (let* ((ts "<2112-01-01 Thu>")
@@ -499,14 +518,14 @@ list then join the cdr of IN with newlines."
                                    "https://example.com")
       `((links :file_path ,testing-filepath
                :headline_offset 1
-               :link_offset 30
-               :link_path "//example.com"
+               :link_offset 10
+               :link_path "//example.org"
                :link_text ""
                :link_type "https")
         (links :file_path ,testing-filepath
                :headline_offset 1
-               :link_offset 10
-               :link_path "//example.org"
+               :link_offset 30
+               :link_path "//example.com"
                :link_text ""
                :link_type "https"))))
   
@@ -544,13 +563,13 @@ list then join the cdr of IN with newlines."
               ":PROPERTIES:"
               ":key: val"
               ":END:")
-      `((headline_properties :file_path ,testing-filepath
-                             :headline_offset 1
-                             :property_offset 23)
-        (properties :file_path ,testing-filepath
+      `((properties :file_path ,testing-filepath
                     :property_offset 23
                     :key_text "key"
-                    :val_text "val"))))
+                    :val_text "val")
+        (headline_properties :file_path ,testing-filepath
+                             :headline_offset 1
+                             :property_offset 23))))
 
   (it "multiple properties"
     (expect-sql-tbls (properties headline_properties)
@@ -559,31 +578,31 @@ list then join the cdr of IN with newlines."
               ":p1: ragtime dandies"
               ":p2: this time its personal"
               ":END:")
-      `((headline_properties :file_path ,testing-filepath
+      `((properties :file_path ,testing-filepath
+                    :property_offset 23
+                    :key_text "p1"
+                    :val_text "ragtime dandies")
+        (headline_properties :file_path ,testing-filepath
                              :headline_offset 1
-                             :property_offset 44)
+                             :property_offset 23)
         (properties :file_path ,testing-filepath
                     :property_offset 44
                     :key_text "p2"
                     :val_text "this time its personal")
         (headline_properties :file_path ,testing-filepath
                              :headline_offset 1
-                             :property_offset 23)
-        (properties :file_path ,testing-filepath
-                    :property_offset 23
-                    :key_text "p1"
-                    :val_text "ragtime dandies"))))
+                             :property_offset 44))))
 
   (it "single file property"
     (expect-sql-tbls (properties file_properties)
         (list "#+PROPERTY: FOO bar"
               "* parent")
-      `((file_properties :file_path ,testing-filepath
-                         :property_offset 1)
-        (properties :file_path ,testing-filepath
+      `((properties :file_path ,testing-filepath
                     :property_offset 1
                     :key_text "FOO"
-                    :val_text "bar"))))
+                    :val_text "bar")
+        (file_properties :file_path ,testing-filepath
+                         :property_offset 1))))
 
   ;; ;; TODO add inherited properties once they exist
 
@@ -619,6 +638,22 @@ list then join the cdr of IN with newlines."
                   :time_end nil
                   :clock_note nil)))))
 
+  (it "single clock (note)"
+    (let* ((org-log-into-drawer "LOGBOOK")
+           (ts "[2112-01-01 Fri 00:00]")
+           (clock (format "CLOCK: %s" ts)))
+      (expect-sql-tbls (clocks) (list "* parent"
+                                      ":LOGBOOK:"
+                                      clock
+                                      "- random"
+                                      ":END:")
+        `((clocks :file_path ,testing-filepath
+                  :headline_offset 1
+                  :clock_offset 20
+                  :time_start ,(org-ts-to-unixtime ts)
+                  :time_end nil
+                  :clock_note "random")))))
+
   (it "multiple clocks"
     (let* ((org-log-into-drawer "LOGBOOK")
            (ts0 "[2112-01-01 Fri 00:00]")
@@ -632,14 +667,14 @@ list then join the cdr of IN with newlines."
                                       ":END:")
         `((clocks :file_path ,testing-filepath
                   :headline_offset 1
-                  :clock_offset 50
-                  :time_start ,(org-ts-to-unixtime ts1)
+                  :clock_offset 20
+                  :time_start ,(org-ts-to-unixtime ts0)
                   :time_end nil
                   :clock_note nil)
           (clocks :file_path ,testing-filepath
                   :headline_offset 1
-                  :clock_offset 20
-                  :time_start ,(org-ts-to-unixtime ts0)
+                  :clock_offset 50
+                  :time_start ,(org-ts-to-unixtime ts1)
                   :time_end nil
                   :clock_note nil)))))
 
@@ -670,17 +705,17 @@ list then join the cdr of IN with newlines."
                 ":LOGBOOK:"
                 (format "- %s" header)
                 ":END:")
-        `((state_changes :file_path ,testing-filepath
-                         :entry_offset 20
-                         :state_old "TODO"
-                         :state_new "DONE")
-          (logbook_entries :file_path ,testing-filepath
+        `((logbook_entries :file_path ,testing-filepath
                            :headline_offset 1
                            :entry_offset 20
                            :entry_type state
                            :time_logged ,(org-ts-to-unixtime ts)
                            :header ,header
-                           :note nil)))))
+                           :note nil)
+          (state_changes :file_path ,testing-filepath
+                         :entry_offset 20
+                         :state_old "TODO"
+                         :state_new "DONE")))))
 
   (it "logbook item (reschedule)"
     (let* ((org-log-into-drawer "LOGBOOK")
@@ -692,7 +727,17 @@ list then join the cdr of IN with newlines."
                 ":LOGBOOK:"
                 (format "- %s" header)
                 ":END:")
-        `((timestamps :file_path ,testing-filepath
+        `((logbook_entries :file_path ,testing-filepath
+                           :headline_offset 1
+                           :entry_offset 20
+                           :entry_type reschedule
+                           :time_logged ,(org-ts-to-unixtime ts1)
+                           :header ,header
+                           :note nil)
+          (planning_changes :file_path ,testing-filepath
+                            :entry_offset 20
+                            :timestamp_offset 40)
+          (timestamps :file_path ,testing-filepath
                       :headline_offset 1
                       :timestamp_offset 40
                       :is_active 0
@@ -706,17 +751,7 @@ list then join the cdr of IN with newlines."
                       :start_is_long 1
                       :time_end nil
                       :end_is_long nil
-                      :raw_value ,ts0)
-          (planning_changes :file_path ,testing-filepath
-                            :entry_offset 20
-                            :timestamp_offset 40)
-          (logbook_entries :file_path ,testing-filepath
-                           :headline_offset 1
-                           :entry_offset 20
-                           :entry_type reschedule
-                           :time_logged ,(org-ts-to-unixtime ts1)
-                           :header ,header
-                           :note nil)))))
+                      :raw_value ,ts0)))))
 
   (it "logbook item (redeadline)"
     (let* ((org-log-into-drawer "LOGBOOK")
@@ -728,7 +763,17 @@ list then join the cdr of IN with newlines."
                 ":LOGBOOK:"
                 (format "- %s" header)
                 ":END:")
-        `((timestamps :file_path ,testing-filepath
+        `((logbook_entries :file_path ,testing-filepath
+                           :headline_offset 1
+                           :entry_offset 20
+                           :entry_type redeadline
+                           :time_logged ,(org-ts-to-unixtime ts1)
+                           :header ,header
+                           :note nil)
+          (planning_changes :file_path ,testing-filepath
+                            :entry_offset 20
+                            :timestamp_offset 41)
+          (timestamps :file_path ,testing-filepath
                       :headline_offset 1
                       :timestamp_offset 41
                       :is_active 0
@@ -742,17 +787,7 @@ list then join the cdr of IN with newlines."
                       :start_is_long 1
                       :time_end nil
                       :end_is_long nil
-                      :raw_value ,ts0)
-          (planning_changes :file_path ,testing-filepath
-                            :entry_offset 20
-                            :timestamp_offset 41)
-          (logbook_entries :file_path ,testing-filepath
-                           :headline_offset 1
-                           :entry_offset 20
-                           :entry_type redeadline
-                           :time_logged ,(org-ts-to-unixtime ts1)
-                           :header ,header
-                           :note nil)))))
+                      :raw_value ,ts0)))))
 
   (it "logbook item (delschedule)"
     (let* ((org-log-into-drawer "LOGBOOK")
@@ -764,7 +799,17 @@ list then join the cdr of IN with newlines."
                 ":LOGBOOK:"
                 (format "- %s" header)
                 ":END:")
-        `((timestamps :file_path ,testing-filepath
+        `((logbook_entries :file_path ,testing-filepath
+                           :headline_offset 1
+                           :entry_offset 20
+                           :entry_type delschedule
+                           :time_logged ,(org-ts-to-unixtime ts1)
+                           :header ,header
+                           :note nil)
+          (planning_changes :file_path ,testing-filepath
+                            :entry_offset 20
+                            :timestamp_offset 42)
+          (timestamps :file_path ,testing-filepath
                       :headline_offset 1
                       :timestamp_offset 42
                       :is_active 0
@@ -778,17 +823,7 @@ list then join the cdr of IN with newlines."
                       :start_is_long 1
                       :time_end nil
                       :end_is_long nil
-                      :raw_value ,ts0)
-          (planning_changes :file_path ,testing-filepath
-                            :entry_offset 20
-                            :timestamp_offset 42)
-          (logbook_entries :file_path ,testing-filepath
-                           :headline_offset 1
-                           :entry_offset 20
-                           :entry_type delschedule
-                           :time_logged ,(org-ts-to-unixtime ts1)
-                           :header ,header
-                           :note nil)))))
+                      :raw_value ,ts0)))))
 
   (it "logbook item (deldeadline)"
     (let* ((org-log-into-drawer "LOGBOOK")
@@ -800,7 +835,17 @@ list then join the cdr of IN with newlines."
                 ":LOGBOOK:"
                 (format "- %s" header)
                 ":END:")
-        `((timestamps :file_path ,testing-filepath
+        `((logbook_entries :file_path ,testing-filepath
+                           :headline_offset 1
+                           :entry_offset 20
+                           :entry_type deldeadline
+                           :time_logged ,(org-ts-to-unixtime ts1)
+                           :header ,header
+                           :note nil)
+          (planning_changes :file_path ,testing-filepath
+                            :entry_offset 20
+                            :timestamp_offset 45)
+          (timestamps :file_path ,testing-filepath
                       :headline_offset 1
                       :timestamp_offset 45
                       :is_active 0
@@ -814,17 +859,7 @@ list then join the cdr of IN with newlines."
                       :start_is_long 1
                       :time_end nil
                       :end_is_long nil
-                      :raw_value ,ts0)
-          (planning_changes :file_path ,testing-filepath
-                            :entry_offset 20
-                            :timestamp_offset 45)
-          (logbook_entries :file_path ,testing-filepath
-                           :headline_offset 1
-                           :entry_offset 20
-                           :entry_type deldeadline
-                           :time_logged ,(org-ts-to-unixtime ts1)
-                           :header ,header
-                           :note nil)))))
+                      :raw_value ,ts0)))))
 
   (it "logbook item (refile)"
     (let* ((org-log-into-drawer "LOGBOOK")
@@ -857,5 +892,223 @@ list then join the cdr of IN with newlines."
                            :time_logged ,(org-ts-to-unixtime ts)
                            :header ,header
                            :note nil))))))
+
+(defun format-with (mode type value)
+  (funcall (org-sql--compile-mql-format-function mode type) value))
+
+(defun format-with-sqlite (type value)
+  (format-with 'sqlite type value))
+
+(defun expect-formatter (type input &rest value-plist)
+  (declare (indent 2))
+  (-let (((&plist :sqlite :postgres) value-plist))
+    (expect (format-with 'sqlite type input) :to-equal sqlite)
+    (expect (format-with 'postgres type input) :to-equal postgres)))
+
+(describe "meta-query language type formatting spec"
+  (it "boolean (NULL)"
+    (expect-formatter 'boolean nil :sqlite "NULL" :postgres "NULL"))
+
+  (it "boolean (TRUE)"
+    (expect-formatter 'boolean 1 :sqlite "1" :postgres "TRUE"))
+
+  (it "boolean (FALSE)"
+    (expect-formatter 'boolean 0 :sqlite "0" :postgres "FALSE"))
+
+  (it "enum (NULL)"
+    (expect-formatter 'enum nil :sqlite "NULL" :postgres "NULL"))
+
+  (it "enum (defined)"
+    (expect-formatter 'enum 'foo :sqlite "'foo'" :postgres "'foo'"))
+
+  (it "integer (NULL)"
+    (expect-formatter 'integer nil :sqlite "NULL" :postgres "NULL"))
+
+  (it "integer (defined)"
+    (expect-formatter 'integer 123456 :sqlite "123456" :postgres "123456"))
+
+  (it "text (NULL)"
+    (expect-formatter 'text nil :sqlite "NULL" :postgres "NULL"))
+
+  (it "text (plain)"
+    (expect-formatter 'text "foo" :sqlite "'foo'" :postgres "'foo'"))
+  
+  (it "text (newlines)"
+    (expect-formatter 'text "foo\nbar"
+      :sqlite "'foo'||char(10)||'bar'"
+      :postgres "'foo'||chr(10)||'bar'"))
+
+  (it "text (quotes)"
+    (expect-formatter 'text "'foo'" :sqlite "'''foo'''" :postgres "'''foo'''")))
+
+(describe "meta-query language statement formatting spec"
+  (before-all
+    (setq test-schema
+          '((table-foo
+             (columns
+              (:bool :type boolean)
+              (:enum :type enum :allowed (bim bam boo))
+              (:int :type integer)
+              (:text :type text))
+             (constraints
+              (primary :keys (:int))))
+            (table-bar
+             (columns
+              (:intone :type integer)
+              (:inttwo :type integer))
+             (constraints
+              (primary :keys (:intone))
+              (foreign :ref table-foo
+                       :keys (:inttwo)
+                       :parent-keys (:int)
+                       :on_update cascade
+                       :on_delete cascade)))))
+    (setq formatter-alist
+          (->> test-schema
+               (--map (org-sql--compile-mql-schema-formatter-alist 'sqlite it)))))
+
+  ;; TODO use function to make this list, but the one now has hardcoded
+  ;; schema checking
+  (it "insert"
+    (let ((mql-insert '(table-foo :bool 0
+                                  :enum bim
+                                  :int 666
+                                  :text "hello")))
+      (expect (org-sql--format-mql-insert formatter-alist mql-insert)
+              :to-equal "insert into table-foo (bool,enum,int,text) values (0,'bim',666,'hello');")))
+
+  (it "update"
+    (let ((mql-insert '(table-foo (set :bool 0)
+                                  (where :enum bim))))
+      (expect (org-sql--format-mql-update formatter-alist mql-insert)
+              :to-equal "update table-foo set bool=0 where enum='bim';")))
+
+  (it "delete"
+    (let ((mql-delete '(table-foo)))
+      (expect (org-sql--format-mql-delete formatter-alist mql-delete)
+              :to-equal "delete from table-foo;")))
+
+  (it "delete (where)"
+    (let ((mql-delete '(table-foo (where :enum bim))))
+      (expect (org-sql--format-mql-delete formatter-alist mql-delete)
+              :to-equal "delete from table-foo where enum='bim';")))
+
+  (it "drop"
+    (expect (org-sql--format-mql-drop 'table-foo)
+            :to-equal "drop table table-foo;"))
+
+  (it "select"
+    (let ((mql-select '(table-foo (columns :bool))))
+      (expect (org-sql--format-mql-select formatter-alist mql-select)
+              :to-equal "select bool from table-foo;")))
+
+  (it "select (all columns)"
+    (let ((mql-select '(table-foo)))
+      (expect (org-sql--format-mql-select formatter-alist mql-select)
+              :to-equal "select * from table-foo;")))
+
+  (it "select (where)"
+    (let ((mql-select '(table-foo (columns :bool) (where :enum bim))))
+      (expect (org-sql--format-mql-select formatter-alist mql-select)
+              :to-equal "select bool from table-foo where enum='bim';")))
+
+  (it "create table (SQLite)"
+    (let ((config '(sqlite)))
+      (expect
+       (--map (org-sql--format-mql-schema-table config it) test-schema)
+       :to-equal
+       (list
+        "CREATE TABLE IF NOT EXISTS table-foo (bool INTEGER,enum TEXT,int INTEGER,text TEXT,PRIMARY KEY (int));"
+        "CREATE TABLE IF NOT EXISTS table-bar (intone INTEGER,inttwo INTEGER,PRIMARY KEY (intone),FOREIGN KEY (inttwo) REFERENCES table-foo (int) ON DELETE CASCADE ON UPDATE CASCADE);"))))
+
+  (it "create table (postgres)"
+    (let ((config '(postgres)))
+      (expect
+       (--map (org-sql--format-mql-schema-table config it) test-schema)
+       :to-equal
+       (list
+        "CREATE TABLE IF NOT EXISTS table-foo (bool BOOLEAN,enum ENUM('bim','bam','boo'),int INTEGER,text TEXT,PRIMARY KEY (int));"
+        "CREATE TABLE IF NOT EXISTS table-bar (intone INTEGER,inttwo INTEGER,PRIMARY KEY (intone),FOREIGN KEY (inttwo) REFERENCES table-foo (int) ON DELETE CASCADE ON UPDATE CASCADE);"))))
+
+  (it "transaction (sqlite)"
+    (let ((config '(sqlite))
+          (statements (list "INSERT INTO foo (bar) values (1);")))
+      (expect
+       (org-sql--format-sql-transaction config statements)
+       :to-equal
+       "PRAGMA foreign_keys = ON;BEGIN TRANSACTION;INSERT INTO foo (bar) values (1);COMMIT;")))
+
+  (it "transaction (postgres)"
+    (let ((config '(postgres))
+          (statements (list "INSERT INTO foo (bar) values (1);")))
+      (expect
+       (org-sql--format-sql-transaction config statements)
+       :to-equal
+       "BEGIN TRANSACTION;INSERT INTO foo (bar) values (1);COMMIT;")))
+
+  )
+
+  ;; (it "format insert"
+  ;;   (expect (org-sql--fmt-insert 'foo '(:one 1 :two "2"))
+  ;;           :to-equal "insert into foo (one,two) values (1,'2');"))
+
+  ;; (it "format update"
+  ;;   (expect (org-sql--fmt-update 'foo '(:one 1 :two "2") '(:three three))
+  ;;           :to-equal "update foo set one=1,two='2' where three='three';"))
+
+  ;; (it "format delete"
+  ;;   (expect (org-sql--fmt-delete 'foo '(:three three))
+  ;;           :to-equal "delete from foo where three='three';"))
+
+  ;; (it "format delete all"
+  ;;   (expect (org-sql--fmt-delete-all 'foo)
+  ;;           :to-equal "delete from foo;"))
+
+  ;; (it "format select"
+  ;;   (expect (org-sql--fmt-select 'foo '(:a :b))
+  ;;           :to-equal "select a,b from foo;"))
+
+  ;; (it "format create table (columns only)"
+  ;;   (let* ((create "CREATE TABLE foo")
+  ;;          (columns "bar TEXT,bam INTEGER NOT NULL")
+  ;;          (test-res (format "%s (%s);" create columns))
+  ;;          (meta '(foo
+  ;;                  (columns
+  ;;                   (:bar :type text)
+  ;;                   (:bam :type integer :constraints (notnull))))))
+  ;;     (expect (org-sql--meta-create-table meta) :to-equal test-res)))
+
+  ;; (it "format create table (primary)"
+  ;;   (let* ((create "CREATE TABLE foo")
+  ;;          (columns "bar TEXT,bam INTEGER NOT NULL")
+  ;;          (primary "PRIMARY KEY (bar ASC)")
+  ;;          (test-res (format "%s (%s,%s);" create columns primary))
+  ;;          (meta '(foo
+  ;;                  (columns
+  ;;                   (:bar :type text)
+  ;;                   (:bam :type integer :constraints (notnull)))
+  ;;                  (constraints
+  ;;                   (primary :keys (:bar ASC))))))
+  ;;     (expect (org-sql--meta-create-table meta) :to-equal test-res)))
+
+  ;; (it "format create table (all)"
+  ;;   (let* ((create "CREATE TABLE foo")
+  ;;          (columns "bar TEXT,bam INTEGER NOT NULL")
+  ;;          (primary "PRIMARY KEY (bar ASC)")
+  ;;          (foreign "FOREIGN KEY (bam) REFERENCES fubar (BAM)")
+  ;;          (cascade "ON DELETE CASCADE ON UPDATE CASCADE")
+  ;;          (test-res (format "%s (%s,%s,%s %s);" create columns primary foreign cascade))
+  ;;          (meta '(foo
+  ;;                  (columns
+  ;;                   (:bar :type text)
+  ;;                   (:bam :type integer :constraints (notnull)))
+  ;;                  (constraints
+  ;;                   (primary :keys (:bar ASC))
+  ;;                   (foreign :ref fubar
+  ;;                            :keys (:bam)
+  ;;                            :parent-keys (:BAM)
+  ;;                            :on_delete cascade
+  ;;                            :on_update cascade)))))
+  ;;     (expect (org-sql--meta-create-table meta) :to-equal test-res))))
 
 ;;; org-sql-test-internal.el ends here
