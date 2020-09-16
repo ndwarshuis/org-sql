@@ -1388,7 +1388,7 @@ Add tags to ACC (which is treated like a set)."
   "Add link data from headline HEADLINE to accumulator ACC."
   (if (eq 'all org-sql-ignored-link-types) acc
     (let ((offset (org-ml-get-property :begin headline))
-          (links (->> (org-ml-match '(headline section :any * link) headline)
+          (links (->> (org-ml-match '(section :any * link) headline)
                       (--remove (member (org-ml-get-property :type it)
                                         org-sql-ignored-link-types)))))
       (cl-flet

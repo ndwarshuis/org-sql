@@ -221,10 +221,6 @@ list then join the cdr of IN with newlines."
                              :headline_offset 1
                              :parent_offset 1
                              :depth 0)
-          (planning_entries :file_path ,testing-filepath
-                            :headline_offset 1
-                            :planning_type closed
-                            :timestamp_offset 20)
           (timestamps :file_path ,testing-filepath
                       :headline_offset 1
                       :timestamp_offset 20
@@ -239,7 +235,11 @@ list then join the cdr of IN with newlines."
                       :start_is_long 0
                       :time_end nil
                       :end_is_long nil
-                      :raw_value ,ts)))))
+                      :raw_value ,ts)
+          (planning_entries :file_path ,testing-filepath
+                            :headline_offset 1
+                            :planning_type closed
+                            :timestamp_offset 20)))))
 
   (it "scheduled/closed/deadlined headline"
     (let ((ts0 "<2112-01-01 Thu>")
@@ -262,10 +262,6 @@ list then join the cdr of IN with newlines."
                              :headline_offset 1
                              :parent_offset 1
                              :depth 0)
-          (planning_entries :file_path ,testing-filepath
-                            :headline_offset 1
-                            :planning_type closed
-                            :timestamp_offset 75)
           (timestamps :file_path ,testing-filepath
                       :headline_offset 1
                       :timestamp_offset 75
@@ -283,8 +279,8 @@ list then join the cdr of IN with newlines."
                       :raw_value ,ts2)
           (planning_entries :file_path ,testing-filepath
                             :headline_offset 1
-                            :planning_type deadline
-                            :timestamp_offset 50)
+                            :planning_type closed
+                            :timestamp_offset 75)
           (timestamps :file_path ,testing-filepath
                       :headline_offset 1
                       :timestamp_offset 50
@@ -302,8 +298,8 @@ list then join the cdr of IN with newlines."
                       :raw_value ,ts1)
           (planning_entries :file_path ,testing-filepath
                             :headline_offset 1
-                            :planning_type scheduled
-                            :timestamp_offset 23)
+                            :planning_type deadline
+                            :timestamp_offset 50)
           (timestamps :file_path ,testing-filepath
                       :headline_offset 1
                       :timestamp_offset 23
@@ -318,7 +314,11 @@ list then join the cdr of IN with newlines."
                       :start_is_long 0
                       :time_end nil
                       :end_is_long nil
-                      :raw_value ,ts0)))))
+                      :raw_value ,ts0)
+          (planning_entries :file_path ,testing-filepath
+                            :headline_offset 1
+                            :planning_type scheduled
+                            :timestamp_offset 23)))))
 
   ;; tags table
 
@@ -690,7 +690,7 @@ list then join the cdr of IN with newlines."
         `((logbook_entries :file_path ,testing-filepath
                            :headline_offset 1
                            :entry_offset 20
-                           :entry_type note
+                           :entry_type "note"
                            :time_logged ,(org-ts-to-unixtime ts)
                            :header ,header
                            :note ,note)))))
@@ -707,7 +707,7 @@ list then join the cdr of IN with newlines."
         `((logbook_entries :file_path ,testing-filepath
                            :headline_offset 1
                            :entry_offset 20
-                           :entry_type state
+                           :entry_type "state"
                            :time_logged ,(org-ts-to-unixtime ts)
                            :header ,header
                            :note nil)
@@ -729,13 +729,10 @@ list then join the cdr of IN with newlines."
         `((logbook_entries :file_path ,testing-filepath
                            :headline_offset 1
                            :entry_offset 20
-                           :entry_type reschedule
+                           :entry_type "reschedule"
                            :time_logged ,(org-ts-to-unixtime ts1)
                            :header ,header
                            :note nil)
-          (planning_changes :file_path ,testing-filepath
-                            :entry_offset 20
-                            :timestamp_offset 40)
           (timestamps :file_path ,testing-filepath
                       :headline_offset 1
                       :timestamp_offset 40
@@ -750,7 +747,10 @@ list then join the cdr of IN with newlines."
                       :start_is_long 1
                       :time_end nil
                       :end_is_long nil
-                      :raw_value ,ts0)))))
+                      :raw_value ,ts0)
+          (planning_changes :file_path ,testing-filepath
+                            :entry_offset 20
+                            :timestamp_offset 40)))))
 
   (it "logbook item (redeadline)"
     (let* ((org-log-into-drawer "LOGBOOK")
@@ -765,13 +765,10 @@ list then join the cdr of IN with newlines."
         `((logbook_entries :file_path ,testing-filepath
                            :headline_offset 1
                            :entry_offset 20
-                           :entry_type redeadline
+                           :entry_type "redeadline"
                            :time_logged ,(org-ts-to-unixtime ts1)
                            :header ,header
                            :note nil)
-          (planning_changes :file_path ,testing-filepath
-                            :entry_offset 20
-                            :timestamp_offset 41)
           (timestamps :file_path ,testing-filepath
                       :headline_offset 1
                       :timestamp_offset 41
@@ -786,7 +783,10 @@ list then join the cdr of IN with newlines."
                       :start_is_long 1
                       :time_end nil
                       :end_is_long nil
-                      :raw_value ,ts0)))))
+                      :raw_value ,ts0)
+          (planning_changes :file_path ,testing-filepath
+                            :entry_offset 20
+                            :timestamp_offset 41)))))
 
   (it "logbook item (delschedule)"
     (let* ((org-log-into-drawer "LOGBOOK")
@@ -801,13 +801,10 @@ list then join the cdr of IN with newlines."
         `((logbook_entries :file_path ,testing-filepath
                            :headline_offset 1
                            :entry_offset 20
-                           :entry_type delschedule
+                           :entry_type "delschedule"
                            :time_logged ,(org-ts-to-unixtime ts1)
                            :header ,header
                            :note nil)
-          (planning_changes :file_path ,testing-filepath
-                            :entry_offset 20
-                            :timestamp_offset 42)
           (timestamps :file_path ,testing-filepath
                       :headline_offset 1
                       :timestamp_offset 42
@@ -822,7 +819,10 @@ list then join the cdr of IN with newlines."
                       :start_is_long 1
                       :time_end nil
                       :end_is_long nil
-                      :raw_value ,ts0)))))
+                      :raw_value ,ts0)
+          (planning_changes :file_path ,testing-filepath
+                            :entry_offset 20
+                            :timestamp_offset 42)))))
 
   (it "logbook item (deldeadline)"
     (let* ((org-log-into-drawer "LOGBOOK")
@@ -837,13 +837,10 @@ list then join the cdr of IN with newlines."
         `((logbook_entries :file_path ,testing-filepath
                            :headline_offset 1
                            :entry_offset 20
-                           :entry_type deldeadline
+                           :entry_type "deldeadline"
                            :time_logged ,(org-ts-to-unixtime ts1)
                            :header ,header
                            :note nil)
-          (planning_changes :file_path ,testing-filepath
-                            :entry_offset 20
-                            :timestamp_offset 45)
           (timestamps :file_path ,testing-filepath
                       :headline_offset 1
                       :timestamp_offset 45
@@ -858,7 +855,10 @@ list then join the cdr of IN with newlines."
                       :start_is_long 1
                       :time_end nil
                       :end_is_long nil
-                      :raw_value ,ts0)))))
+                      :raw_value ,ts0)
+          (planning_changes :file_path ,testing-filepath
+                            :entry_offset 20
+                            :timestamp_offset 45)))))
 
   (it "logbook item (refile)"
     (let* ((org-log-into-drawer "LOGBOOK")
@@ -871,7 +871,7 @@ list then join the cdr of IN with newlines."
         `((logbook_entries :file_path ,testing-filepath
                            :headline_offset 1
                            :entry_offset 20
-                           :entry_type refile
+                           :entry_type "refile"
                            :time_logged ,(org-ts-to-unixtime ts)
                            :header ,header
                            :note nil)))))
@@ -887,7 +887,7 @@ list then join the cdr of IN with newlines."
         `((logbook_entries :file_path ,testing-filepath
                            :headline_offset 1
                            :entry_offset 20
-                           :entry_type done
+                           :entry_type "done"
                            :time_logged ,(org-ts-to-unixtime ts)
                            :header ,header
                            :note nil))))))
@@ -1014,34 +1014,35 @@ list then join the cdr of IN with newlines."
   (it "create table (SQLite)"
     (let ((config '(sqlite)))
       (expect
-       (--map (org-sql--format-mql-schema-table config it) test-schema)
+       (org-sql--format-mql-schema config test-schema)
        :to-equal
-       (list
+       (concat
         "CREATE TABLE IF NOT EXISTS table-foo (bool INTEGER,enum TEXT,int INTEGER,text TEXT,PRIMARY KEY (int));"
         "CREATE TABLE IF NOT EXISTS table-bar (intone INTEGER,inttwo INTEGER,PRIMARY KEY (intone),FOREIGN KEY (inttwo) REFERENCES table-foo (int) ON DELETE CASCADE ON UPDATE CASCADE);"))))
 
   (it "create table (postgres)"
     (let ((config '(postgres)))
       (expect
-       (--map (org-sql--format-mql-schema-table config it) test-schema)
+       (org-sql--format-mql-schema config test-schema)
        :to-equal
-       (list
-        "CREATE TABLE IF NOT EXISTS table-foo (bool BOOLEAN,enum ENUM('bim','bam','boo'),int INTEGER,text TEXT,PRIMARY KEY (int));"
+       (concat
+        "CREATE TYPE enum_enum AS ENUM ('bim','bam','boo');"
+        "CREATE TABLE IF NOT EXISTS table-foo (bool BOOLEAN,enum enum_enum,int INTEGER,text TEXT,PRIMARY KEY (int));"
         "CREATE TABLE IF NOT EXISTS table-bar (intone INTEGER,inttwo INTEGER,PRIMARY KEY (intone),FOREIGN KEY (inttwo) REFERENCES table-foo (int) ON DELETE CASCADE ON UPDATE CASCADE);"))))
 
   (it "transaction (sqlite)"
-    (let ((config '(sqlite))
+    (let ((mode 'sqlite)
           (statements (list "INSERT INTO foo (bar) values (1);")))
       (expect
-       (org-sql--format-sql-transaction config statements)
+       (org-sql--format-sql-transaction mode statements)
        :to-equal
        "PRAGMA foreign_keys = ON;BEGIN TRANSACTION;INSERT INTO foo (bar) values (1);COMMIT;")))
 
   (it "transaction (postgres)"
-    (let ((config '(postgres))
+    (let ((mode 'postgres)
           (statements (list "INSERT INTO foo (bar) values (1);")))
       (expect
-       (org-sql--format-sql-transaction config statements)
+       (org-sql--format-sql-transaction mode statements)
        :to-equal
        "BEGIN TRANSACTION;INSERT INTO foo (bar) values (1);COMMIT;"))))
 
