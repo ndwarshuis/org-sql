@@ -798,8 +798,8 @@ COLS are the column names as symbols used to obtain OUT."
 
 (defun org-sql--format-mql-column-name (kw)
   "Return string representation of KW for column in sql database."
-  (if (keywordp kw) (--> kw (symbol-name it) (substring it 1))
-    (error "Not a keyword: %s" kw)))
+  (if (not (keywordp kw)) (error "Not a keyword: %s" kw)
+    (s-chop-prefix ":" (symbol-name kw))))
 
 ;; create table
 
