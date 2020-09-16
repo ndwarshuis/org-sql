@@ -4,10 +4,9 @@ EMACS ?= emacs
 all: test
 
 test:
-	${MAKE} unit
-	${MAKE} sqlite
+	${MAKE} stateless
+	${MAKE} stateful
 	${MAKE} compile
-	${MAKE} clean-elc
 
 docs:
 	${CASK} exec ${EMACS} -Q -batch \
@@ -24,6 +23,7 @@ compile:
 	${CASK} build
 	${MAKE} stateless
 	${MAKE} stateful
+	${MAKE} clean-elc
 
 clean-elc:
 	${CASK} clean-elc
