@@ -1729,24 +1729,6 @@ commands outside of this package."
 
 ;;; SQL command abstractions
 
-;; TODO don't hardcode the exe paths or the tmp path...just to make everyone happy
-;; (defun org-sql--get-sqlite-arguments ()
-;;   (format "/usr/bin/sqlite3 %s" org-sql-sqlite-path))
-
-(defun org-sql--get-sqlite-arguments (config-keys)
-  (-let (((&plist :path) config-keys))
-    (list path)))
-
-(defun org-sql--get-postgres-arguments (config-keys)
-  (-let* (((&plist :database :hostname :port :username) config-keys)
-          (d (list "-d" database))
-          (h (-some->> hostname (list "-h")))
-          (p (-some->> port (list "-p")))
-          (u (-some->> username (list "-U")))
-          ;; TODO maybe we shouldn't hardcode this
-          (f '("-At")))
-    (append d h p u f)))
-
 ;; TODO what about the windows users?
 (defconst org-sql--sqlite-exe "/usr/bin/sqlite3")
 
@@ -1756,34 +1738,51 @@ commands outside of this package."
 
 (defconst org-sql--postgres-dropdb-exe "/usr/bin/dropdb")
 
+(defun org-sql--exec-sqlite-command (config-keys &rest args)
+  (-let (((&plist :path) config-keys))
+    (apply #'org-sql--run-command org-sql--sqlite-exe (cons path args))))
+
+(defun org-sql--exec-postgres-command-sub (exe config-keys &rest args)
+  (-let* (((&plist :hostname :port :username :password) config-keys)
+          (h (-some->> hostname (list "-h")))
+          (p (-some->> port (list "-p")))
+          (u (-some->> username (list "-U")))
+          (w '("-w"))
+          (process-environment
+           (if (not password) process-environment
+             (cons (format "PGPASSWORD=%s" password) process-environment)))
+          (exe* (cl-case exe
+                  (psql org-sql--psql-exe)
+                  (createdb org-sql--postgres-createdb-exe)
+                  (dropdb org-sql--postgres-dropdb-exe)
+                  (t (error "Invalid postgres exe: %s" exe)))))
+    (apply #'org-sql--run-command exe* (append h p u w args))))
+
+(defun org-sql--exec-postgres-command (config-keys &rest args)
+  (-let* (((&plist :database) config-keys)
+          (d (-some->> database (list "-d")))
+          (f (list "-At")))
+    (apply #'org-sql--exec-postgres-command-sub 'psql config-keys (append d f args))))
+
 (defun org-sql--send-sql (sql-cmd)
-  (-let* (((mode . keys) org-sql-db-config)
-          (path (org-sql--case-mode mode
-                  (sqlite org-sql--sqlite-exe)
-                  (postgres org-sql--psql-exe)))
-          (sql-args (org-sql--case-mode mode
-                      (postgres (list "-c" sql-cmd))
-                      (sqlite (list sql-cmd))))
-          (option-args (org-sql--case-mode mode
-                         (postgres (org-sql--get-postgres-arguments keys))
-                         (sqlite (org-sql--get-sqlite-arguments keys)))))
-    (apply #'org-sql--run-command path (append option-args sql-args))))
+  (-let* (((mode . keyvals) org-sql-db-config))
+    (org-sql--case-mode mode
+      (sqlite
+       (org-sql--exec-sqlite-command keyvals sql-cmd))
+      (postgres
+       (org-sql--exec-postgres-command keyvals "-c" sql-cmd)))))
 
 (defun org-sql--send-sql* (sql-cmd)
   (if (not sql-cmd) '(0 . "")
     (-let* ((tmp-path (format "/tmp/org-sql-cmd-%s" (round (float-time))))
-            ((mode . keys) org-sql-db-config)
-            (path (org-sql--case-mode mode
-                    (sqlite org-sql--sqlite-exe)
-                    (postgres org-sql--psql-exe)))
-            (sql-args (org-sql--case-mode mode
-                        (postgres (list "-f" tmp-path))
-                        (sqlite (list (format ".read %s" tmp-path)))))
-            (option-args (org-sql--case-mode mode
-                           (postgres (org-sql--get-postgres-arguments keys))
-                           (sqlite (org-sql--get-sqlite-arguments keys)))))
+            ((mode . keyvals) org-sql-db-config))
       (f-write sql-cmd 'utf-8 tmp-path)
-      (let ((res (apply #'org-sql--run-command path (append option-args sql-args))))
+      (let ((res
+             (org-sql--case-mode mode
+               (sqlite
+                (org-sql--exec-sqlite-command keyvals (format ".read %s" tmp-path)))
+               (postgres
+                (org-sql--exec-postgres-command keyvals "-f" tmp-path)))))
         (f-delete tmp-path)
         res))))
 
@@ -1795,7 +1794,7 @@ commands outside of this package."
          (file-exists-p path)))
       (postgres
        (-let (((&plist :database) keyvals)
-              ((rc . out) (org-sql--run-command org-sql--psql-exe "-qtl")))
+              ((rc . out) (org-sql--exec-postgres-command-sub 'psql keyvals "-qtl")))
          (if (/= 0 rc) (error out)
            (->> (s-split "\n" out)
                 (--map (s-trim (car (s-split "|" it))))
@@ -1823,13 +1822,12 @@ commands outside of this package."
   (-let (((mode . keyvals) org-sql-db-config))
     (org-sql--case-mode mode
       (sqlite
-       (-let (((&plist :path) keyvals))
-         ;; this is a silly command that should work on all platforms (eg
-         ;; doesn't require `touch' to make an empty file)
-         (org-sql--run-command org-sql--sqlite-exe path ".schema")))
+       ;; this is a silly command that should work on all platforms (eg doesn't
+       ;; require `touch' to make an empty file)
+       (org-sql--exec-sqlite-command keyvals ".schema"))
       (postgres
        (-let (((&plist :database) keyvals))
-         (org-sql--run-command org-sql--postgres-createdb-exe database))))))
+         (org-sql--exec-postgres-command-sub 'createdb keyvals database))))))
 
 (defun org-sql--db-create-tables ()
   (let ((sql-cmd (org-sql--format-mql-schema org-sql-db-config org-sql--mql-schema)))
@@ -1844,7 +1842,7 @@ commands outside of this package."
          (delete-file path)))
       (postgres
        (-let (((&plist :database) keyvals))
-         (org-sql--run-command org-sql--postgres-dropdb-exe database))))))
+         (org-sql--exec-postgres-command-sub 'dropdb keyvals database))))))
 
 ;; public IO functions
 

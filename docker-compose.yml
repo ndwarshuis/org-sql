@@ -1,0 +1,12 @@
+version: '3.7'
+
+services:
+  db:
+    image: postgres:12.4-alpine
+    container_name: org-sql-postgres
+    restart: always
+    environment:    
+      - POSTGRES_PASSWORD=org_sql_postgres
+      - POSTGRES_USER=org_sql
+    ports:
+      - 60001:5432
