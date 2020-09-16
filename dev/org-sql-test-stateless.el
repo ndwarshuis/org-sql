@@ -1132,42 +1132,42 @@ list then join the cdr of IN with newlines."
                                   :int 666
                                   :text "hello")))
       (expect (org-sql--format-mql-insert formatter-alist mql-insert)
-              :to-equal "insert into table-foo (bool,enum,int,text) values (0,'bim',666,'hello');")))
+              :to-equal "INSERT INTO table-foo (bool,enum,int,text) VALUES (0,'bim',666,'hello');")))
 
   (it "update"
     (let ((mql-insert '(table-foo (set :bool 0)
                                   (where :enum bim))))
       (expect (org-sql--format-mql-update formatter-alist mql-insert)
-              :to-equal "update table-foo set bool=0 where enum='bim';")))
+              :to-equal "UPDATE table-foo SET bool=0 WHERE enum='bim';")))
 
   (it "delete"
     (let ((mql-delete '(table-foo)))
       (expect (org-sql--format-mql-delete formatter-alist mql-delete)
-              :to-equal "delete from table-foo;")))
+              :to-equal "DELETE FROM table-foo;")))
 
   (it "delete (where)"
     (let ((mql-delete '(table-foo (where :enum bim))))
       (expect (org-sql--format-mql-delete formatter-alist mql-delete)
-              :to-equal "delete from table-foo where enum='bim';")))
+              :to-equal "DELETE FROM table-foo WHERE enum='bim';")))
 
   (it "drop"
     (expect (org-sql--format-mql-drop 'table-foo)
-            :to-equal "drop table table-foo;"))
+            :to-equal "DROP TABLE table-foo;"))
 
   (it "select"
     (let ((mql-select '(table-foo (columns :bool))))
       (expect (org-sql--format-mql-select formatter-alist mql-select)
-              :to-equal "select bool from table-foo;")))
+              :to-equal "SELECT bool FROM table-foo;")))
 
   (it "select (all columns)"
     (let ((mql-select '(table-foo)))
       (expect (org-sql--format-mql-select formatter-alist mql-select)
-              :to-equal "select * from table-foo;")))
+              :to-equal "SELECT * FROM table-foo;")))
 
   (it "select (where)"
     (let ((mql-select '(table-foo (columns :bool) (where :enum bim))))
       (expect (org-sql--format-mql-select formatter-alist mql-select)
-              :to-equal "select bool from table-foo where enum='bim';")))
+              :to-equal "SELECT bool FROM table-foo WHERE enum='bim';")))
 
   (it "create table (SQLite)"
     (let ((config '(sqlite)))

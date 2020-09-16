@@ -904,7 +904,7 @@ COLS are the column names as symbols used to obtain OUT."
           (values (->> (-partition 2 keyvals)
                        (--map (funcall (alist-get (car it) formatter-list) (cadr it)))
                        (s-join ","))))
-    (format "insert into %s (%s) values (%s);" tbl-name columns values)))
+    (format "INSERT INTO %s (%s) VALUES (%s);" tbl-name columns values)))
 
 ;; update
 
@@ -913,22 +913,22 @@ COLS are the column names as symbols used to obtain OUT."
           (formatter-list (alist-get tbl-name formatter-alist))
           (set* (org-sql--format-mql-plist formatter-list "," set))
           (where* (org-sql--format-mql-plist formatter-list " and " where)))
-    (format "update %s set %s where %s;" tbl-name set* where*)))
+    (format "UPDATE %s SET %s WHERE %s;" tbl-name set* where*)))
 
 ;; delete
 
 (defun org-sql--format-mql-delete (formatter-alist mql-delete)
   (-let* (((tbl-name . (&alist 'where)) mql-delete)
           (formatter-list (alist-get tbl-name formatter-alist)))
-    (if (not where) (format "delete from %s;" tbl-name)
+    (if (not where) (format "DELETE FROM %s;" tbl-name)
       (->> (org-sql--format-mql-plist formatter-list " and " where)
-           (format "delete from %s where %s;" tbl-name)))))
+           (format "DELETE FROM %s WHERE %s;" tbl-name)))))
 
 ;; drop
 
 (defun org-sql--format-mql-drop (tbl-name)
   "Return SQL command to drop TBL-NAME."
-  (format "drop table %s;" tbl-name))
+  (format "DROP TABLE %s;" tbl-name))
 
 ;; select
 
@@ -938,9 +938,9 @@ COLS are the column names as symbols used to obtain OUT."
           (columns* (or (-some->> (-map #'org-sql--format-mql-column-name columns)
                           (s-join ","))
                         "*")))
-    (if (not where) (format "select %s from %s;" columns* tbl-name)
-      (->> (org-sql--format-mql-plist formatter-list " and " where)
-           (format "select %s from %s where %s;" columns* tbl-name)))))
+    (if (not where) (format "SELECT %s FROM %s;" columns* tbl-name)
+      (->> (org-sql--format-mql-plist formatter-list " AND " where)
+           (format "SELECT %s FROM %s WHERE %s;" columns* tbl-name)))))
 
 (defun org-sql--pragma-merge-default (pragma)
   "Add PRAGMA to `org-sql--default-pragma'."
