@@ -1150,10 +1150,6 @@ list then join the cdr of IN with newlines."
       (expect (org-sql--format-mql-delete formatter-alist mql-delete)
               :to-equal "DELETE FROM table-foo WHERE enum='bim';")))
 
-  (it "drop"
-    (expect (org-sql--format-mql-drop 'table-foo)
-            :to-equal "DROP TABLE table-foo;"))
-
   (it "select"
     (let ((mql-select '(table-foo (columns :bool))))
       (expect (org-sql--format-mql-select formatter-alist mql-select)

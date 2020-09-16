@@ -924,12 +924,6 @@ COLS are the column names as symbols used to obtain OUT."
       (->> (org-sql--format-mql-plist formatter-list " and " where)
            (format "DELETE FROM %s WHERE %s;" tbl-name)))))
 
-;; drop
-
-(defun org-sql--format-mql-drop (tbl-name)
-  "Return SQL command to drop TBL-NAME."
-  (format "DROP TABLE %s;" tbl-name))
-
 ;; select
 
 (defun org-sql--format-mql-select (formatter-alist mql-select)
