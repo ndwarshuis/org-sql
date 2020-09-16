@@ -25,6 +25,9 @@ jobs:
       with:
         version: '0.8.4'
 
+    - name: Setup testing databases
+      run: docker-compose up -d
+
     - name: Run tests
       if: matrix.allow_failure != true
       run: |
