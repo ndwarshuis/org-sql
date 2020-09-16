@@ -514,49 +514,53 @@ Either list may contain repeats, in which case nil is returned."
 
 ;; workflow
 
-;; readDiskAndDb [files] -> [fmeta]
-;; classify [fmeta] -> ((inserts [fmeta]) (updates [fmeta]) (deletes [fmeta]))
-;;
-;; for inserts
-;;   readState fmeta -> fstate
-;;   toInsertMQL fstate -> insertMQL
-;;   formatInsert insertMQL -> insertSQL
-;; for updates
-;;   toInsertMQL fmeta -> updateMQL
-;;   formatUpdate updateMQL -> updateSQL
-;; for deletes
-;;   toDeleteMQL fmeta -> deleteMQL
-;;   formatDelete deleteMQL -> deleteSQL
-
-(defmacro org-sql--mql-insert (tbl-name &rest plist)
-  (declare (indent 1))
+(defun org-sql--mql-check-get-schema-keys (tbl-name)
   (let ((valid-keys (->> org-sql--mql-schema
                          (alist-get tbl-name)
                          (alist-get 'columns)
-                         (-map #'car)))
-        (input-keys (->> (-partition 2 plist)
                          (-map #'car))))
     (unless valid-keys (error "Invalid table name: %s" tbl-name))
+    valid-keys))
+
+(defun org-sql--mql-check-columns-all (tbl-name plist)
+  (declare (indent 2))
+  (let ((valid-keys (org-sql--mql-check-get-schema-keys tbl-name))
+        (input-keys (->> (-partition 2 plist)
+                         (-map #'car))))
     (-some->> (-difference valid-keys input-keys)
       (error "Keys not given for table %s: %s" tbl-name))
     (-some->> (-difference input-keys valid-keys)
-      (error "Keys not valid for table %s: %s" tbl-name))
-    `(list ',tbl-name ,@plist)))
+      (error "Keys not valid for table %s: %s" tbl-name))))
+
+(defun org-sql--mql-check-columns-contains (tbl-name plist)
+  (declare (indent 2))
+  (let ((valid-keys (org-sql--mql-check-get-schema-keys tbl-name))
+        (input-keys (->> (-partition 2 plist)
+                         (-map #'car))))
+    (-some->> (-difference input-keys valid-keys)
+      (error "Keys not valid for table %s: %s" tbl-name))))
+
+(defmacro org-sql--mql-insert (tbl-name &rest plist)
+  (declare (indent 1))
+  (org-sql--mql-check-columns-all tbl-name plist)
+  `(list ',tbl-name ,@plist))
 
 (defmacro org-sql--add-mql-insert (acc tbl-name &rest plist)
   (declare (indent 2))
   `(cons (org-sql--mql-insert ,tbl-name ,@plist) ,acc))
 
 (defmacro org-sql--mql-update (tbl-name set where)
-  ;; TODO add compile time check for this
+  (declare (indent 1))
+  (org-sql--mql-check-columns-contains tbl-name set)
+  (org-sql--mql-check-columns-contains tbl-name where)
   `(list ',tbl-name
-         (cons 'set ,set)
-         (cons 'where ,where)))
+         (list 'set ,@set)
+         (list 'where ,@where)))
 
 (defmacro org-sql--mql-delete (tbl-name where)
-  ;; TODO add compile time check for this
+  (org-sql--mql-check-columns-contains tbl-name where)
   `(list ',tbl-name
-         (cons 'where ,where)))
+         (list 'where ,@where)))
 
 (defconst org-sql--log-note-keys
   '((:user .  "%u")
@@ -1587,11 +1591,11 @@ Add tags to ACC (which is treated like a set)."
 
 (defun org-sql--fmeta-to-mql-update (fmeta)
   (-let (((&plist :disk-path :hash) fmeta))
-    (org-sql--mql-update files `(:file_path ,disk-path) `(:md5 ,hash))))
+    (org-sql--mql-update files (:file_path disk-path) (:md5 hash))))
 
 (defun org-sql--fmeta-to-mql-delete (fmeta)
   (-let (((&plist :db-path) fmeta))
-    (org-sql--mql-delete files `(:file_path ,db-path))))
+    (org-sql--mql-delete files (:file_path db-path))))
 
 ;; fmeta functions
 
