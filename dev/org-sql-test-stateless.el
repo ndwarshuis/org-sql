@@ -1,4 +1,4 @@
-;;; org-sql-test-internal.el --- Internal tests for org-sql -*- lexical-binding: t; -*-
+;;; org-sql-test-stateless.el --- Stateless tests for org-sql -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2020 Nathan Dwarshuis
 
@@ -17,8 +17,7 @@
 
 ;;; Commentary:
 
-;; This spec tests the internal metalanguage (and associated functions) of
-;; org-sql
+;; This spec tests the stateless functions in org-sql
 
 ;;; Code:
 
@@ -1044,71 +1043,26 @@ list then join the cdr of IN with newlines."
       (expect
        (org-sql--format-sql-transaction config statements)
        :to-equal
-       "BEGIN TRANSACTION;INSERT INTO foo (bar) values (1);COMMIT;")))
+       "BEGIN TRANSACTION;INSERT INTO foo (bar) values (1);COMMIT;"))))
 
-  )
+(describe "file metadata spec"
+  (it "classify file metadata"
+    (let ((on-disk (list (org-sql--to-fmeta "/bar.org" nil "123")
+                         (org-sql--to-fmeta "/bam.org" nil "654")
+                         (org-sql--to-fmeta "/foo.org" nil "456")))
+          (in-db (list (org-sql--to-fmeta nil "/bar.org" "123")
+                       (org-sql--to-fmeta nil "/bam0.org" "654")
+                       (org-sql--to-fmeta nil "/foo0.org" "789"))))
+      (expect (org-sql--classify-fmeta on-disk in-db)
+              :to-equal
+              `((deletes
+                 ,(org-sql--to-fmeta nil "/foo0.org" "789"))
+                (updates
+                 ,(org-sql--to-fmeta "/bam.org" "/bam0.org" "654"))
+                (inserts
+                 ,(org-sql--to-fmeta "/foo.org" nil "456"))
+                (noops
+                 ,(org-sql--to-fmeta "/bar.org" "/bar.org" "123")))))))
 
-  ;; (it "format insert"
-  ;;   (expect (org-sql--fmt-insert 'foo '(:one 1 :two "2"))
-  ;;           :to-equal "insert into foo (one,two) values (1,'2');"))
+;;; org-sql-test-stateless.el ends here
 
-  ;; (it "format update"
-  ;;   (expect (org-sql--fmt-update 'foo '(:one 1 :two "2") '(:three three))
-  ;;           :to-equal "update foo set one=1,two='2' where three='three';"))
-
-  ;; (it "format delete"
-  ;;   (expect (org-sql--fmt-delete 'foo '(:three three))
-  ;;           :to-equal "delete from foo where three='three';"))
-
-  ;; (it "format delete all"
-  ;;   (expect (org-sql--fmt-delete-all 'foo)
-  ;;           :to-equal "delete from foo;"))
-
-  ;; (it "format select"
-  ;;   (expect (org-sql--fmt-select 'foo '(:a :b))
-  ;;           :to-equal "select a,b from foo;"))
-
-  ;; (it "format create table (columns only)"
-  ;;   (let* ((create "CREATE TABLE foo")
-  ;;          (columns "bar TEXT,bam INTEGER NOT NULL")
-  ;;          (test-res (format "%s (%s);" create columns))
-  ;;          (meta '(foo
-  ;;                  (columns
-  ;;                   (:bar :type text)
-  ;;                   (:bam :type integer :constraints (notnull))))))
-  ;;     (expect (org-sql--meta-create-table meta) :to-equal test-res)))
-
-  ;; (it "format create table (primary)"
-  ;;   (let* ((create "CREATE TABLE foo")
-  ;;          (columns "bar TEXT,bam INTEGER NOT NULL")
-  ;;          (primary "PRIMARY KEY (bar ASC)")
-  ;;          (test-res (format "%s (%s,%s);" create columns primary))
-  ;;          (meta '(foo
-  ;;                  (columns
-  ;;                   (:bar :type text)
-  ;;                   (:bam :type integer :constraints (notnull)))
-  ;;                  (constraints
-  ;;                   (primary :keys (:bar ASC))))))
-  ;;     (expect (org-sql--meta-create-table meta) :to-equal test-res)))
-
-  ;; (it "format create table (all)"
-  ;;   (let* ((create "CREATE TABLE foo")
-  ;;          (columns "bar TEXT,bam INTEGER NOT NULL")
-  ;;          (primary "PRIMARY KEY (bar ASC)")
-  ;;          (foreign "FOREIGN KEY (bam) REFERENCES fubar (BAM)")
-  ;;          (cascade "ON DELETE CASCADE ON UPDATE CASCADE")
-  ;;          (test-res (format "%s (%s,%s,%s %s);" create columns primary foreign cascade))
-  ;;          (meta '(foo
-  ;;                  (columns
-  ;;                   (:bar :type text)
-  ;;                   (:bam :type integer :constraints (notnull)))
-  ;;                  (constraints
-  ;;                   (primary :keys (:bar ASC))
-  ;;                   (foreign :ref fubar
-  ;;                            :keys (:bam)
-  ;;                            :parent-keys (:BAM)
-  ;;                            :on_delete cascade
-  ;;                            :on_update cascade)))))
-  ;;     (expect (org-sql--meta-create-table meta) :to-equal test-res))))
-
-;;; org-sql-test-internal.el ends here

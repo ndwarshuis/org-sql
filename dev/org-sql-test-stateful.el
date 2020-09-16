@@ -1,4 +1,4 @@
-;;; org-sql-doc.el --- SQLite tests for org-sql -*- lexical-binding: t; -*-
+;;; org-sql-test-stateful.el --- IO tests for org-sql -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2020 Nathan Dwarshuis
 
@@ -17,7 +17,10 @@
 
 ;;; Commentary:
 
-;; These specs test SQLite-specific code in org-sql
+;; These specs test IO functions on org-sql, including reading/writing
+;; to databases and reading the status of org files on disk. These are at
+;; a higher level of complexity than the stateless tests and thus assume
+;; that specification is fully met.
 
 ;;; Code:
 
@@ -30,91 +33,6 @@
 (defconst test-dir (f-dirname (f-this-file)))
 
 (defconst test-files (f-join test-dir "files"))
-
-(describe "Transaction spec"
-  (it "classify transactions"
-    (let ((on-disk (list (org-sql--to-fmeta "/bar.org" nil "123")
-                         (org-sql--to-fmeta "/bam.org" nil "654")
-                         (org-sql--to-fmeta "/foo.org" nil "456")))
-          (in-db (list (org-sql--to-fmeta nil "/bar.org" "123")
-                       (org-sql--to-fmeta nil "/bam0.org" "654")
-                       (org-sql--to-fmeta nil "/foo0.org" "789"))))
-      (expect (org-sql--classify-fmeta on-disk in-db)
-              :to-equal
-              `((deletes
-                 ,(org-sql--to-fmeta nil "/foo0.org" "789"))
-                (updates
-                 ,(org-sql--to-fmeta "/bam.org" "/bam0.org" "654"))
-                (inserts
-                 ,(org-sql--to-fmeta "/foo.org" nil "456"))
-                (noops
-                 ,(org-sql--to-fmeta "/bar.org" "/bar.org" "123")))))))
-
-;;   (let ((pragma "PRAGMA defer_foreign_keys=on;PRAGMA foreign_keys=on;begin transaction;")
-;;         (commit "commit;"))
-;;     (it "transaction (insert new file)"
-;;       (let* ((org-sql-files (list test-files))
-;;              (test-file (f-join test-files "test.org"))
-;;              (test-md5 "106e9f12c9e4ff3333425115d148fbd4")
-;;              (schema-cmd "CREATE TABLE files (file_path TEXT,md5 TEXT);")
-;;              (files (format "insert into files (file_path,md5,size) values ('%s','%s',6);"
-;;                             test-file test-md5))
-;;              (headlines (format "insert into headlines (file_path,headline_offset,headline_text,keyword,effort,priority,is_archived,is_commented,content) values ('%s',1,'foo',NULL,NULL,NULL,0,0,NULL);insert into headline_closures (file_path,headline_offset,parent_offset,depth) values ('%s',1,1,0);"
-;;                                 test-file test-file)))
-;;         (expect (org-sql--cmd org-sql-sqlite-path schema-cmd)
-;;                 :to-equal "")
-;;         (expect (org-sql--get-transactions)
-;;                 :to-equal (concat pragma files headlines commit))))
-
-;;     (it "transaction (delete file)"
-;;       (let* ((test-file (f-join test-files "nil.org"))
-;;              (schema-cmd "CREATE TABLE files (file_path TEXT,md5 TEXT);")
-;;              (insert-cmd "insert into files (file_path,md5) values ('foo.org','123');")
-;;              (delete "delete from files where file_path='foo.org';"))
-;;         (expect (org-sql--cmd org-sql-sqlite-path schema-cmd)
-;;                 :to-equal "")
-;;         (expect (org-sql--cmd org-sql-sqlite-path insert-cmd)
-;;                 :to-equal "")
-;;         (expect (org-sql--get-transactions)
-;;                 :to-equal (concat pragma delete commit))))
-
-;;     (it "transaction (update file)"
-;;       (let* ((org-sql-files (list test-files))
-;;              (test-file (f-join test-files "test.org"))
-;;              (test-md5 "106e9f12c9e4ff3333425115d148fbd4")
-;;              (schema-cmd "CREATE TABLE files (file_path TEXT,md5 TEXT);")
-;;              (insert-cmd (format "insert into files (file_path,md5) values ('foo','%s');"
-;;                                  test-md5))
-;;              (files (format "update files set file_path='%s' where md5='%s';"
-;;                             test-file test-md5)))
-;;         (expect (org-sql--cmd org-sql-sqlite-path schema-cmd)
-;;                 :to-equal "")
-;;         (expect (org-sql--cmd org-sql-sqlite-path insert-cmd)
-;;                 :to-equal "")
-;;         (expect (org-sql--get-transactions)
-;;                 :to-equal (concat pragma files commit))))))
-
-;; (describe "SQLite command spec"
-;;   (before-each
-;;     (setq org-sql-sqlite-path "/tmp/org-sql-test.db")
-;;     (f-delete org-sql-sqlite-path t))
-
-;;   (after-each
-;;     (f-delete org-sql-sqlite-path t))
-
-;;   (let ((schema-cmd "CREATE TABLE FOO (foo TEXT, bar INTEGER);"))
-;;     (it "create SQLite db with schema"
-;;       (org-sql--cmd org-sql-sqlite-path schema-cmd)
-;;       (expect (s-trim (org-sql--cmd org-sql-sqlite-path ".schema"))
-;;               :to-equal schema-cmd))
-
-;;     (it "add entries to SQLite db and run simple query"
-;;       (expect (org-sql--cmd org-sql-sqlite-path schema-cmd)
-;;               :to-equal "")
-;;       (expect (org-sql--cmd* org-sql-sqlite-path "INSERT INTO FOO (foo,bar) values ('1',2);")
-;;               :to-equal "")
-;;       (expect (s-trim (org-sql--cmd org-sql-sqlite-path "SELECT * FROM FOO;"))
-;;               :to-equal "1|2"))))
 
 (defun expect-exit-success (res)
   (-let (((rc . out) res))
@@ -278,3 +196,5 @@
 
 (describe-sql-io-spec "SQL IO spec (Postgres)"
   '(postgres :database "org_sql_testing"))
+
+;;; org-sql-test-stateful ends here
