@@ -599,7 +599,7 @@ list then join the cdr of IN with newlines."
                :link_type "file"))))
 
   (it "single link (ignored)"
-    (let ((org-sql-ignored-link-types 'all))
+    (let ((org-sql-excluded-link-types 'all))
       (expect-sql-tbls (links) (list "* parent"
                                      "file:///tmp/eternalblue.exe")
         nil)))
