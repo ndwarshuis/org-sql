@@ -49,8 +49,6 @@
 ;; - constants
 ;; - customization variables
 ;; - stateless functions
-;;   - meta-query language (MQL) construction/manipulation functions
-;;   - MQL -> SQL formatting functions
 ;; - stateful IO functions
 
 ;;; Code:
@@ -63,48 +61,43 @@
 (require 'org)
 (require 'org-ml)
 
-;;; constants and customizations
+;;;
+;;; CONSTANTS
+;;;
+
+
+(defconst org-sql--log-note-keys
+  '((:user .  "%u")
+    (:user-full . "%U")
+    (:ts . "%t")
+    (:ts-active . "%T")
+    (:short-ts . "%d")
+    (:short-ts-active . "%D")
+    (:old-state . "%S")
+    (:new-state . "%s"))
+  "Keywords for placeholders used in `org-log-note-headings'.")
+
+(defconst org-sql--log-note-replacements
+  (->> (-map #'cdr org-sql--log-note-keys) (--map (cons it it)))
+  "A list to simplify placeholders in `org-log-note-headings'.
+This is only used in combination with `org-replace-escapes'")
+
+(defconst org-sql--entry-keys
+  (append
+   (-map #'car org-sql--log-note-keys)
+   '(:file-path :headline-offset :entry-offset :note-text :header-text :old-ts :new-ts))
+  "Valid keys that may be used in logbook entry lists.")
 
 (defconst org-sql--ignored-properties-default
   '("ARCHIVE_ITAGS" "Effort")
   "Property keys to be ignored when inserting in properties table.
 It is assumed these are used elsewhere and thus it would be redundant
 to store them. This is in addition to any properties specifified by
-`nd/org-sql-excluded-properties'.")
+`org-sql-excluded-properties'.")
 
-(defun org-sql--sets-equal (list1 list2 &rest args)
-  "Return t if LIST1 and LIST2 are equal via set logic.
-Either list may contain repeats, in which case nil is returned.
-ARGS is a list of additional arguments to pass to `cl-subsetp'."
-  (and (equal (length list1) (length list2))
-       (apply #'cl-subsetp list1 list2 args)
-       (apply #'cl-subsetp list2 list1 args)))
-
-(defmacro org-sql--case-type (type &rest alist-forms)
-  "Execute one of ALIST-FORMS depending on TYPE.
-TYPE must be one of 'boolean', 'text', 'enum', or 'integer'."
-  (declare (indent 1))
-  (-let (((keys &as &alist 'boolean 'text 'enum 'integer) alist-forms))
-    (unless (-none? #'null keys)
-      (error "Must provide form for all types"))
-    `(cl-case ,type
-       (boolean ,@boolean)
-       (text ,@text)
-       (enum ,@enum)
-       (integer ,@integer)
-       (t (error "Invalid type: %s" ,type)))))
-
-(defmacro org-sql--case-mode (mode &rest alist-forms)
-  "Execute one of ALIST-FORMS depending on MODE.
-TYPE must be one of 'sqlite' or 'postgres'."
-  (declare (indent 1))
-  (-let (((keys &as &alist 'sqlite 'postgres) alist-forms))
-    (unless (-none? #'null keys)
-      (error "Must provide form for all modes"))
-    `(cl-case ,mode
-       (postgres ,@postgres)
-       (sqlite ,@sqlite)
-       (t (error "Invalid mode: %s" ,mode)))))
+(defconst org-sql--content-timestamp-types
+  '(active active-range inactive inactive-range)
+  "Types of timestamps to include in the database.")
 
 (eval-and-compile
   (defconst org-sql--mql-schema
@@ -466,175 +459,22 @@ TYPE must be one of 'sqlite' or 'postgres'."
     "Org-SQL database schema represented in internal meta query
     language (MQL, basically a giant list)"))
 
-;; ensure integrity of the metaschema
+;; TODO what about the windows users?
+(defconst org-sql--sqlite-exe "/usr/bin/sqlite3"
+  "The path to the sqlite client command.")
 
-(eval-when-compile
-  (defun org-sql--mql-schema-has-valid-keys (tbl-schema)
-    "Verify that TBL-SCHEMA has valid keys in its table constraints."
-    (-let* (((tbl-name . (&alist 'constraints 'columns)) tbl-schema)
-            (column-names (-map #'car columns)))
-      (cl-flet
-          ((get-keys
-            (constraint)
-            (-let (((type . (&plist :keys)) constraint))
-              (cons type keys)))
-           (test-keys
-            (type keys)
-            (-some->> (-difference keys column-names)
-              (-map #'symbol-name)
-              (s-join ", ")
-              (error "Mismatched %s keys in table '%s': %s" type tbl-name))))
-        (--> (--filter (memq (car it) '(primary foreign)) constraints)
-             (-map #'get-keys it)
-             (--each it (test-keys (car it) (cdr it)))))))
+(defconst org-sql--psql-exe "/usr/bin/psql"
+  "The path to the postgres client command.")
 
-  (defun org-sql--mql-schema-has-valid-parent-keys (tbl-schema)
-    "Verify that TBL-SCHEMA has valid keys in its table foreign constraints."
-    (cl-flet
-        ((is-valid
-          (foreign-meta tbl-name)
-          (-let* (((&plist :parent-keys :ref) foreign-meta)
-                  (parent-meta (alist-get ref org-sql--mql-schema))
-                  (parent-columns (-map #'car (alist-get 'columns parent-meta)))
-                  (parent-primary (--> (alist-get 'constraints parent-meta)
-                                       (alist-get 'primary it)
-                                       (plist-get it :keys))))
-            ;; any parent keys must have corresponding columns in the referred
-            ;; table
-            (-some->> (-difference parent-keys parent-columns)
-              (-map #'symbol-name)
-              (s-join ", ")
-              (error "Mismatched foreign keys between %s and %s: %s" tbl-name ref))
-            ;; This isn't strictly a requirement (but still good practice); make
-            ;; sure the foreign key refer to the primary key in the parent table
-            (when (or (-difference parent-keys parent-primary)
-                      (-difference parent-primary parent-keys))
-              (error "Mismatched foreign and primary keys between %s and %s" tbl-name ref)))))
-      (-let* (((tbl-name . meta) tbl-schema)
-              (foreign (->> (alist-get 'constraints meta)
-                            (--filter (eq (car it) 'foreign))
-                            (-map #'cdr))))
-        (--each foreign (is-valid it tbl-name)))))
+(defconst org-sql--postgres-createdb-exe "/usr/bin/createdb"
+  "The path to the postgres 'create database' command.")
 
-  (-each org-sql--mql-schema #'org-sql--mql-schema-has-valid-keys)
-  (-each org-sql--mql-schema #'org-sql--mql-schema-has-valid-parent-keys))
+(defconst org-sql--postgres-dropdb-exe "/usr/bin/dropdb"
+  "The path to the postgres 'drop database' command.")
 
-
-(defun org-sql--mql-check-get-schema-keys (tbl-name)
-  "Return a list of columns for TBL-NAME.
-The columns are retrieved from `org-sql--mql-schema'."
-  (let ((valid-keys (->> org-sql--mql-schema
-                         (alist-get tbl-name)
-                         (alist-get 'columns)
-                         (-map #'car))))
-    (unless valid-keys (error "Invalid table name: %s" tbl-name))
-    valid-keys))
-
-(defun org-sql--mql-check-columns-all (tbl-name plist)
-  "Test if keys in PLIST are valid column names for TBL-NAME.
-All column keys must be in PLIST."
-  (declare (indent 2))
-  (let ((valid-keys (org-sql--mql-check-get-schema-keys tbl-name))
-        (input-keys (->> (-partition 2 plist)
-                         (-map #'car))))
-    (-some->> (-difference valid-keys input-keys)
-      (error "Keys not given for table %s: %s" tbl-name))
-    (-some->> (-difference input-keys valid-keys)
-      (error "Keys not valid for table %s: %s" tbl-name))))
-
-(defun org-sql--mql-check-columns-contains (tbl-name plist)
-  "Test if keys in PLIST are valid column names for TBL-NAME.
-Only some of the column keys must be in PLIST."
-  (declare (indent 2))
-  (let ((valid-keys (org-sql--mql-check-get-schema-keys tbl-name))
-        (input-keys (->> (-partition 2 plist)
-                         (-map #'car))))
-    (-some->> (-difference input-keys valid-keys)
-      (error "Keys not valid for table %s: %s" tbl-name))))
-
-(defmacro org-sql--mql-insert (tbl-name &rest plist)
-  "Return an MQL-insert list for TBL-NAME.
-PLIST is a property list of the columns and values to insert."
-  (declare (indent 1))
-  (org-sql--mql-check-columns-all tbl-name plist)
-  `(list ',tbl-name ,@plist))
-
-(defmacro org-sql--add-mql-insert (acc tbl-name &rest plist)
-  "Add a new MQL-insert list for TBL-NAME to ACC.
-PLIST is a property list of the columns and values to insert."
-  (declare (indent 2))
-  `(cons (org-sql--mql-insert ,tbl-name ,@plist) ,acc))
-
-(defmacro org-sql--mql-update (tbl-name set where)
-  "Return an MQL-update list for TBL-NAME.
-SET is a plist for the updated values of columns and WHERE is a plist of
-columns that must be equal to the values in the plist in order for the update
-to be applied."
-  (declare (indent 1))
-  (org-sql--mql-check-columns-contains tbl-name set)
-  (org-sql--mql-check-columns-contains tbl-name where)
-  `(list ',tbl-name
-         (list 'set ,@set)
-         (list 'where ,@where)))
-
-(defmacro org-sql--mql-delete (tbl-name where)
-  "Return an MQL-delete list for TBL-NAME.
-WHERE is a plist of columns that must be equal to the values in
-the plist in order for the delete to be applied."
-  (org-sql--mql-check-columns-contains tbl-name where)
-  `(list ',tbl-name
-         (list 'where ,@where)))
-
-(defconst org-sql--log-note-keys
-  '((:user .  "%u")
-    (:user-full . "%U")
-    (:ts . "%t")
-    (:ts-active . "%T")
-    (:short-ts . "%d")
-    (:short-ts-active . "%D")
-    (:old-state . "%S")
-    (:new-state . "%s"))
-  "Keywords for placeholders used in `org-log-note-headings'.")
-
-(defconst org-sql--entry-keys
-  (append
-   (-map #'car org-sql--log-note-keys)
-   '(:file-path :headline-offset :entry-offset :note-text :header-text :old-ts :new-ts))
-  "Valid keys that may be used in logbook entry lists.")
-
-(defun org-sql--to-fstate (file-path hash attributes todo-keywords tree)
-  "Return a plist representing the state of an org buffer.
-The plist will include:
-- `:file-path': the path to this org file on disk (given by
-  FILE-PATH)
-- `:md5': the hash of this org file (given by HASH)
-- `:attributes': the ATTRIBUTES list for the file as returned via
-  `file-attributes'
-- `:top-section': the org-element TREE representation of this
-  org-file's top section before the first headline
-- `:headline': a list of org-element TREE headlines in this org
-  file
-- `:log-note-matcher': a list of log-note-matchers for this org
-  file as returned by
-  `org-sql--build-log-note-heading-matchers' (which depends on
-  TODO-KEYWORDS)"
-  (let* ((children (org-ml-get-children tree))
-         (top-section (-some->> (assoc 'section children)
-                        (org-ml-get-children))))
-    (list :file-path file-path
-          :md5 hash
-          :attributes attributes
-          :top-section top-section
-          :headlines (if top-section (cdr children) children)
-          :log-note-matcher (org-sql--build-log-note-heading-matchers
-                             org-log-note-headings todo-keywords))))
-
-(defun org-sql--to-fmeta (disk-path db-path hash)
-  "Return a plist representing org file status.
-DISK-PATH is the path to the org file on disk, DB-PATH is the
-path on disk recorded in the database for this org file, and HASH
-is the md5 of this org file."
-  (list :disk-path disk-path :db-path db-path :hash hash))
+;;;
+;;; CUSTOMIZATION OPTIONS
+;;;
 
 (defgroup org-sql nil
   "Org mode SQL backend options."
@@ -766,6 +606,211 @@ ignored."
   "Set to t to enable high-level debugging of SQL transactions."
   :type 'boolean
   :group 'org-sql)
+
+;;;
+;;; STATELESS FUNCTIONS
+;;;
+
+
+;;; compile/macro checking
+
+;; case selection statements for sql mode and type
+
+(defun org-sql--sets-equal (list1 list2 &rest args)
+  "Return t if LIST1 and LIST2 are equal via set logic.
+Either list may contain repeats, in which case nil is returned.
+ARGS is a list of additional arguments to pass to `cl-subsetp'."
+  (and (equal (length list1) (length list2))
+       (apply #'cl-subsetp list1 list2 args)
+       (apply #'cl-subsetp list2 list1 args)))
+
+(defmacro org-sql--case-type (type &rest alist-forms)
+  "Execute one of ALIST-FORMS depending on TYPE.
+TYPE must be one of 'boolean', 'text', 'enum', or 'integer'."
+  (declare (indent 1))
+  (-let (((keys &as &alist 'boolean 'text 'enum 'integer) alist-forms))
+    (unless (-none? #'null keys)
+      (error "Must provide form for all types"))
+    `(cl-case ,type
+       (boolean ,@boolean)
+       (text ,@text)
+       (enum ,@enum)
+       (integer ,@integer)
+       (t (error "Invalid type: %s" ,type)))))
+
+(defmacro org-sql--case-mode (mode &rest alist-forms)
+  "Execute one of ALIST-FORMS depending on MODE.
+TYPE must be one of 'sqlite' or 'postgres'."
+  (declare (indent 1))
+  (-let (((keys &as &alist 'sqlite 'postgres) alist-forms))
+    (unless (-none? #'null keys)
+      (error "Must provide form for all modes"))
+    `(cl-case ,mode
+       (postgres ,@postgres)
+       (sqlite ,@sqlite)
+       (t (error "Invalid mode: %s" ,mode)))))
+
+;; ensure integrity of the metaschema
+
+(eval-when-compile
+  (defun org-sql--mql-schema-has-valid-keys (tbl-schema)
+    "Verify that TBL-SCHEMA has valid keys in its table constraints."
+    (-let* (((tbl-name . (&alist 'constraints 'columns)) tbl-schema)
+            (column-names (-map #'car columns)))
+      (cl-flet
+          ((get-keys
+            (constraint)
+            (-let (((type . (&plist :keys)) constraint))
+              (cons type keys)))
+           (test-keys
+            (type keys)
+            (-some->> (-difference keys column-names)
+              (-map #'symbol-name)
+              (s-join ", ")
+              (error "Mismatched %s keys in table '%s': %s" type tbl-name))))
+        (--> (--filter (memq (car it) '(primary foreign)) constraints)
+             (-map #'get-keys it)
+             (--each it (test-keys (car it) (cdr it)))))))
+
+  (defun org-sql--mql-schema-has-valid-parent-keys (tbl-schema)
+    "Verify that TBL-SCHEMA has valid keys in its table foreign constraints."
+    (cl-flet
+        ((is-valid
+          (foreign-meta tbl-name)
+          (-let* (((&plist :parent-keys :ref) foreign-meta)
+                  (parent-meta (alist-get ref org-sql--mql-schema))
+                  (parent-columns (-map #'car (alist-get 'columns parent-meta)))
+                  (parent-primary (--> (alist-get 'constraints parent-meta)
+                                       (alist-get 'primary it)
+                                       (plist-get it :keys))))
+            ;; any parent keys must have corresponding columns in the referred
+            ;; table
+            (-some->> (-difference parent-keys parent-columns)
+              (-map #'symbol-name)
+              (s-join ", ")
+              (error "Mismatched foreign keys between %s and %s: %s" tbl-name ref))
+            ;; This isn't strictly a requirement (but still good practice); make
+            ;; sure the foreign key refer to the primary key in the parent table
+            (when (or (-difference parent-keys parent-primary)
+                      (-difference parent-primary parent-keys))
+              (error "Mismatched foreign and primary keys between %s and %s" tbl-name ref)))))
+      (-let* (((tbl-name . meta) tbl-schema)
+              (foreign (->> (alist-get 'constraints meta)
+                            (--filter (eq (car it) 'foreign))
+                            (-map #'cdr))))
+        (--each foreign (is-valid it tbl-name)))))
+
+  (-each org-sql--mql-schema #'org-sql--mql-schema-has-valid-keys)
+  (-each org-sql--mql-schema #'org-sql--mql-schema-has-valid-parent-keys))
+
+;; ensure MQL constructors are given the right input
+
+(defun org-sql--mql-check-get-schema-keys (tbl-name)
+  "Return a list of columns for TBL-NAME.
+The columns are retrieved from `org-sql--mql-schema'."
+  (let ((valid-keys (->> org-sql--mql-schema
+                         (alist-get tbl-name)
+                         (alist-get 'columns)
+                         (-map #'car))))
+    (unless valid-keys (error "Invalid table name: %s" tbl-name))
+    valid-keys))
+
+(defun org-sql--mql-check-columns-all (tbl-name plist)
+  "Test if keys in PLIST are valid column names for TBL-NAME.
+All column keys must be in PLIST."
+  (declare (indent 2))
+  (let ((valid-keys (org-sql--mql-check-get-schema-keys tbl-name))
+        (input-keys (->> (-partition 2 plist)
+                         (-map #'car))))
+    (-some->> (-difference valid-keys input-keys)
+      (error "Keys not given for table %s: %s" tbl-name))
+    (-some->> (-difference input-keys valid-keys)
+      (error "Keys not valid for table %s: %s" tbl-name))))
+
+(defun org-sql--mql-check-columns-contains (tbl-name plist)
+  "Test if keys in PLIST are valid column names for TBL-NAME.
+Only some of the column keys must be in PLIST."
+  (declare (indent 2))
+  (let ((valid-keys (org-sql--mql-check-get-schema-keys tbl-name))
+        (input-keys (->> (-partition 2 plist)
+                         (-map #'car))))
+    (-some->> (-difference input-keys valid-keys)
+      (error "Keys not valid for table %s: %s" tbl-name))))
+
+;;; data constructors
+
+;; meta query language (MQL)
+
+(defmacro org-sql--mql-insert (tbl-name &rest plist)
+  "Return an MQL-insert list for TBL-NAME.
+PLIST is a property list of the columns and values to insert."
+  (declare (indent 1))
+  (org-sql--mql-check-columns-all tbl-name plist)
+  `(list ',tbl-name ,@plist))
+
+(defmacro org-sql--add-mql-insert (acc tbl-name &rest plist)
+  "Add a new MQL-insert list for TBL-NAME to ACC.
+PLIST is a property list of the columns and values to insert."
+  (declare (indent 2))
+  `(cons (org-sql--mql-insert ,tbl-name ,@plist) ,acc))
+
+(defmacro org-sql--mql-update (tbl-name set where)
+  "Return an MQL-update list for TBL-NAME.
+SET is a plist for the updated values of columns and WHERE is a plist of
+columns that must be equal to the values in the plist in order for the update
+to be applied."
+  (declare (indent 1))
+  (org-sql--mql-check-columns-contains tbl-name set)
+  (org-sql--mql-check-columns-contains tbl-name where)
+  `(list ',tbl-name
+         (list 'set ,@set)
+         (list 'where ,@where)))
+
+(defmacro org-sql--mql-delete (tbl-name where)
+  "Return an MQL-delete list for TBL-NAME.
+WHERE is a plist of columns that must be equal to the values in
+the plist in order for the delete to be applied."
+  (org-sql--mql-check-columns-contains tbl-name where)
+  `(list ',tbl-name
+         (list 'where ,@where)))
+
+;; TODO I forgot select
+
+;; external state
+
+(defun org-sql--to-fstate (file-path hash attributes todo-keywords tree)
+  "Return a plist representing the state of an org buffer.
+The plist will include:
+- `:file-path': the path to this org file on disk (given by
+  FILE-PATH)
+- `:md5': the hash of this org file (given by HASH)
+- `:attributes': the ATTRIBUTES list for the file as returned via
+  `file-attributes'
+- `:top-section': the org-element TREE representation of this
+  org-file's top section before the first headline
+- `:headline': a list of org-element TREE headlines in this org
+  file
+- `:log-note-matcher': a list of log-note-matchers for this org
+  file as returned by
+  `org-sql--build-log-note-heading-matchers' (which depends on
+  TODO-KEYWORDS)"
+  (let* ((children (org-ml-get-children tree))
+         (top-section (-some->> (assoc 'section children)
+                        (org-ml-get-children))))
+    (list :file-path file-path
+          :md5 hash
+          :attributes attributes
+          :top-section top-section
+          :headlines (if top-section (cdr children) children)
+          :log-note-matcher (org-sql--build-log-note-heading-matchers
+                             org-log-note-headings todo-keywords))))
+
+(defun org-sql--to-fmeta (disk-path db-path hash)
+  "Return a plist representing org file status.
+DISK-PATH is the path to the org file on disk, DB-PATH is the
+path on disk recorded in the database for this org file, and HASH
+is the md5 of this org file."
+  (list :disk-path disk-path :db-path db-path :hash hash))
 
 ;;; SQL string parsing functions
 
@@ -1046,7 +1091,7 @@ transaction. MODE is the SQL mode."
         (sqlite (concat "PRAGMA foreign_keys = ON;" bare-transaction))
         (postgres bare-transaction)))))
 
-;; org-mode element helper functions
+;;; org-element/org-ml wrapper functions
 
 ;; TODO these are all functions that may be included in org-ml in the future
         
@@ -1126,7 +1171,7 @@ is not the planning, logbook drawer, or property drawer."
         (-let (((p0 . p1) (org-sql--split-paragraph first)))
           (if (not p0) `(,p1 . ,rest) `(,p0 . (,p1 . ,rest))))))))
 
-;; org-element tree -> logbook entry
+;; org-element tree -> logbook entry (see `org-sql--to-entry')
 
 (defun org-sql--build-log-note-regexp-alist (todo-keywords)
   "Return a list of regexps that match placeholders in `org-log-note-headings'.
@@ -1156,11 +1201,6 @@ be used when evaluating the regexp for the \"%S\" and \"%s\" matchers."
                  ts-or-todo-regexp)
            (--map (format "[[:space:]]*%s[[:space:]]*" it))
            (-zip-pair keys)))))
-
-(defconst org-sql--log-note-replacements
-  (->> (-map #'cdr org-sql--log-note-keys) (--map (cons it it)))
-  "A list to simplify placeholders in `org-log-note-headings'.
-This is only used in combination with `org-replace-escapes'")
 
 (defun org-sql--build-log-note-heading-matchers (log-note-headings todo-keywords)
   "Return a list of matchers for LOG-NOTE-HEADINGS.
@@ -1351,7 +1391,7 @@ returned list."
              (-reduce-from #'filter-clock-notes nil)
              (reverse))))))
 
-;; org-element tree -> MQL inserts
+;; org-element tree -> MQL inserts (see `org-sql--mql-insert')
 
 (defun org-sql--add-mql-insert-clock (acc entry)
   "Add MQL-insert for clock ENTRY to ACC."
@@ -1541,10 +1581,6 @@ timestamp."
         :end_is_long (get-resolution end)
         :raw_value (org-ml-get-property :raw-value timestamp)))))
 
-(defconst org-sql--content-timestamp-types
-  '(active active-range inactive inactive-range)
-  "Types of timestamps to include in the database.")
-
 (defun org-sql--add-mql-insert-headline-timestamps (acc headline file-path)
   "Add MQL-insert for each timestamp in HEADLINE to ACC.
 FILE-PATH is the path to the file containing this headline."
@@ -1715,7 +1751,7 @@ FMETA is a list given by `org-sql--to-fmeta'."
   (-let (((&plist :db-path) fmeta))
     (org-sql--mql-delete files (:file_path db-path))))
 
-;; fmeta functions
+;; fmeta function (see `org-sql--to-fmeta')
 
 (defun org-sql--merge-fmeta (disk-fmeta db-fmeta)
   "Return a list of merged fmeta.
@@ -1778,7 +1814,11 @@ the alist will be 'noops', 'inserts', 'updates', and 'deletes'."
     (->> (org-sql--merge-fmeta disk-fmeta db-fmeta)
          (-group-by #'get-group))))
 
-;;; yucky IO functions
+;;;
+;;; STATEFUL FUNCTIONS
+;;;
+
+;;; low-level IO
 
 (defun org-sql--run-command (path &rest args)
   "Execute PATH with ARGS.
@@ -1792,7 +1832,7 @@ Return a cons cell like (RETURNCODE . OUTPUT)."
     (let ((rc (apply #'call-process path file (current-buffer) nil args)))
       (cons rc (buffer-string)))))
 
-;; fmeta -> fstate
+;;; fmeta -> fstate
 
 (defun org-sql--fmeta-get-fstate (fmeta)
   "Return the fstate for FMETA.
@@ -1804,7 +1844,7 @@ FSTATE is a list as given by `org-sql--to-fstate'."
             (todo-keywords (-map #'substring-no-properties org-todo-keywords-1)))
         (org-sql--to-fstate disk-path hash attributes todo-keywords tree)))))
 
-;; disk -> fmeta
+;;; reading fmeta from external state
 
 (defun org-sql--disk-get-fmeta ()
   "Get a list of fmeta for org files on disk.
@@ -1826,8 +1866,6 @@ Each fmeta will have it's :db-path set to nil. Only files in
            (-filter #'file-exists-p)
            (--map (org-sql--to-fmeta it nil (get-md5 it)))))))
 
-;; DB -> fmeta
-
 (defun org-sql--db-get-fmeta ()
   "Get a list of fmeta for the database.
 Each fmeta will have it's :disk-path set to nil."
@@ -1840,8 +1878,6 @@ Each fmeta will have it's :disk-path set to nil."
            (org-sql--parse-output-to-plist columns)
            (--map (-let (((&plist :md5 h :file_path p) it))
                     (org-sql--to-fmeta nil p h)))))))
-
-;; getting all transactions
 
 (defun org-sql--get-transactions ()
   "Return SQL string of the update transaction.
@@ -1880,20 +1916,7 @@ state as the orgfiles on disk."
     (switch-to-buffer "SQL: Org-update-dump")
     (insert (s-replace ";" ";\n" out))))
 
-;;; SQL command abstractions
-
-;; TODO what about the windows users?
-(defconst org-sql--sqlite-exe "/usr/bin/sqlite3"
-  "The path to the sqlite client command.")
-
-(defconst org-sql--psql-exe "/usr/bin/psql"
-  "The path to the postgres client command.")
-
-(defconst org-sql--postgres-createdb-exe "/usr/bin/createdb"
-  "The path to the postgres 'create database' command.")
-
-(defconst org-sql--postgres-dropdb-exe "/usr/bin/dropdb"
-  "The path to the postgres 'drop database' command.")
+;;; SQL command wrappers
 
 (defun org-sql--exec-sqlite-command (config-keys &rest args)
   "Execute a sqlite command with ARGS.
@@ -1958,6 +1981,8 @@ The database connection will be handled transparently."
         (f-delete tmp-path)
         res))))
 
+;;; high-level database operations
+
 (defun org-sql--db-exists ()
   "Return t if the configured database exists."
   (-let (((mode . keyvals) org-sql-db-config))
@@ -2021,7 +2046,11 @@ Note that this currently only tests the existence of the schema's tables."
        (-let (((&plist :database) keyvals))
          (org-sql--exec-postgres-command-sub 'dropdb keyvals database))))))
 
-;; public IO functions
+;;;
+;;; PUBLIC API
+;;; 
+
+;;; non-interactive
 
 (defun org-sql-init-db ()
   "Initialize the Org-SQL database."
@@ -2050,7 +2079,7 @@ required schema."
   (org-sql--delete-db)
   (org-sql-init-db))
 
-;;; interactive user functions
+;;; interactive
 
 (defun org-sql-user-update ()
   "Update the Org SQL database."
