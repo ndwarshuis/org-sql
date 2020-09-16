@@ -1246,7 +1246,7 @@ Add tags to ACC (which is treated like a set)."
 
 ;; org-element tree -> MQL inserts
 
-(defun org-sql--insert-sml-clock (acc entry)
+(defun org-sql--add-mql-insert-clock (acc entry)
   "Add data from logbook clock ENTRY to accumulator ACC."
   (-let (((&plist :entry-offset
                   :note-text
@@ -1268,7 +1268,7 @@ Add tags to ACC (which is treated like a set)."
       ;; TODO this option can be moved to optimize the logbook flatten function
       :clock_note (when org-sql-store-clock-notes note-text))))
 
-(defun org-sql--insert-sml-logbook-item (acc entry)
+(defun org-sql--add-mql-insert-logbook-item (acc entry)
   "Add general logbook ENTRY to ACC."
   (-let (((entry-type . (&plist :entry-offset
                                 :header-text
@@ -1288,27 +1288,27 @@ Add tags to ACC (which is treated like a set)."
       :header header-text
       :note note-text)))
 
-(defun org-sql--insert-sml-state-change (acc entry)
+(defun org-sql--add-mql-insert-state-change (acc entry)
   "Add data from state-change logbook ENTRY to accumulator ACC."
   (-let (((&plist :entry-offset :file-path :old-state :new-state) (cdr entry)))
-    (--> (org-sql--insert-sml-logbook-item acc entry)
+    (--> (org-sql--add-mql-insert-logbook-item acc entry)
          (org-sql--add-mql-insert it state_changes
            :file_path file-path
            :entry_offset entry-offset
            :state_old old-state
            :state_new new-state))))
 
-(defun org-sql--insert-sml-planning-change (acc entry)
+(defun org-sql--add-mql-insert-planning-change (acc entry)
   "Add data from planning-change logbook ENTRY to accumulator ACC."
   (-let (((&plist :entry-offset :file-path :headline-offset :old-ts) (cdr entry)))
-    (--> (org-sql--insert-sml-logbook-item acc entry)
-         (org-sql--insert-sml-timestamp it old-ts headline-offset file-path)
+    (--> (org-sql--add-mql-insert-logbook-item acc entry)
+         (org-sql--add-mql-insert-timestamp it old-ts headline-offset file-path)
          (org-sql--add-mql-insert it planning_changes
            :file_path file-path
            :entry_offset entry-offset
            :timestamp_offset (org-ml-get-property :begin old-ts)))))
          
-(defun org-sql--insert-sml-logbook (acc fstate headline)
+(defun org-sql--add-mql-insert-logbook (acc fstate headline)
   (-let (((&plist :file-path) fstate)
          (headline-offset (org-ml-get-property :begin headline)))
     (cl-flet
@@ -1319,22 +1319,18 @@ Add tags to ACC (which is treated like a set)."
             (if (not (memq entry-type org-sql-included-logbook-types)) acc
               (cl-case entry-type
                 ((redeadline deldeadline reschedule delschedule)
-                 (org-sql--insert-sml-planning-change acc entry))
+                 (org-sql--add-mql-insert-planning-change acc entry))
                 (state
-                 (org-sql--insert-sml-state-change acc entry))
+                 (org-sql--add-mql-insert-state-change acc entry))
                 (clock
-                 (org-sql--insert-sml-clock acc entry))
+                 (org-sql--add-mql-insert-clock acc entry))
                 (t
-                 (org-sql--insert-sml-logbook-item acc entry)))))))
-      ;; (->> (org-ml-headline-get-logbook headline)
-      ;;      (org-sql--logbook-to-entries fstate headline-offset)
-      ;;      (-map #'car)
-      ;;      (print))
+                 (org-sql--add-mql-insert-logbook-item acc entry)))))))
       (->> (org-ml-headline-get-logbook headline)
            (org-sql--logbook-to-entries fstate headline-offset)
            (-reduce-from #'add-entry acc)))))
 
-(defun org-sql--insert-sml-headlines-properties (acc headline file-path)
+(defun org-sql--add-mql-insert-headlines-properties (acc headline file-path)
   "Add properties data from HEADLINE to accumulator ACC."
   (if (eq 'all org-sql-ignored-properties) acc
     ;; TODO only do this once
@@ -1361,7 +1357,7 @@ Add tags to ACC (which is treated like a set)."
              (-remove #'is-ignored)
              (-reduce-from #'add-property acc))))))
 
-(defun org-sql--insert-sml-tags (acc headline file-path)
+(defun org-sql--add-mql-insert-tags (acc headline file-path)
   "Extract tags data from HEADLINE and add to accumulator ACC."
   (if (eq 'all org-sql-ignored-tags) acc
     (let ((offset (org-ml-get-property :begin headline)))
@@ -1384,7 +1380,7 @@ Add tags to ACC (which is treated like a set)."
                (--reduce-from (add-tag acc it nil) it tags)
                (--reduce-from (add-tag acc it t) it i-tags)))))))
 
-(defun org-sql--insert-sml-links (acc headline file-path)
+(defun org-sql--add-mql-insert-links (acc headline file-path)
   "Add link data from headline HEADLINE to accumulator ACC."
   (if (eq 'all org-sql-ignored-link-types) acc
     (let ((offset (org-ml-get-property :begin headline))
@@ -1405,7 +1401,7 @@ Add tags to ACC (which is treated like a set)."
               :link_type (org-ml-get-property :type link))))
         (-reduce-from #'add-link acc links)))))
 
-(defun org-sql--insert-sml-timestamp (acc timestamp headline-offset file-path)
+(defun org-sql--add-mql-insert-timestamp (acc timestamp headline-offset file-path)
   (cl-flet
       ((get-resolution
         (time)
@@ -1430,7 +1426,7 @@ Add tags to ACC (which is treated like a set)."
         :end_is_long (get-resolution end)
         :raw_value (org-ml-get-property :raw-value timestamp)))))
 
-(defun org-sql--insert-sml-headlines-contents (acc headline file-path)
+(defun org-sql--add-mql-insert-headlines-contents (acc headline file-path)
   "Add contents from partitioned header HEADLINE to accumulator ACC."
   (-if-let (pattern (-some--> org-sql-included-contents-timestamp-types
                       (--map `(:type ',it) it)
@@ -1438,17 +1434,17 @@ Add tags to ACC (which is treated like a set)."
       (let ((timestamps (-some->> (org-sql--headline-get-contents headline)
                           (org-ml-match pattern)))
             (headline-offset (org-ml-get-property :begin headline)))
-        (--reduce-from (org-sql--insert-sml-timestamp acc it headline-offset file-path) acc timestamps))
+        (--reduce-from (org-sql--add-mql-insert-timestamp acc it headline-offset file-path) acc timestamps))
     acc))
 
-(defun org-sql--insert-sml-headlines-planning (acc headline file-path)
+(defun org-sql--add-mql-insert-headlines-planning (acc headline file-path)
   (-if-let (planning (org-ml-headline-get-planning headline))
       (let ((offset (org-ml-get-property :begin headline)))
         (cl-flet
             ((add-planning-maybe
               (acc type)
               (-if-let (ts (org-ml-get-property type planning))
-                  (--> (org-sql--insert-sml-timestamp acc ts offset file-path)
+                  (--> (org-sql--add-mql-insert-timestamp acc ts offset file-path)
                        (org-sql--add-mql-insert it planning_entries
                          :file_path file-path
                          :headline_offset offset
@@ -1461,7 +1457,7 @@ Add tags to ACC (which is treated like a set)."
                (-reduce-from #'add-planning-maybe acc))))
     acc))
 
-(defun org-sql--insert-sml-headlines-closures (acc headline file-path)
+(defun org-sql--add-mql-insert-headlines-closures (acc headline file-path)
   (let ((offset (org-ml-get-property :begin headline)))
     (cl-flet
         ((add-closure
@@ -1477,7 +1473,7 @@ Add tags to ACC (which is treated like a set)."
            (reverse)
            (--reduce-from (apply #'add-closure acc it) acc)))))
 
-(defun org-sql--insert-sml-headlines-meta (acc headline file-path)
+(defun org-sql--add-mql-insert-headlines-meta (acc headline file-path)
   (cl-flet
       ((effort-to-int
         (s)
@@ -1502,24 +1498,24 @@ Add tags to ACC (which is treated like a set)."
                  (-map #'org-ml-to-string)
                  (s-join "")))))
 
-(defun org-sql--insert-sml-headlines (acc fstate)
+(defun org-sql--add-mql-insert-headlines (acc fstate)
   (-let (((&plist :file-path :headlines) fstate))
     (cl-labels
         ((add-headline
           (acc hl)
           (let ((sub (org-ml-headline-get-subheadlines hl)))
-            (--> (org-sql--insert-sml-headlines-meta acc hl file-path)
-                 (org-sql--insert-sml-headlines-closures it hl file-path)
-                 (org-sql--insert-sml-headlines-planning it hl file-path)
-                 (org-sql--insert-sml-headlines-contents it hl file-path)
-                 (org-sql--insert-sml-links it hl file-path)
-                 (org-sql--insert-sml-tags it hl file-path)
-                 (org-sql--insert-sml-headlines-properties it hl file-path)
-                 (org-sql--insert-sml-logbook it fstate hl)
+            (--> (org-sql--add-mql-insert-headlines-meta acc hl file-path)
+                 (org-sql--add-mql-insert-headlines-closures it hl file-path)
+                 (org-sql--add-mql-insert-headlines-planning it hl file-path)
+                 (org-sql--add-mql-insert-headlines-contents it hl file-path)
+                 (org-sql--add-mql-insert-links it hl file-path)
+                 (org-sql--add-mql-insert-tags it hl file-path)
+                 (org-sql--add-mql-insert-headlines-properties it hl file-path)
+                 (org-sql--add-mql-insert-logbook it fstate hl)
                  (-reduce-from #'add-headline it sub)))))
       (-reduce-from #'add-headline acc headlines))))
 
-(defun org-sql--insert-sml-file-tags (acc fstate)
+(defun org-sql--add-mql-insert-file-tags (acc fstate)
   (-let (((&plist :file-path :top-section) fstate))
     (cl-flet
         ((add-tag
@@ -1533,7 +1529,7 @@ Add tags to ACC (which is treated like a set)."
            (-uniq)
            (-reduce-from #'add-tag acc)))))
 
-(defun org-sql--insert-sml-file-properties (acc fstate)
+(defun org-sql--add-mql-insert-file-properties (acc fstate)
   (-let (((&plist :file-path :top-section) fstate))
     (cl-flet
         ((add-property
@@ -1553,7 +1549,7 @@ Add tags to ACC (which is treated like a set)."
            (--filter (equal (org-ml-get-property :key it) "PROPERTY"))
            (-reduce-from #'add-property acc)))))
 
-(defun org-sql--insert-sml-file (acc fstate)
+(defun org-sql--add-mql-insert-file (acc fstate)
   (-let (((&plist :file-path :md5 :attributes) fstate))
     (-> (org-sql--add-mql-insert acc files
           :file_path file-path
@@ -1562,10 +1558,10 @@ Add tags to ACC (which is treated like a set)."
 
 (defun org-sql--fstate-to-mql-insert (fstate)
   (-> nil
-      (org-sql--insert-sml-file fstate)
-      (org-sql--insert-sml-file-properties fstate)
-      (org-sql--insert-sml-file-tags fstate)
-      (org-sql--insert-sml-headlines fstate)
+      (org-sql--add-mql-insert-file fstate)
+      (org-sql--add-mql-insert-file-properties fstate)
+      (org-sql--add-mql-insert-file-tags fstate)
+      (org-sql--add-mql-insert-headlines fstate)
       (reverse)))
 
 (defun org-sql--fmeta-to-mql-update (fmeta)
