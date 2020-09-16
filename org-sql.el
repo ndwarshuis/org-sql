@@ -780,8 +780,7 @@ COLS are the column names as symbols used to obtain OUT."
           (when (and (eq type 'enum) allowed)
             (->> (--map (format "'%s'" it) allowed)
                  (s-join ",")
-                 ;; TODO this assumes all enum column names are unique
-                 (format "CREATE TYPE enum_%s AS ENUM (%s);" column-name*)))))
+                 (format "CREATE TYPE enum_%s_%s AS ENUM (%s);" table-name column-name*)))))
        (format-table
         (mql-table)
         (-let (((table-name . (&alist 'columns)) mql-table))
@@ -803,11 +802,11 @@ COLS are the column names as symbols used to obtain OUT."
          (-map #'format-constraint)
          (s-join " "))))
 
-(defun org-sql--format-mql-schema-postgres-type (mql-column)
+(defun org-sql--format-mql-schema-postgres-type (tbl-name mql-column)
   (-let* (((column-name . (&plist :type)) mql-column)
           (column-name* (org-sql--format-mql-column-name column-name)))
     (org-sql--case-type type
-      (enum (format "enum_%s" column-name*))
+      (enum (format "enum_%s_%s" tbl-name column-name*))
       (text "TEXT")
       (integer "INTEGER")
       (boolean "BOOLEAN"))))
@@ -820,18 +819,18 @@ COLS are the column names as symbols used to obtain OUT."
       (integer "INTEGER")
       (boolean "INTEGER"))))
 
-(defun org-sql--format-mql-schema-type (config mql-column)
+(defun org-sql--format-mql-schema-type (config tbl-name mql-column)
   (org-sql--case-mode (car config)
     (sqlite (org-sql--format-mql-schema-sqlite-type mql-column))
-    (postgres (org-sql--format-mql-schema-postgres-type mql-column))))
+    (postgres (org-sql--format-mql-schema-postgres-type tbl-name mql-column))))
 
-(defun org-sql--format-mql-schema-columns (config mql-columns)
+(defun org-sql--format-mql-schema-columns (config tbl-name mql-columns)
   (cl-flet
       ((format-column
         (mql-column)
         (-let* (((name . (&plist :constraints)) mql-column)
                 (name* (org-sql--format-mql-column-name name))
-                (type* (org-sql--format-mql-schema-type config mql-column))
+                (type* (org-sql--format-mql-schema-type config tbl-name mql-column))
                 (column-str (format "%s %s" name* type*)))
           (if (not constraints) column-str
             (->> (org-sql--format-mql-schema-column-constraints constraints)
@@ -877,7 +876,7 @@ COLS are the column names as symbols used to obtain OUT."
 (defun org-sql--format-mql-schema-table (config mql-schema)
   (-let* (((tbl-name . (&alist 'columns 'constraints)) mql-schema))
     (->> (org-sql--format-mql-schema-table-constraints constraints)
-         (append (org-sql--format-mql-schema-columns config columns))
+         (append (org-sql--format-mql-schema-columns config tbl-name columns))
          (s-join ",")
          (format "CREATE TABLE IF NOT EXISTS %s (%s);" tbl-name))))
 
