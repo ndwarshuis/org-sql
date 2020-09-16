@@ -475,17 +475,56 @@ list then join the cdr of IN with newlines."
                       :end_is_long nil
                       :raw_value ,ts)))))
 
-  ;; TODO obviously this is bullshit
-  (it "timestamp deadline (ranged)"
-    (let* ((ts0 "<2112-01-01 Thu>")
-           (ts1 "<2112-01-02 Fri>")
-           (ts (format "%s--%s" ts0 ts1))
-           (planning (format "DEADLINE: %s" ts)))
+  (it "timestamp  (content)"
+    (let* ((ts "<2112-01-01 Thu>"))
       (expect-sql-tbls (timestamps) (list "* parent"
-                                          planning)
+                                          ts)
         `((timestamps :file_path ,testing-filepath
                       :headline_offset 1
-                      :timestamp_offset 20
+                      :timestamp_offset 10
+                      :is_active 1
+                      :warning_type nil
+                      :warning_value nil
+                      :warning_unit nil
+                      :repeat_type nil
+                      :repeat_value nil
+                      :repeat_unit nil
+                      :time_start ,(org-ts-to-unixtime ts)
+                      :start_is_long 0
+                      :time_end nil
+                      :end_is_long nil
+                      :raw_value ,ts)))))
+
+  (it "timestamp  (content-nested)"
+    (let* ((ts "<2112-01-01 Thu>"))
+      (expect-sql-tbls (timestamps) (list "* parent"
+                                          "** child"
+                                          ts)
+        `((timestamps :file_path ,testing-filepath
+                      :headline_offset 10
+                      :timestamp_offset 19
+                      :is_active 1
+                      :warning_type nil
+                      :warning_value nil
+                      :warning_unit nil
+                      :repeat_type nil
+                      :repeat_value nil
+                      :repeat_unit nil
+                      :time_start ,(org-ts-to-unixtime ts)
+                      :start_is_long 0
+                      :time_end nil
+                      :end_is_long nil
+                      :raw_value ,ts)))))
+
+  (it "timestamp  (content-ranged)"
+    (let* ((ts0 "<2112-01-01 Thu>")
+           (ts1 "<2112-01-02 Fri>")
+           (ts (format "%s--%s" ts0 ts1)))
+      (expect-sql-tbls (timestamps) (list "* parent"
+                                          ts)
+        `((timestamps :file_path ,testing-filepath
+                      :headline_offset 1
+                      :timestamp_offset 10
                       :is_active 1
                       :warning_type nil
                       :warning_value nil
@@ -507,6 +546,17 @@ list then join the cdr of IN with newlines."
       `((links :file_path ,testing-filepath
                :headline_offset 1
                :link_offset 10
+               :link_path "//example.com"
+               :link_text ""
+               :link_type "https"))))
+
+  (it "single link (nested)"
+    (expect-sql-tbls (links) (list "* parent"
+                                   "** child"
+                                   "https://example.com")
+      `((links :file_path ,testing-filepath
+               :headline_offset 10
+               :link_offset 19
                :link_path "//example.com"
                :link_text ""
                :link_type "https"))))
