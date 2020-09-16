@@ -1734,14 +1734,14 @@ commands outside of this package."
 ;;; SQL command abstractions
 
 ;; TODO don't hardcode the exe paths or the tmp path...just to make everyone happy
-;; (defun org-sql--fmt-sqlite-cmd ()
+;; (defun org-sql--get-sqlite-arguments ()
 ;;   (format "/usr/bin/sqlite3 %s" org-sql-sqlite-path))
 
-(defun org-sql--fmt-sqlite-cmd (config-keys)
+(defun org-sql--get-sqlite-arguments (config-keys)
   (-let (((&plist :path) config-keys))
     (list path)))
 
-(defun org-sql--fmt-postgres-cmd (config-keys)
+(defun org-sql--get-postgres-arguments (config-keys)
   (-let* (((&plist :database :hostname :port :username) config-keys)
           (d (list "-d" database))
           (h (-some->> hostname (list "-h")))
@@ -1751,81 +1751,77 @@ commands outside of this package."
           (f '("-At")))
     (append d h p u f)))
 
+;; TODO what about the windows users?
+(defconst org-sql--sqlite-exe "/usr/bin/sqlite3")
+
+(defconst org-sql--psql-exe "/usr/bin/psql")
+
+(defconst org-sql--postgres-createdb-exe "/usr/bin/createdb")
+
+(defconst org-sql--postgres-dropdb-exe "/usr/bin/dropdb")
+
 (defun org-sql--send-sql (sql-cmd)
   (-let* (((mode . keys) org-sql-db-config)
-          ;; TODO do we need to quote anything? it isn't running in a shell
           (path (org-sql--case-mode mode
-                  (sqlite "/usr/bin/sqlite3")
-                  (postgres "/usr/bin/psql")))
+                  (sqlite org-sql--sqlite-exe)
+                  (postgres org-sql--psql-exe)))
           (sql-args (org-sql--case-mode mode
                       (postgres (list "-c" sql-cmd))
                       (sqlite (list sql-cmd))))
           (option-args (org-sql--case-mode mode
-                         (postgres (org-sql--fmt-postgres-cmd keys))
-                         (sqlite (org-sql--fmt-sqlite-cmd keys)))))
+                         (postgres (org-sql--get-postgres-arguments keys))
+                         (sqlite (org-sql--get-sqlite-arguments keys)))))
     (apply #'org-sql--run-command path (append option-args sql-args))))
-    ;; (->> (s-replace "'" "'\"'\"'" sql-cmd)
-    ;;      (format fmt cmd)
-    ;;      (shell-command-to-string))))
 
 (defun org-sql--send-sql* (sql-cmd)
   (if (not sql-cmd) '(0 . "")
     (-let* ((tmp-path (format "/tmp/org-sql-cmd-%s" (round (float-time))))
             ((mode . keys) org-sql-db-config)
             (path (org-sql--case-mode mode
-                    (sqlite "/usr/bin/sqlite3")
-                    (postgres "/usr/bin/psql")))
+                    (sqlite org-sql--sqlite-exe)
+                    (postgres org-sql--psql-exe)))
             (sql-args (org-sql--case-mode mode
                         (postgres (list "-f" tmp-path))
                         (sqlite (list (format ".read %s" tmp-path)))))
             (option-args (org-sql--case-mode mode
-                           (postgres (org-sql--fmt-postgres-cmd keys))
-                           (sqlite (org-sql--fmt-sqlite-cmd keys)))))
+                           (postgres (org-sql--get-postgres-arguments keys))
+                           (sqlite (org-sql--get-sqlite-arguments keys)))))
       (f-write sql-cmd 'utf-8 tmp-path)
       (let ((res (apply #'org-sql--run-command path (append option-args sql-args))))
         (f-delete tmp-path)
         res))))
 
-(defun org-sql--db-exists-sqlite (keyvals)
-  (-let (((&plist :path) keyvals))
-    (file-exists-p path)))
-
-(defun org-sql--db-exists-postgres (keyvals)
-  (-let (((&plist :database) keyvals)
-         ((rc . out) (org-sql--run-command "/usr/bin/psql" "-qtl")))
-      (if (/= 0 rc) (error out)
-        (->> (s-split "\n" out)
-             (--map (s-trim (car (s-split "|" it))))
-             (--find (equal it database))))))
-
 (defun org-sql--db-exists ()
   (-let (((mode . keyvals) org-sql-db-config))
     (org-sql--case-mode mode
       (sqlite
-       (org-sql--db-exists-sqlite keyvals))
-       ;; TODO this does not check if the required tables exist
+       (-let (((&plist :path) keyvals))
+         (file-exists-p path)))
       (postgres
-       (org-sql--db-exists-postgres keyvals)))))
+       (-let (((&plist :database) keyvals)
+              ((rc . out) (org-sql--run-command org-sql--psql-exe "-qtl")))
+         (if (/= 0 rc) (error out)
+           (->> (s-split "\n" out)
+                (--map (s-trim (car (s-split "|" it))))
+                (--find (equal it database)))))))))
 
 (defun org-sql--db-has-valid-schema ()
-  (-let ((table-names (--map (symbol-name (car it)) org-sql--mql-schema))
-         ((mode . keyvals) org-sql-db-config))
-    (org-sql--case-mode mode
-      (sqlite
-       (-let* (((&plist :path) keyvals)
-               ((rc . out) (org-sql--run-command "sqlite3" path ".tables")))
-         (if (/= 0 rc) (error out)
-           (--> (s-lines out)
-                (--mapcat (s-split " " it t) it)
-                (org-sql--sets-equal table-names it :test #'equal)))))
-      (postgres
-       (-let* (((&plist :database) keyvals)
-               ((rc . out) (apply #'org-sql--run-command "psql" (list "-d" database "-Atc" "\\dt"))))
-         (if (/= 0 rc) (error out)
-           (--> (s-trim out)
-                (s-lines it)
-                (--map (nth 1 (s-split "|" it)) it)
-                (org-sql--sets-equal table-names it :test #'equal))))))))
+  (-let* ((table-names (--map (symbol-name (car it)) org-sql--mql-schema))
+          ((sql-cmd parse-fun)
+           (org-sql--case-mode (car org-sql-db-config)
+             (sqlite
+              (list ".tables"
+                    (lambda (s)
+                      (--mapcat (s-split " " it t) (s-lines s)))))
+             (postgres
+              (list "\\dt"
+                    (lambda (s)
+                      (->> (s-trim s)
+                           (s-lines)
+                           (--map (nth 1 (s-split "|" it)))))))))
+          ((rc . out) (org-sql--send-sql sql-cmd)))
+    (if (/= 0 rc) (error out)
+      (org-sql--sets-equal table-names (funcall parse-fun out) :test #'equal))))
 
 (defun org-sql--db-create ()
   (-let (((mode . keyvals) org-sql-db-config))
@@ -1834,10 +1830,10 @@ commands outside of this package."
        (-let (((&plist :path) keyvals))
          ;; this is a silly command that should work on all platforms (eg
          ;; doesn't require `touch' to make an empty file)
-         (org-sql--run-command "sqlite3" path ".schema")))
+         (org-sql--run-command org-sql--sqlite-exe path ".schema")))
       (postgres
        (-let (((&plist :database) keyvals))
-         (org-sql--run-command "createdb" database))))))
+         (org-sql--run-command org-sql--postgres-createdb-exe database))))))
 
 (defun org-sql--db-create-tables ()
   (let ((sql-cmd (org-sql--format-mql-schema org-sql-db-config org-sql--mql-schema)))
@@ -1852,7 +1848,7 @@ commands outside of this package."
          (delete-file path)))
       (postgres
        (-let (((&plist :database) keyvals))
-         (org-sql--run-command "dropdb" database))))))
+         (org-sql--run-command org-sql--postgres-dropdb-exe database))))))
 
 ;; public IO functions
 
