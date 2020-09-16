@@ -1886,7 +1886,9 @@ This assumes an active connection is open."
 (defun org-sql-clear-db ()
   "Clear the database."
   ;; only delete from files as we assume actions here cascade down
-  (org-sql--send-sql (org-sql--format-mql-delete nil '(files))))
+  (->> (org-sql--mql-delete files nil)
+       (org-sql--format-mql-delete nil)
+       (org-sql--send-sql)))
 
 (defun org-sql-reset-db ()
   (org-sql--delete-db)
