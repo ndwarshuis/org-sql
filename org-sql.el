@@ -1879,8 +1879,8 @@ This assumes an active connection is open."
 
 (defun org-sql-update-db ()
   "Update the database."
-  ;; (print (org-sql--get-transactions))
-  (org-save-all-org-buffers)
+  (let ((inhibit-message t))
+    (org-save-all-org-buffers))
   (org-sql--send-sql* (org-sql--get-transactions)))
 
 (defun org-sql-clear-db ()
