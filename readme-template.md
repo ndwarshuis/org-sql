@@ -164,11 +164,16 @@ variable.
 ## 1.0.0 (relative to previous unversioned release)
 
 - use `org-ml` to simplify code
+- add support for postgres
 - use shell commands and temp scripts for SQL interaction instead of built-in
   Emacs SQL comint mode
 - various performance improvements
-- make entries for `closed`, `scheduled`, and `deadline` in `headlines` table
-  and remove the `planning_type` entry in `timestamp` table
+- add tests (stateless and stateful)
+- total rewrite of the schema:
+   - moved/added file tags, file properties, headline closures, headline tags,
+     headline properties, and planning entries as seperate tables
+   - no longer defer foreign keys
+   - use enum where fixed data types are expected (not sqlite)
 
 # Acknowledgements
 
