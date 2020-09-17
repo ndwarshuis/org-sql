@@ -89,35 +89,6 @@ One can also use `use-package` to automate this entire process
 Options following the pattern `org-sql-exclude-X` dictate what to exclude from
 the database. By default all these variables are nil (include everything).
 
-## Logbooks
-
-Much of the extracted data from `org-sql` pertains to logbook entries, and there
-are a number of settings that effect how this data is generated in org files and
-how it may be parsed reliably.
-
-Firstly, one needs to set the relevant `org-mode` variables in order to capture
-logging information. Please refer to the documentation in `org-mode` itself for
-their meaning:
-- `org-log-done`
-- `org-log-reschedule`
-- `org-log-redeadline`
-- `org-log-note-clock-out`
-- `org-log-refile`
-- `org-log-repeat`
-- `org-todo-keywords` (in this one can set which todo keywords changes are
-  logged)
-
-Obtaining the above information for the database assumes that
-`org-log-note-headings` is left at its default value. This limitation may be
-surpassed in the future.
-
-Additionally, for best results it is recommended that all logbook entries be
-contained in their own drawer. This means that `org-log-into-drawer` should be
-set to `LOGBOOK` and `org-clock-into-drawer` should be set to `t` (which means
-clocks go into a drawer with hardcoded name `LOGBOOK`). Without these settings,
-`org-sql` needs to guess where the logbook entries are based on location and
-pattern matching, which is not totally reliable.
-
 # Usage
 
 ## Initializing
@@ -142,6 +113,36 @@ operation will also block Emacs until complete.
 ## Removing all data
 
 Run `org-sql-user-clear-all`. This will clear all data but leave the schema.
+
+# Limitations
+
+## OS support
+
+This has currently only been tested on Linux and will likely break on Windows
+(it may work on MacOS). Support for other operating systems is planned for
+future releases.
+
+## Logbook entries
+
+Due to a limitation in `org-ml` (used as the backend for parsing org files here)
+logbooks will only be detected and parsed if `org-log-into-drawer` is non-nil
+(which means logbook entries go into a separate drawer, `LOGBOOK` by default).
+Even when this limitation is fixed, there is no guarantee that logbook entries
+without a drawer will be parsed correctly (since these are just free clock
+entries and plain-lists in the headline section with everything else). For this
+reason, it is recommended to set `org-log-into-drawer` to non-nil anyways.
+
+Additionally, `org-ml` will not pay attention to file-level logbook settings (eg
+`#+STARTUP: nologdrawer`) or subtree settings (eg the `LOG_INTO_DRAWER`
+property) and as such `org-ml` will only parse subtrees and store logbooks
+according to `org-log-into-drawer`.
+
+## Logbook header types
+
+`org-ml` parse logbook entries by trying to match their headings using
+`org-log-note-headings`. There is no way to set this variable on a per-file or
+per-tree basis, so all parsed file will be treated the same according to this
+variable.
 
 # Database Layout
 
