@@ -217,6 +217,10 @@ make docs
 
 # Changelog
 
+## 1.0.1
+
+- various bugfixes
+
 ## 1.0.0 (relative to previous unversioned release)
 
 - use `org-ml` to simplify code
