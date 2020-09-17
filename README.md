@@ -1,48 +1,8 @@
 # Org-SQL ![Github Workflow Status](https://img.shields.io/github/workflow/status/ndwarshuis/org-sql/CI) ![MELPA VERSION](https://melpa.org/packages/org-sql-badge.svg)
 
-This is a SQL backend for Emacs Org-Mode. It scans through text files formatted
-in org-mode, parses them, and adds key information such as todo keywords,
-timestamps, and links to a relational database. For now only SQLite is
-supported.
-
-# Motivation and Goals
-
-Despite the fact that Emacs is the (second?) greatest text editor of all time,
-it is not a good data analysis platform, and neither is Lisp a good data
-analysis language. This is the strong-suite of other languages such as Python
-and R which have powerful data manipulation packages (`dplyr` and `pandas`) as
-well as specialized presentation platforms (`shiny` and `dash`). The common
-thread between these data analysis tools is a tabular data storage system, for
-which SQL is the most common language.
-
-Therefore, the primary goal of `org-sql` is to provide a link between the
-text-based universe of Emacs / Org-mode and the table-based universe of data
-analysis platforms.
-
-A common use case for org-mode is a daily planner. Within this use case, some
-questions that can easily be answered with a SQL-backed approach:
-- How much time do I spend doing pre-planned work? (track how much time is spent
-  clocking)
-- How well do I estimate how long tasks take? (compare effort and clocked time)
-- Which types of tasks do I concentrate on the most? (tag entries and sort based
-  on effort and clocking)
-- How indecisive am I? (track how many times schedule or deadline timestamps are
-  changed)
-- How much do I overplan? (track number of canceled tasks)
-- How much do I delegate (track properties indicating which people are working
-  on tasks)
-- How many outstanding tasks/projects do I have? (count keywords and tags on
-  headlines)
-
-There are other uses for an Org-mode SQL database. If one has many org files
-scattered throughout their filesystem, a database is an easy way to aggregate
-key information such as links or timestamps. Or if one primary uses org-mode for
-taking notes, it could be a way to aggregate and analyze meeting minutes.
-
-Of course, these could all be done directly in Org-mode with Lisp code (indeed
-there are already built-in functions for reporting aggregated effort and
-clock-time). But why do that when one could analyze all org files by making a
-descriptive dashboard with a relatively few lines of R or Python code?
+This package converts org-mode files to Structured Query Language (SQL) and
+stores them in a database, which can then be used for comprehensive data
+analysis and visualization.
 
 # Installation
 
@@ -75,19 +35,36 @@ One can also use `use-package` to automate this entire process
   )
 ```
 
+## Dependencies
+
+### Emacs packages
+
+- org-ml.el
+- dash.el
+- s.el
+
+### Databases
+
+Only the programs for your desired implementation are required:
+
+- sqlite3
+- postgres (specifically createdb, dropdb, psql)
+
 # Configuration
 
 ## General Behavior
 
-- `org-sql-db-config`: a list describing the database to use and how to connect
-  to it (see this variable's help page for more details)
-- `org-sql-files`: list of org files to insert into database
+- `org-sql-db-config`: a list describing the database implementation to use and
+  how to connect to it (see this variable's help page for more details)
+- `org-sql-files`: list of org files to insert into the database
 - `org-sql-debug`: turn on SQL transaction debug output in the message buffer
 
 ## Database Storage
 
-Options following the pattern `org-sql-exclude-X` dictate what to exclude from
-the database. By default all these variables are nil (include everything).
+Options following the pattern `org-sql-exclude-X` or `org-sql-excluded-X`
+dictate what not to store in the database. By default all these variables are
+nil (include everything). See the help page for each of these for further
+details.
 
 # Usage
 
@@ -171,7 +148,7 @@ Each row stores one headline in a given org file and its metadata
 
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - files |  | TEXT / TEXT | path to file containin the headline |
+| file_path | x | file_path - files |  | TEXT / TEXT | path to file containing the headline |
 | headline_offset | x |  |  | INTEGER / INTEGER | file offset of the headline's first character |
 | headline_text |  |  |  | TEXT / TEXT | raw text of the headline |
 | keyword |  |  | x | TEXT / TEXT | the TODO state keyword |
@@ -338,14 +315,92 @@ Each rows stores one link
 
 <!-- 0.0.1 -->
 
+# Contributing
+
+Contributions welcome! But please take advantage of the testing environment
+(especially when contributing to code which directly interacts with the database
+servers).
+
+## Dependencies
+
+In addition to all required dependencies above:
+
+- cask
+- make
+- docker
+- docker-compose
+
+## Emacs setup
+
+Install all emacs dependencies:
+
+``` sh
+cask install --dev
+```
+
+## Test environment setup
+
+Except for SQLite, the each database for testing is encoded and set up using
+`docker-compose` (see the included `docker-compose.yml` file). These are
+necessary to run the stateful tests above.
+
+To set up the environment, start the docker-daemon (may require sudo):
+
+``` sh
+docker-compose up -d
+```
+
+To shut down the environment:
+
+``` sh
+docker-compose down
+```
+
+## Running tests
+
+Tests are divided into stateless (pure functions, don't rely on external
+database implementations) and stateful (impure, interacts with the database
+and/or files on disk).
+
+Run all stateless tests:
+
+```
+make stateless
+```
+
+Run all stateful tests:
+
+```
+make stateful
+```
+
+Compile code and run stateful and stateless tests:
+
+```
+make compile
+```
+
+Run all tests using both interpreted and compiled code:
+
+```
+make test
+```
+
+## Building documentation
+
+To generate documentation from the readme template:
+
+```
+make docs
+```
+
 # Changelog
 
 ## 1.0.0 (relative to previous unversioned release)
 
 - use `org-ml` to simplify code
 - add support for postgres
-- use shell commands and temp scripts for SQL interaction instead of built-in
-  Emacs SQL comint mode
+- use subprocesses for SQL interaction instead of built-in Emacs SQL comint mode
 - various performance improvements
 - add tests (stateless and stateful)
 - total rewrite of the schema:

@@ -119,7 +119,7 @@ to store them. This is in addition to any properties specifified by
       (headlines
        (desc . "Each row stores one headline in a given org file and its metadata")
        (columns
-        (:file_path :desc "path to file containin the headline"
+        (:file_path :desc "path to file containing the headline"
                     :type text)
         (:headline_offset :desc "file offset of the headline's first character"
                           :type integer)
