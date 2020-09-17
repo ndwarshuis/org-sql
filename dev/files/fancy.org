@@ -1,0 +1,29 @@
+#+FILETAGS: one two three
+#+PROPERTY: p1 v1 v2 v3
+
+* plain
+* archived                                                          :ARCHIVE:
+* TODO parent
+** DONE [#B] COMMENT child                                                 :sometag:
+CLOSED: [2020-09-15 Tue 17:59]
+:PROPERTIES:
+:Effort:   1:00
+:thing: thingy
+:END:
+:LOGBOOK:
+- State "DONE"       from "TODO"       [2020-09-15 Tue 17:57]
+CLOCK: [2020-09-15 Tue 17:57]--[2020-09-15 Tue 17:57] =>  0:00
+- this is a clock note
+:END:
+** TODO other child
+SCHEDULED: <2020-09-18 Fri> DEADLINE: <2020-09-22 Tue>
+:LOGBOOK:
+- Rescheduled from "[2020-09-17 Thu]" on [2020-09-15 Tue 17:58]
+- Not scheduled, was "[2020-09-19 Sat]" on [2020-09-15 Tue 17:58]
+- Removed deadline, was "[2020-09-22 Tue]" on [2020-09-15 Tue 17:58]
+- New deadline from "[2020-09-17 Thu]" on [2020-09-15 Tue 17:58]
+:END:
+https://downloadmoreram.gov
+<2020-09-15 Tue>
+hopefully this hits all the relevent code paths :)
+

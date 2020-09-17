@@ -2,10 +2,11 @@
 (source melpa)
 
 (package-file "org-sql.el")
+(files ".el")
 
 (development
- (depends-on "f")
+ (depends-on "org-ml")
  (depends-on "dash")
- (depends-on "ecukes")
- (depends-on "ert-runner")
- (depends-on "el-mock"))
+ (depends-on "s")
+ (depends-on "f")
+ (depends-on "buttercup"))

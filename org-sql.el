@@ -1,12 +1,12 @@
 ;;; org-sql.el --- Org-Mode SQL converter -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2019  Nathan Dwarshuis
+;; Copyright (C) 2020  Nathan Dwarshuis
 
 ;; Author: Nathan Dwarshuis <natedwarshuis@gmail.com>
 ;; Keywords: org-mode, data
 ;; Homepage: https://github.com/ndwarshuis/org-sql
-;; Package-Requires: ((emacs "25") (dash "2.15"))
-;; Version: 0.0.1
+;; Package-Requires: ((emacs "26.1") (s "1.12") (dash "2.15") (org-ml "3.0.2"))
+;; Version: 1.0.0
 
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -23,70 +23,492 @@
 
 ;;; Commentary:
 
-;; This library converts org files to tabular data and inserts this
-;; into a SQL database. For the moment only SQLite is supported. In
-;; addition to the elisp dependencies required here, this library
-;; also requires the sqlite3 program to be installed.
+;; This code stores org buffers in a variety of SQL databases for use in
+;; processing org-mode data outside of Emacs where SQL operations might be more
+;; appropriate.
 
-;; See README for the structure of the database and the data that is
-;; stored in each table.
+;; The rough process by which this occurs is:
+;;  1) query state of org files on disk and in db (if any) and classify
+;;     files as 'updates', 'deletes', or 'inserts'
+;;    - updates: a file on disk is also in the database but the path on disk has
+;;      changed; this is the part that will be updated
+;;    - deletes: a file in the db is not on disk; therefore delete from db
+;;    - inserts: a file is on disk but not in the db, therefore insert into db
+;;    - NOTE: file equality will be assessed using a hash algorithm (eg md5)
+;;    - NOTE: in the case that a file on disk has changed and its path is also
+;;      in the db, this file will be deleted and reinserted
+;;  2) convert the updates/deletes/inserts into meta query language (MQL, an
+;;     internal, database agnostic representation of the SQL statements to be
+;;     sent)
+;;    - inserts will be constructed using `org-element'/`org-ml' from target
+;;      files on disk
+;;  3) format MQL to database-specific SQL statements
+;;  4) send SQL statements to the configured database
 
-;; Before data acquisition, each file is checked against the current
-;; database using its MD5 checksum to determine if updates are needed.
-;; Any required data is obtained by parsing each desired org(archive)
-;; file into a tree-structure using `org-element-parse-buffer', and
-;; converting this to a series of SQL insert commands to be executed
-;; via bulk transactions.
+;; The code is roughly arranged as follows:
+;; - constants
+;; - customization variables
+;; - stateless functions
+;; - stateful IO functions
 
 ;;; Code:
 
 (require 'cl-lib)
 (require 'subr-x)
 (require 'dash)
+(require 's)
 (require 'sql)
 (require 'org)
+(require 'org-ml)
 
-;;; constants and customizations
+;;;
+;;; CONSTANTS
+;;;
+
+
+(defconst org-sql--log-note-keys
+  '((:user .  "%u")
+    (:user-full . "%U")
+    (:ts . "%t")
+    (:ts-active . "%T")
+    (:short-ts . "%d")
+    (:short-ts-active . "%D")
+    (:old-state . "%S")
+    (:new-state . "%s"))
+  "Keywords for placeholders used in `org-log-note-headings'.")
+
+(defconst org-sql--log-note-replacements
+  (->> (-map #'cdr org-sql--log-note-keys) (--map (cons it it)))
+  "A list to simplify placeholders in `org-log-note-headings'.
+This is only used in combination with `org-replace-escapes'")
+
+(defconst org-sql--entry-keys
+  (append
+   (-map #'car org-sql--log-note-keys)
+   '(:file-path :headline-offset :entry-offset :note-text :header-text :old-ts :new-ts))
+  "Valid keys that may be used in logbook entry lists.")
 
 (defconst org-sql--ignored-properties-default
   '("ARCHIVE_ITAGS" "Effort")
   "Property keys to be ignored when inserting in properties table.
 It is assumed these are used elsewhere and thus it would be redundant
 to store them. This is in addition to any properties specifified by
-`nd/org-sql-ignored-properties'.")
+`org-sql-excluded-properties'.")
 
-;; TODO, make a formating function to convert a lisp obj to schema
-(defconst org-sql--schemas
-  '("CREATE TABLE files (file_path TEXT PRIMARY KEY ASC,md5 TEXT NOT NULL,size INTEGER NOT NULL,time_modified INTEGER,time_created INTEGER,time_accessed INTEGER);"
-    "CREATE TABLE headlines (file_path TEXT, headline_offset INTEGER, tree_path TEXT, headline_text TEXT NOT NULL, keyword TEXT, effort INTEGER, priority CHAR, archived BOOLEAN, commented BOOLEAN, content TEXT, PRIMARY KEY (file_path ASC, headline_offset ASC), FOREIGN KEY (file_path) REFERENCES files (file_path) ON UPDATE CASCADE ON DELETE CASCADE);"
-    "CREATE TABLE tags (file_path TEXT,headline_offset INTEGER,tag TEXT,inherited BOOLEAN,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path, headline_offset, tag, inherited));"
-    "CREATE TABLE properties (file_path TEXT,headline_offset INTEGER,property_offset INTEGER,key_text TEXT NOT NULL,val_text TEXT NOT NULL,inherited BOOLEAN,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, property_offset ASC));"
-    "CREATE TABLE clocking (file_path TEXT,headline_offset INTEGER,clock_offset INTEGER,time_start INTEGER,time_end INTEGER,clock_note TEXT,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset)ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, clock_offset ASC));"
-    "CREATE TABLE logbook (file_path TEXT,headline_offset INTEGER,entry_offset INTEGER,entry_type TEXT,time_logged INTEGER,header TEXT,note TEXT,FOREIGN KEY (file_path, headline_offset)REFERENCES headlines (file_path, headline_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, entry_offset ASC));"
-    "CREATE TABLE state_changes (file_path TEXT,entry_offset INTEGER,state_old TEXT NOT NULL,state_new TEXT NOT NULL,FOREIGN KEY (file_path, entry_offset) REFERENCES logbook (file_path, entry_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, entry_offset ASC));"
-    "CREATE TABLE planning_changes (file_path TEXT, entry_offset INTEGER, timestamp_offset INTEGER NOT NULL, FOREIGN KEY (file_path, entry_offset) REFERENCES logbook (file_path, entry_offset) ON DELETE CASCADE ON UPDATE CASCADE, PRIMARY KEY (file_path ASC, entry_offset ASC), FOREIGN KEY (file_path, timestamp_offset) REFERENCES timestamp (file_path, timestamp_offset) ON DELETE CASCADE ON UPDATE CASCADE);"
-    "CREATE TABLE links (file_path TEXT,headline_offset INTEGER,link_offset INTEGER,link_path TEXT,link_text TEXT,link_type TEXT,FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON UPDATE CASCADE ON DELETE CASCADE,PRIMARY KEY (file_path ASC, link_offset ASC));"
-    "CREATE TABLE timestamp (file_path TEXT, headline_offset INTEGER, timestamp_offset INTEGER, raw_value TEXT NOT NULL, type TEXT, planning_type TEXT, warning_type TEXT, warning_value INTEGER, warning_unit TEXT, repeat_type TEXT, repeat_value INTEGER, repeat_unit TEXT, time INTEGER NOT NULL, time_end INTEGER, resolution TEXT, resolution_end TEXT, PRIMARY KEY (file_path, timestamp_offset), FOREIGN KEY (file_path, headline_offset) REFERENCES headlines (file_path, headline_offset) ON DELETE CASCADE ON UPDATE CASCADE);")
-  "Table schemas for the org database.")
+(defconst org-sql--content-timestamp-types
+  '(active active-range inactive inactive-range)
+  "Types of timestamps to include in the database.")
 
-(defconst org-sql--default-pragma
-  '(:foreign_keys on)
-  "Pragma activated upon opening a new SQLite connection.")
+(eval-and-compile
+  (defconst org-sql--mql-schema
+    '((files
+       (desc . "Each row stores metadata for one tracked org file")
+       (columns
+        (:file_path :desc "path to the org file"
+                    :type text)
+        (:md5 :desc "md5 checksum of the org file"
+              :type text
+              :constraints (notnull))
+        (:size :desc "size of the org file in bytes"
+               :type integer
+               :constraints (notnull)))
+       (constraints
+        (primary :keys (:file_path))))
+
+
+      (headlines
+       (desc . "Each row stores one headline in a given org file and its metadata")
+       (columns
+        (:file_path :desc "path to file containing the headline"
+                    :type text)
+        (:headline_offset :desc "file offset of the headline's first character"
+                          :type integer)
+        (:headline_text :desc "raw text of the headline"
+                        :type text
+                        :constraints (notnull))
+        (:keyword :desc "the TODO state keyword"
+                  :type text)
+        (:effort :desc "the value of the Effort property in minutes"
+                 :type integer)
+        (:priority :desc "character value of the priority"
+                   :type text)
+        (:is_archived :desc "true if the headline has an archive tag"
+                      :type boolean
+                      :constraints (notnull))
+        (:is_commented :desc "true if the headline has a comment keyword"
+                       :type boolean
+                       :constraints (notnull))
+        (:content :desc "the headline contents"
+                  :type text))
+       (constraints
+        (primary :keys (:file_path :headline_offset))
+        (foreign :ref files
+                 :keys (:file_path)
+                 :parent-keys (:file_path)
+                 :on_delete cascade
+                 :on_update cascade)))
+
+      (headline_closures
+       (desc . "Each row stores the ancestor and depth of a headline relationship (eg closure table)")
+       (columns
+        (:file_path :desc "path to the file containing this headline"
+                    :type text)
+        (:headline_offset :desc "offset of this headline"
+                          :type integer)
+        (:parent_offset :desc "offset of this headline's parent"
+                        :type integer)
+        (:depth :desc "levels between this headline and the referred parent"
+                :type integer))
+       (constraints
+        (primary :keys (:file_path :headline_offset :parent_offset))
+        (foreign :ref headlines
+                 :keys (:file_path :headline_offset)
+                 :parent-keys (:file_path :headline_offset)
+                 :on_delete cascade
+                 :on_update cascade)
+        (foreign :ref headlines
+                 :keys (:file_path :parent_offset)
+                 :parent-keys (:file_path :headline_offset)
+                 :on_delete cascade
+                 :on_update cascade)))
+
+      (timestamps
+       (desc . "Each row stores one timestamp")
+       (columns
+        (:file_path :desc "path to the file containing this timestamp"
+                    :type text)
+        (:headline_offset :desc "offset of the headline containing this timestamp"
+                          :type integer
+                          :constraints (notnull))
+        (:timestamp_offset :desc "offset of this timestamp"
+                           :type integer)
+        (:raw_value :desc "text representation of this timestamp"
+                    :type text
+                    :constraints (notnull))
+        (:is_active :desc "true if the timestamp is active"
+                    :type boolean
+                    :constraints (notnull))
+        (:warning_type :desc "warning type of this timestamp"
+                       :type enum
+                       :allowed (all first))
+        (:warning_value :desc "warning shift of this timestamp"
+                        :type integer)
+        (:warning_unit :desc "warning unit of this timestamp "
+                       :type enum
+                       :allowed (hour day week month year))
+        (:repeat_type :desc "repeater type of this timestamp"
+                      :type enum
+                      :allowed (catch-up restart cumulate))
+        (:repeat_value :desc "repeater shift of this timestamp"
+                       :type integer)
+        (:repeat_unit :desc "repeater unit of this timestamp"
+                      :type enum
+                      :allowed (hour day week month year))
+        (:time_start :desc "the start time (or only time) of this timestamp"
+                     :type integer
+                     :constraints (notnull))
+        (:time_end :desc "the end time of this timestamp"
+                   :type integer)
+        (:start_is_long :desc "true if the start time is in long format"
+                        :type boolean
+                        :constraints (notnull))
+        (:end_is_long :desc "true if the end time is in long format"
+                      :type boolean))
+       (constraints
+        (primary :keys (:file_path :timestamp_offset))
+        (foreign :ref headlines
+                 :keys (:file_path :headline_offset)
+                 :parent-keys (:file_path :headline_offset)
+                 :on_delete cascade
+                 :on_update cascade)))
+
+      (planning_entries
+       (desc . "Each row stores the metadata for headline planning timestamps.")
+       (columns
+        (:file_path :desc "path to the file containing the entry"
+                    :type text)
+        (:headline_offset :desc "file offset of the headline with this tag"
+                          :type integer)
+        (:planning_type :desc "the type of this planning entry"
+                        :type enum
+                        :allowed (closed scheduled deadline))
+        (:timestamp_offset :desc "file offset of this entries timestamp"
+                           :type integer
+                           :constraints (notnull)))
+       (constraints
+        (primary :keys (:file_path :headline_offset :planning_type))
+        (foreign :ref timestamps
+                 :keys (:file_path :timestamp_offset)
+                 :parent-keys (:file_path :timestamp_offset)
+                 :on_delete cascade
+                 :on_update cascade)))
+
+      (file_tags
+       (desc . "Each row stores one tag at the file level")
+       (columns
+        (:file_path :desc "path to the file containing the tag"
+                    :type text)
+        (:tag :desc "the text value of this tag"
+              :type text))
+       (constraints
+        (primary :keys (:file_path :tag))
+        (foreign :ref files
+                 :keys (:file_path)
+                 :parent-keys (:file_path)
+                 :on_delete cascade
+                 :on_update cascade)))
+
+      (headline_tags
+       (desc . "Each row stores one tag")
+       (columns
+        (:file_path :desc "path to the file containing the tag"
+                    :type text)
+        (:headline_offset :desc "file offset of the headline with this tag"
+                          :type integer)
+        (:tag :desc "the text value of this tag"
+              :type text)
+        (:is_inherited :desc "true if this tag is from the ITAGS property"
+                       :type boolean
+                       :constraints (notnull)))
+       (constraints
+        (primary :keys (:file_path :headline_offset :tag :is_inherited))
+        (foreign :ref headlines
+                 :keys (:file_path :headline_offset)
+                 :parent-keys (:file_path :headline_offset)
+                 :on_delete cascade
+                 :on_update cascade)))
+
+      (properties
+       (desc . "Each row stores one property")
+       (columns
+        (:file_path :desc "path to the file containing this property"
+                    :type text)
+        (:property_offset :desc "file offset of this property in the org file"
+                          :type integer)
+        (:key_text :desc "this property's key"
+                   :type text
+                   :constraints (notnull))
+        (:val_text :desc "this property's value"
+                   :type text
+                   :constraints (notnull)))
+       (constraints
+        (primary :keys (:file_path :property_offset))
+        (foreign :ref files
+                 :keys (:file_path)
+                 :parent-keys (:file_path)
+                 :on_delete cascade
+                 :on_update cascade)))
+
+      (file_properties
+       (desc . "Each row stores a property at the file level")
+       (columns
+        (:file_path :desc "path to file containin the property"
+                    :type text)
+        (:property_offset :desc "file offset of this property in the org file"
+                          :type integer))
+       (constraints
+        (primary :keys (:file_path :property_offset))
+        (foreign :ref files
+                 :keys (:file_path)
+                 :parent-keys (:file_path)
+                 :on_delete cascade
+                 :on_update cascade)
+        (foreign :ref properties
+                 :keys (:file_path :property_offset)
+                 :parent-keys (:file_path :property_offset)
+                 :on_delete cascade
+                 :on_update cascade)))
+
+      (headline_properties
+       (desc . "Each row stores a property at the headline level")
+       (columns
+        (:file_path :desc "path to file containin the property"
+                    :type text)
+        (:property_offset :desc "file offset of this property in the org file"
+                          :type integer)
+        (:headline_offset :desc "file offset of the headline with this property"
+                          :type integer
+                          :constraints (notnull)))
+       (constraints
+        (primary :keys (:file_path :property_offset))
+        (foreign :ref headlines
+                 :keys (:file_path :headline_offset)
+                 :parent-keys (:file_path :headline_offset)
+                 :on_delete cascade
+                 :on_update cascade)))
+      
+      (clocks
+       (desc . "Each row stores one clock entry")
+       (columns
+        (:file_path :desc "path to the file containing this clock"
+                    :type text)
+        (:headline_offset :desc "offset of the headline with this clock"
+                          :type integer
+                          :constraints (notnull))
+        (:clock_offset :desc "file offset of this clock"
+                       :type integer)
+        (:time_start :desc "timestamp for the start of this clock"
+                     :type integer)
+        (:time_end :desc "timestamp for the end of this clock"
+                   :type integer)
+        (:clock_note :desc "the note entry beneath this clock"
+                     :type text))
+       (constraints
+        (primary :keys (:file_path :clock_offset))
+        (foreign :ref headlines
+                 :keys (:file_path :headline_offset)
+                 :parent-keys (:file_path :headline_offset)
+                 :on_delete cascade
+                 :on_update cascade)))
+
+      (logbook_entries
+       (desc . "Each row stores one logbook entry (except for clocks)")
+       (columns
+        (:file_path :desc "path to the file containing this entry"
+                    :type text)
+        (:headline_offset :desc "offset of the headline with this entry"
+                          :type integer
+                          :constraints (notnull))
+        (:entry_offset :desc "offset of this logbook entry"
+                       :type integer)
+        (:entry_type :desc "type of this entry (see `org-log-note-headlines')"
+                     :type text)
+        (:time_logged :desc "timestamp for when this entry was taken"
+                      :type integer)
+        (:header :desc "the first line of this entry (usually standardized)"
+                 :type text)
+        (:note :desc "the text of this entry underneath the header"
+               :type text))
+       (constraints
+        (primary :keys (:file_path :entry_offset))
+        (foreign :ref headlines
+                 :keys (:file_path :headline_offset)
+                 :parent-keys (:file_path :headline_offset)
+                 :on_delete cascade
+                 :on_update cascade)))
+
+      (state_changes
+       (desc . "Each row stores additional metadata for a state change logbook entry")
+       (columns
+        (:file_path :desc "path to the file containing this entry"
+                    :type text)
+        (:entry_offset :desc "offset of the logbook entry for this state change"
+                       :type integer)
+        (:state_old :desc "former todo state keyword"
+                    :type text
+                    :constraints (notnull))
+        (:state_new :desc "updated todo state keyword"
+                    :type text
+                    :constraints (notnull)))
+       (constraints
+        (primary :keys (:file_path :entry_offset))
+        (foreign :ref logbook_entries
+                 :keys (:file_path :entry_offset)
+                 :parent-keys (:file_path :entry_offset)
+                 :on_delete cascade
+                 :on_update cascade)))
+
+      (planning_changes
+       (desc . "Each row stores additional metadata for a planning change logbook entry")
+       (columns
+        (:file_path :desc "path to the file containing this entry"
+                    :type text)
+        (:entry_offset :desc "offset of the logbook entry for this planning change"
+                       :type integer)
+        (:timestamp_offset :desc "offset of the former timestamp"
+                           :type integer
+                           :constraints (notnull)))
+       (constraints
+        (primary :keys (:file_path :entry_offset))
+        (foreign :ref timestamps
+                 :keys (:file_path :timestamp_offset)
+                 :parent-keys (:file_path :timestamp_offset)
+                 :on_delete cascade
+                 :on_update cascade)
+        (foreign :ref logbook_entries
+                 :keys (:file_path :entry_offset)
+                 :parent-keys (:file_path :entry_offset)
+                 :on_delete cascade
+                 :on_update cascade)))
+
+      (links
+       (desc . "Each rows stores one link")
+       (columns
+        (:file_path :desc "path to the file containing this link"
+                    :type text)
+        (:headline_offset :desc "offset of the headline with this link"
+                          :type integer
+                          :constraints (notnull))
+        (:link_offset :desc "file offset of this link"
+                      :type integer)
+        (:link_path :desc "target of this link (eg url, file path, etc)"
+                    :type text
+                    :constraints (notnull))
+        (:link_text :desc "text of this link"
+                    :type text)
+        (:link_type :desc "type of this link (eg http, mu4e, file, etc)"
+                    :type text
+                    :constraints (notnull)))
+       (constraints
+        (primary :keys (:file_path :link_offset))
+        (foreign :ref headlines
+                 :keys (:file_path :headline_offset)
+                 :parent-keys (:file_path :headline_offset)
+                 :on_delete cascade
+                 :on_update cascade))))
+    "Org-SQL database schema represented in internal meta query
+    language (MQL, basically a giant list)"))
+
+;; TODO what about the windows users?
+(defconst org-sql--sqlite-exe "/usr/bin/sqlite3"
+  "The path to the sqlite client command.")
+
+(defconst org-sql--psql-exe "/usr/bin/psql"
+  "The path to the postgres client command.")
+
+(defconst org-sql--postgres-createdb-exe "/usr/bin/createdb"
+  "The path to the postgres 'create database' command.")
+
+(defconst org-sql--postgres-dropdb-exe "/usr/bin/dropdb"
+  "The path to the postgres 'drop database' command.")
+
+;;;
+;;; CUSTOMIZATION OPTIONS
+;;;
 
 (defgroup org-sql nil
   "Org mode SQL backend options."
   :tag "Org SQL"
   :group 'org)
-  
-(defcustom org-sql-use-tag-inheritance nil
-  "Use tag inheritance when constructing sql databases for org.
-Mirrors behavior of `org-use-tag-inheritance'."
-  :type 'boolean
-  :group 'org-sql)
 
-(defcustom org-sql-sqlite-path (expand-file-name "org.db" org-directory)
-  "Path for the sqlite database where org data will be stored."
-  :type 'file
+;; TODO add sqlite pragma (synchronous and journalmode)
+;; TODO add postgres transaction options
+(defcustom org-sql-db-config
+  '(sqlite :path (expand-file-name "org-sql.db" org-directory))
+  "Configuration for the org-sql database.
+
+This is a list like (DB-TYPE OPTION-PLIST). The valid keys and
+values in OPTION-PLIST depend on the DB-TYPE. Note that all
+values in the OPTION-PLIST must be strings.
+
+The following symbols are valid for DB-TYPE:
+- `sqlite' (requires the `sqlite3' command)
+- `postgres' (requires the `psql', `createdb', and `dropdb'
+  commands)
+
+For 'sqlite', the following options are in OPTION-PLIST:
+- `:path' (required): the path on disk to use for the database
+  file
+
+For 'postgres', the following options are in OPTION-PLIST:
+- `:database' (required): the name of the database to use
+- `:hostname': the hostname for the database connection
+- `:port': the port for the database connection
+- `:username': the username for the database connection
+- `:password': the password for the database connection (NOTE:
+  since setting this option will store the password in plain
+  text, consider using a `.pgpass' file\\)"
+  ;; TODO add type
   :group 'org-sql)
 
 (defcustom org-sql-files nil
@@ -96,41 +518,34 @@ directly are added. Only files ending in .org or .org_archive are
 considered. See function `org-sql-files'."
   :type '(repeat :tag "List of files and directories" file)
   :group 'org-sql)
-  
-(defcustom org-sql-pragma
-  '(:synchronous off :journal_mode memory)
-  "User-defined pragmas used when opening a new SQLite connection.
-These cannot override pragma in `org-sql--default-pragma'."
-  :type '(plist :key-type symbol :value-type string)
-  :group 'org-sql)
 
-(defcustom org-sql-buffer "*SQL: Org*"
-  "Name of the SQLi process buffer connected to the database."
-  :type 'string
-  :group 'org-sql)
-
-(defcustom org-sql-ignored-properties nil
-  "List of properties to ignore when building the properties table.
-To ignore all set to 'all' instead of a list of strings."
+(defcustom org-sql-excluded-properties nil
+  "List of properties to exclude from the database.
+To exclude all set to 'all' instead of a list of strings."
   :type '(choice
           (const "Ignore All" all)
           (repeat :tag "List of properties to ignore" string))
   :group 'org-sql)
 
-(defcustom org-sql-ignored-tags nil
-  "List of tags to ignore when building the tags table.
-To ignore all set to 'all' instead of a list of strings."
+(defcustom org-sql-exclude-inherited-tags nil
+  "If t don't include tags in the ARCHIVE_ITAGS property in the database."
+  :type 'boolean
+  :group 'org-sql)
+
+(defcustom org-sql-excluded-tags nil
+  "List of tags to exclude when building the tags table.
+To exclude all set to 'all' instead of a list of strings."
   :type '(choice
           (const "Ignore All" all)
           (repeat :tag "List of tags to ignore" string))
   :group 'org-sql)
 
-(defcustom org-sql-ignored-link-types nil
-  "List of link types to ignore when building the links table.
+(defcustom org-sql-excluded-link-types nil
+  "List of link types to exclude when building the links table.
 Each member should be a string and one of `org-link-types' or
 \"file\", \"coderef\", \"custom-id\", \"fuzzy\", or \"id\". See org-element
 API documentation or`org-element-link-parser' for details.
-To ignore all set to 'all' instead of a list of strings."
+To exclude all set to 'all' instead of a list of strings."
   :type '(choice
           (set :tag "List of types to ignore"
                (const :tag "File paths" "file")
@@ -142,22 +557,20 @@ To ignore all set to 'all' instead of a list of strings."
           (const "Ignore all" all))
   :group 'org-sql)
 
-(defcustom org-sql-included-headline-planning-types
-  '(:deadline :scheduled :closed)
-  "List of headline planning timestamps to include in the database.
-Must be symbols that are one of ':deadline', ':scheduled', or
-':closed'. To include none set to nil."
+(defcustom org-sql-excluded-headline-planning-types nil
+  "List of headline planning timestamps to exclude in the database.
+List members can be ':deadline', ':scheduled', or ':closed'. To
+exclude none set to nil."
   :type '(set :tag "List of types to include"
               (const :tag "Deadline Timestamps" :deadline)
               (const :tag "Scheduled Timestamps" :scheduled)
               (const :tag "Closed Timestamps" :closed))
   :group 'org-sql)
 
-(defcustom org-sql-included-contents-timestamp-types
-  '(active active-range inactive inactive-range)
-  "List of timestamp types to include from headline content sections.
-List members are symbols of any 'active', 'active-range', 'inactive',
-or 'inactive-range'. To include none set to nil."
+(defcustom org-sql-excluded-contents-timestamp-types nil
+  "List of timestamp types to exclude from headline content sections.
+List members can be the symbols 'active', 'active-range', 'inactive',
+or 'inactive-range'. To exclude none set to nil."
   :type '(set :tag "List of types to include"
               (const :tag "Active Timestamps" active)
               (const :tag "Active Timestamp Ranges" active-range)
@@ -165,14 +578,13 @@ or 'inactive-range'. To include none set to nil."
               (const :tag "Inactive Timestamp Ranges" inactive-range))
   :group 'org-sql)
 
-(defcustom org-sql-included-logbook-types
-  '(done state note reschedule delschedule redeadline deldeadline
-         refile)
-  "List of logbook entry types to include in the database.
+(defcustom org-sql-excluded-logbook-types nil
+  "List of logbook entry types to exclude from the database.
 List members are any of the keys from `org-log-note-headings' with the
 exception of 'clock-out' as these are treated as clock-notes (see
-`org-sql-store-clock-notes'). To include none set to nil."
+`org-sql-exclude-clock-notes'). To include none set to nil."
   :type '(set :tag "List of types to include"
+              (const :tag "Clocks" clock)
               (const :tag "Closing notes" done)
               (const :tag "State changes" state)
               (const :tag "Notes taken" note)
@@ -183,12 +595,7 @@ exception of 'clock-out' as these are treated as clock-notes (see
               (const :tag "Refiled tasks" refile))
   :group 'org-sql)
 
-(defcustom org-sql-store-clocks t
-  "Set to t to store clocks in the database."
-  :type 'boolean
-  :group 'org-sql)
-
-(defcustom org-sql-store-clock-notes t
+(defcustom org-sql-exclude-clock-notes nil
   "Set to t to store clock notes in the database.
 Setting `org-sql-store-clocks' to nil will cause this variable to be
 ignored."
@@ -197,447 +604,595 @@ ignored."
 
 (defcustom org-sql-debug nil
   "Set to t to enable high-level debugging of SQL transactions."
-  :type 'boolean)
+  :type 'boolean
+  :group 'org-sql)
 
-;; TODO add a debug buffer
-;; (defconst org-sql-debug-buffer "*SQL: Org-Debug*"
-;;   "Name of the SQLi buffer connected to the database.")
+;;;
+;;; STATELESS FUNCTIONS
+;;;
 
-;;; helper functions
 
-(defun org-sql--strip-string (str)
-  "Remove text properties and trim STR and return the result."
-  (when str (string-trim (substring-no-properties str))))
-  
-(defun org-sql--alist-put (alist prop value)
-  "For given ALIST, append VALUE to the current values in prop.
-Current values (that is the cdr of each key) is assumed to be a list.
-If PROP does not exist, create it. Return the new alist. If FRONT is
-t, add to the front of current values list instead of the back."
-  (let* ((cur-cell (assoc prop alist))
-         (cur-values (cdr cur-cell)))
-      (cond
-       (cur-values
-        (let ((new-cdr (cons value cur-values)))
-        ;; (let ((new-cdr (if front
-                           ;; `(,value ,@cur-values)
-                         ;; `(,@cur-values ,value))))
-          (setcdr cur-cell new-cdr) alist))
-       (cur-cell
-        (setcdr cur-cell `(,value)) alist)
-       (alist
-        (append alist `((,prop ,value))))
-       (t
-        `((,prop ,value))))))
-        
-(defmacro org-sql--with-advice (adlist &rest body)
-  "Execute BODY with temporary advice in ADLIST.
+;;; compile/macro checking
 
-Each element of ADLIST should be a list of the form
-  (SYMBOL WHERE FUNCTION [PROPS])
-suitable for passing to `advice-add'.  The BODY is wrapped in an
-`unwind-protect' form, so the advice will be removed even in the
-event of an error or nonlocal exit."
-  (declare (debug ((&rest (&rest form)) body)) (indent 1))
-  `(progn
-     ,@(--map (cons #'advice-add it) adlist)
-     (unwind-protect (progn ,@body)
-       ,@(--map `(advice-remove ,(car it) ,(nth 2 it)) adlist))))
+;; case selection statements for sql mode and type
 
-(defun org-sql--plist-get-keys (plist)
-  "Return all the keys in PLIST."
-  (-slice plist 0 nil 2))
+(defun org-sql--sets-equal (list1 list2 &rest args)
+  "Return t if LIST1 and LIST2 are equal via set logic.
+Either list may contain repeats, in which case nil is returned.
+ARGS is a list of additional arguments to pass to `cl-subsetp'."
+  (and (equal (length list1) (length list2))
+       (apply #'cl-subsetp list1 list2 args)
+       (apply #'cl-subsetp list2 list1 args)))
 
-(defun org-sql--plist-get-vals (plist)
-  "Return all the values in PLIST."
-  (-slice plist 1 nil 2))
+(defmacro org-sql--case-type (type &rest alist-forms)
+  "Execute one of ALIST-FORMS depending on TYPE.
+TYPE must be one of 'boolean', 'text', 'enum', or 'integer'."
+  (declare (indent 1))
+  (-let (((keys &as &alist 'boolean 'text 'enum 'integer) alist-forms))
+    (unless (-none? #'null keys)
+      (error "Must provide form for all types"))
+    `(cl-case ,type
+       (boolean ,@boolean)
+       (text ,@text)
+       (enum ,@enum)
+       (integer ,@integer)
+       (t (error "Invalid type: %s" ,type)))))
+
+(defmacro org-sql--case-mode (mode &rest alist-forms)
+  "Execute one of ALIST-FORMS depending on MODE.
+TYPE must be one of 'sqlite' or 'postgres'."
+  (declare (indent 1))
+  (-let (((keys &as &alist 'sqlite 'postgres) alist-forms))
+    (unless (-none? #'null keys)
+      (error "Must provide form for all modes"))
+    `(cl-case ,mode
+       (postgres ,@postgres)
+       (sqlite ,@sqlite)
+       (t (error "Invalid mode: %s" ,mode)))))
+
+;; ensure integrity of the metaschema
+
+(eval-when-compile
+  (defun org-sql--mql-schema-has-valid-keys (tbl-schema)
+    "Verify that TBL-SCHEMA has valid keys in its table constraints."
+    (-let* (((tbl-name . (&alist 'constraints 'columns)) tbl-schema)
+            (column-names (-map #'car columns)))
+      (cl-flet
+          ((get-keys
+            (constraint)
+            (-let (((type . (&plist :keys)) constraint))
+              (cons type keys)))
+           (test-keys
+            (type keys)
+            (-some->> (-difference keys column-names)
+              (-map #'symbol-name)
+              (s-join ", ")
+              (error "Mismatched %s keys in table '%s': %s" type tbl-name))))
+        (--> (--filter (memq (car it) '(primary foreign)) constraints)
+             (-map #'get-keys it)
+             (--each it (test-keys (car it) (cdr it)))))))
+
+  (defun org-sql--mql-schema-has-valid-parent-keys (tbl-schema)
+    "Verify that TBL-SCHEMA has valid keys in its table foreign constraints."
+    (cl-flet
+        ((is-valid
+          (foreign-meta tbl-name)
+          (-let* (((&plist :parent-keys :ref) foreign-meta)
+                  (parent-meta (alist-get ref org-sql--mql-schema))
+                  (parent-columns (-map #'car (alist-get 'columns parent-meta)))
+                  (parent-primary (--> (alist-get 'constraints parent-meta)
+                                       (alist-get 'primary it)
+                                       (plist-get it :keys))))
+            ;; any parent keys must have corresponding columns in the referred
+            ;; table
+            (-some->> (-difference parent-keys parent-columns)
+              (-map #'symbol-name)
+              (s-join ", ")
+              (error "Mismatched foreign keys between %s and %s: %s" tbl-name ref))
+            ;; This isn't strictly a requirement (but still good practice); make
+            ;; sure the foreign key refer to the primary key in the parent table
+            (when (or (-difference parent-keys parent-primary)
+                      (-difference parent-primary parent-keys))
+              (error "Mismatched foreign and primary keys between %s and %s" tbl-name ref)))))
+      (-let* (((tbl-name . meta) tbl-schema)
+              (foreign (->> (alist-get 'constraints meta)
+                            (--filter (eq (car it) 'foreign))
+                            (-map #'cdr))))
+        (--each foreign (is-valid it tbl-name)))))
+
+  (-each org-sql--mql-schema #'org-sql--mql-schema-has-valid-keys)
+  (-each org-sql--mql-schema #'org-sql--mql-schema-has-valid-parent-keys))
+
+;; ensure MQL constructors are given the right input
+
+(defun org-sql--mql-check-get-schema-keys (tbl-name)
+  "Return a list of columns for TBL-NAME.
+The columns are retrieved from `org-sql--mql-schema'."
+  (let ((valid-keys (->> org-sql--mql-schema
+                         (alist-get tbl-name)
+                         (alist-get 'columns)
+                         (-map #'car))))
+    (unless valid-keys (error "Invalid table name: %s" tbl-name))
+    valid-keys))
+
+(defun org-sql--mql-check-columns-all (tbl-name plist)
+  "Test if keys in PLIST are valid column names for TBL-NAME.
+All column keys must be in PLIST."
+  (declare (indent 2))
+  (let ((valid-keys (org-sql--mql-check-get-schema-keys tbl-name))
+        (input-keys (->> (-partition 2 plist)
+                         (-map #'car))))
+    (-some->> (-difference valid-keys input-keys)
+      (error "Keys not given for table %s: %s" tbl-name))
+    (-some->> (-difference input-keys valid-keys)
+      (error "Keys not valid for table %s: %s" tbl-name))))
+
+(defun org-sql--mql-check-columns-contains (tbl-name plist)
+  "Test if keys in PLIST are valid column names for TBL-NAME.
+Only some of the column keys must be in PLIST."
+  (declare (indent 2))
+  (let ((valid-keys (org-sql--mql-check-get-schema-keys tbl-name))
+        (input-keys (->> (-partition 2 plist)
+                         (-map #'car))))
+    (-some->> (-difference input-keys valid-keys)
+      (error "Keys not valid for table %s: %s" tbl-name))))
+
+;;; data constructors
+
+;; meta query language (MQL)
+
+(defmacro org-sql--mql-insert (tbl-name &rest plist)
+  "Return an MQL-insert list for TBL-NAME.
+PLIST is a property list of the columns and values to insert."
+  (declare (indent 1))
+  (org-sql--mql-check-columns-all tbl-name plist)
+  `(list ',tbl-name ,@plist))
+
+(defmacro org-sql--add-mql-insert (acc tbl-name &rest plist)
+  "Add a new MQL-insert list for TBL-NAME to ACC.
+PLIST is a property list of the columns and values to insert."
+  (declare (indent 2))
+  `(cons (org-sql--mql-insert ,tbl-name ,@plist) ,acc))
+
+(defmacro org-sql--mql-update (tbl-name set where)
+  "Return an MQL-update list for TBL-NAME.
+SET is a plist for the updated values of columns and WHERE is a plist of
+columns that must be equal to the values in the plist in order for the update
+to be applied."
+  (declare (indent 1))
+  (org-sql--mql-check-columns-contains tbl-name set)
+  (org-sql--mql-check-columns-contains tbl-name where)
+  `(list ',tbl-name
+         (list 'set ,@set)
+         (list 'where ,@where)))
+
+(defmacro org-sql--mql-delete (tbl-name where)
+  "Return an MQL-delete list for TBL-NAME.
+WHERE is a plist of columns that must be equal to the values in
+the plist in order for the delete to be applied."
+  (org-sql--mql-check-columns-contains tbl-name where)
+  `(list ',tbl-name
+         (list 'where ,@where)))
+
+;; TODO I forgot select
+
+;; external state
+
+(defun org-sql--to-fstate (file-path hash attributes todo-keywords tree)
+  "Return a plist representing the state of an org buffer.
+The plist will include:
+- `:file-path': the path to this org file on disk (given by
+  FILE-PATH)
+- `:md5': the hash of this org file (given by HASH)
+- `:attributes': the ATTRIBUTES list for the file as returned via
+  `file-attributes'
+- `:top-section': the org-element TREE representation of this
+  org-file's top section before the first headline
+- `:headline': a list of org-element TREE headlines in this org
+  file
+- `:log-note-matcher': a list of log-note-matchers for this org
+  file as returned by
+  `org-sql--build-log-note-heading-matchers' (which depends on
+  TODO-KEYWORDS)"
+  (let* ((children (org-ml-get-children tree))
+         (top-section (-some->> (assoc 'section children)
+                        (org-ml-get-children))))
+    (list :file-path file-path
+          :md5 hash
+          :attributes attributes
+          :top-section top-section
+          :headlines (if top-section (cdr children) children)
+          :log-note-matcher (org-sql--build-log-note-heading-matchers
+                             org-log-note-headings todo-keywords))))
+
+(defun org-sql--to-fmeta (disk-path db-path hash)
+  "Return a plist representing org file status.
+DISK-PATH is the path to the org file on disk, DB-PATH is the
+path on disk recorded in the database for this org file, and HASH
+is the md5 of this org file."
+  (list :disk-path disk-path :db-path db-path :hash hash))
 
 ;;; SQL string parsing functions
 
-(defun org-sql--to-plist (out cols)
+(defun org-sql--parse-output-to-plist (cols out)
   "Parse SQL output string OUT to an plist representing the data.
 COLS are the column names as symbols used to obtain OUT."
   (unless (equal out "")
-    (-->
-     out
-     (string-trim it)
-     (split-string it "\n")
-     (mapcar (lambda (s) (split-string s "|")) it)
-     (mapcar (lambda (s) (-interleave cols s)) it))))
+    (->> (s-trim out)
+         (s-split "\n")
+         (--map (s-split "|" it))
+         (--map (-interleave cols it)))))
 
-;;; SQL formatting helper functions
+;;; MQL -> SQL string formatting functions
 
-(defun org-sql--escape-text (txt)
-  "Escape and quote TXT for insertion into SQL database.
-This assumes the insertion command will be run on a shell where the
-sql command string is in double quotes."
-  (->> txt
-       (replace-regexp-in-string "'" "''")
-       (replace-regexp-in-string "\n" "'||char(10)||'")
-       (format "'%s'")))
+;; formatting function tree
 
-(defun org-sql--to-string (entry)
-  "Convert ENTRY to a string suitable for insertion into SQLite db.
-Converts numbers to strings, flanks strings with '\"', and converts
-any other symbols to their symbol name."
-  (cond ((null entry) "NULL")
-        ((stringp entry) (org-sql--escape-text entry))
-        ((numberp entry) (number-to-string entry))
-        ((keywordp entry) (org-sql--kw-to-colname entry))
-        ((symbolp entry) (-> entry symbol-name org-sql--escape-text))
-        (t (error "Cannot convert to string: %s" entry))))
+(defun org-sql--compile-mql-format-function (mode type)
+  "Return SQL value formatting function.
+The returned function will depend on the MODE and TYPE."
+  (cl-flet
+      ((quote-string
+        (s)
+        (format "'%s'" s))
+       (escape-string
+        (newline s)
+        (let ((newline* (format "'||%s||'" newline)))
+          (->> (s-replace-regexp "'" "''" s)
+               (s-replace-regexp "\n" newline*)))))
+    ;; TODO this could be way more elegant (build the lambda with forms)
+    (let ((formatter
+           (org-sql--case-type type
+             (boolean
+              (org-sql--case-mode mode
+                (postgres (lambda (b) (if (= b 1) "TRUE" "FALSE")))
+                (sqlite (lambda (b) (if (= b 1) "1" "0")))))
+             (enum (lambda (e) (quote-string (symbol-name e))))
+             (integer #'number-to-string)
+             (text
+              (org-sql--case-mode mode
+                (postgres
+                 (lambda (s)
+                   (quote-string (escape-string "chr(10)" s))))
+                (sqlite
+                 (lambda (s)
+                   (quote-string (escape-string "char(10)" s)))))))))
+      (lambda (s) (if s (funcall formatter s) "NULL")))))
 
-;; TODO this name is too specific
-;; TODO this now seems redundant
-(defun org-sql--kw-to-colname (kw)
-  "Return string representation of KW for column in sql database."
-  (if (keywordp kw) (--> kw (symbol-name it) (substring it 1))
-    (error "Not a keyword: %s" kw)))
+(defun org-sql--compile-mql-schema-formatter-alist (mode mql-schema)
+  "Return an alist of formatting functions for MQL-SCHEMA.
+MODE is the SQL mode. The alist will mirror MSL schema except that the
+car for each column will be a formatting function."
+  (cl-flet
+      ((get-type-function
+        (mql-column)
+        (-let* (((name . (&plist :type)) mql-column))
+          (cons name (org-sql--compile-mql-format-function mode type)))))
+    (-let* (((tbl-name . (&alist 'columns)) mql-schema))
+      (cons tbl-name (-map #'get-type-function columns)))))
 
-(defun org-sql--plist-concat (plist &optional sep)
-  "Concatenate a PLIST to string to be used in a SQL statement.
-Returns a string formatted like 'prop1 = value1 SEP prop2 = value2'
-from a plist like '(:prop1 value1 :prop2 value2)."
-  (let ((sep (or sep ","))
-        (keys (->> plist
-                   org-sql--plist-get-keys
-                   (mapcar #'org-sql--kw-to-colname)))
-        (vals (->> plist
-                   org-sql--plist-get-vals
-                   (mapcar #'org-sql--to-string))))
-    (-some-->
-     (--zip-with (format "%s=%s" it other) keys vals)
-     (string-join it sep))))
+;; helper functions
 
-;;; SQL command formatting functions
+(defun org-sql--format-mql-plist (formatter-alist sep plist)
+  "Format a PLIST to a SQL-compliant string.
+FORMATTER-ALIST is an alist of formatting functions matching the keys
+in PLIST (whose keys in turn should match columns in the schema).
+The keys and values will be formatted like \"key=val\" and
+separated by SEP."
+  (let ((keys (->> (-slice plist 0 nil 2)
+                   (-map #'org-sql--format-mql-column-name)))
+        (vals (->> (-partition 2 plist)
+                   (--map (funcall (alist-get (car it) formatter-alist) (cadr it))))))
+    (-some->> (--zip-with (format "%s=%s" it other) keys vals)
+      (s-join sep))))
 
-(defun org-sql--fmt-insert (tbl-name tbl-data)
-  "Format SQL insert command from TBL-NAME and TBL-DATA."
-  (let ((col-names (-->
-                    tbl-data
-                    (org-sql--plist-get-keys it)
-                    (mapcar #'org-sql--kw-to-colname it)
-                    (string-join it ",")))
-        (col-values (-->
-                     tbl-data
-                     (org-sql--plist-get-vals it)
-                     (mapcar #'org-sql--to-string it)
-                     (string-join it ","))))
-    (format "insert into %s (%s) values (%s);" (symbol-name tbl-name)
-            col-names col-values)))
+(defun org-sql--format-mql-column-name (column-name)
+  "Return SQL string representation of COLUMN-NAME."
+  (if (not (keywordp column-name)) (error "Not a keyword: %s" column-name)
+    (s-chop-prefix ":" (symbol-name column-name))))
 
-(defun org-sql--fmt-update (tbl-name update)
-  "Format SQL update command from TBL-NAME and UPDATE.
-UPDATE is a list of plists where each plist represents one row of data
-where the properties are the column names."
-  (let ((upd-str (->> update car org-sql--plist-concat))
-        (conds-str (--> update (cdr it) (org-sql--plist-concat it " and "))))
-    (format "update %s set %s where %s;" (symbol-name tbl-name)
-            upd-str conds-str)))
+;; create table
 
-(defun org-sql--fmt-delete (tbl-name conds &optional delete-all)
-  "Format SQL update command from TBL-NAME and CONDS.
-To delete everything in TBL-NAME, supply nil for CONDS and set
-DELETE-ALL to t (the latter is a safety mechanism as this could be
-very destructive)."
-  (let ((tbl-name-str (symbol-name tbl-name)))
-    (cond
-     (conds
-      (--> conds
-           (org-sql--plist-concat it " and ")
-           (format "delete from %s where %s;" tbl-name-str it)))
-     (delete-all
-      (format "delete from %s;" tbl-name-str)))))
+(defun org-sql--format-mql-schema-enum-types (mql-schema)
+  "Return a series of CREATE TYPE statements for MQL-SCHEMA.
+The SQL statements will create all enum types found in
+MQL-SCHEMA."
+  (cl-labels
+      ((format-column
+        (table-name mql-column)
+        (-let* (((column-name . (&plist :type :allowed)) mql-column)
+                (column-name* (org-sql--format-mql-column-name column-name)))
+          (when (and (eq type 'enum) allowed)
+            (->> (--map (format "'%s'" it) allowed)
+                 (s-join ",")
+                 (format "CREATE TYPE enum_%s_%s AS ENUM (%s);" table-name column-name*)))))
+       (format-table
+        (mql-table)
+        (-let (((table-name . (&alist 'columns)) mql-table))
+          (-non-nil (--map (format-column table-name it) columns)))))
+    (-mapcat #'format-table mql-schema)))
 
-(defun org-sql--fmt-trans (sql-str)
-  "Format SQL transactions string.
-SQL-STR is a list of individual SQL commands to be included in the
-transaction."
-  (-some->> sql-str
-            (-flatten)
-            (reverse)
-            (string-join)
-            (format "begin transaction; %s commit;")
-            ;; turn on deferred keys for all transactions
-            (concat "pragma defer_foreign_keys=on;")))
+(defun org-sql--format-mql-schema-column-constraints (mql-column-constraints)
+  "Return formatted column constraints for MQL-COLUMN-CONSTRAINTS."
+  (cl-flet
+      ((format-constraint
+        (constraint)
+        (pcase constraint
+          ('notnull "NOT NULL")
+          ('unique "UNIQUE")
+          ;; TODO add CHECK?
+          ;; TODO add PRIMARY KEY?
+          (e (error "Unknown constraint %s" e)))))
+    (->> mql-column-constraints
+         (-map #'format-constraint)
+         (s-join " "))))
 
-(defun org-sql--fmt-multi (tbl fun)
-  "Format multiple SQL command strings.
-TBL is tree structure containing the data to insert and
-FUN is a function used to format the data in TBL."
-  (--map (funcall fun (car tbl) it) (cdr tbl)))
+(defun org-sql--format-mql-schema-type (config tbl-name mql-column)
+  "Return SQL string for the type of MQL-COLUMN.
+CONFIG is the `org-sql-db-config' list and TBL-NAME is the name
+of the table."
+  (-let* (((column-name . (&plist :type)) mql-column)
+          (column-name* (org-sql--format-mql-column-name column-name)))
+    (org-sql--case-mode (car config)
+      (sqlite
+       (org-sql--case-type type
+         (enum "TEXT")
+         (text "TEXT")
+         (integer "INTEGER")
+         (boolean "INTEGER")))
+      (postgres
+       (org-sql--case-type type
+         (enum (format "enum_%s_%s" tbl-name column-name*))
+         (text "TEXT")
+         (integer "INTEGER")
+         (boolean "BOOLEAN"))))))
 
-(defun org-sql--fmt-inserts (tbl)
-  "Format data in TBL as SQL insert commands.
-Returns a list of formatted strings."
-  (org-sql--fmt-multi tbl #'org-sql--fmt-insert))
+(defun org-sql--format-mql-schema-columns (config tbl-name mql-columns)
+  "Return SQL string for MQL-COLUMNS.
+CONFIG is the `org-sql-db-config' list and TBL-NAME is the name
+of the table."
+  (cl-flet
+      ((format-column
+        (mql-column)
+        (-let* (((name . (&plist :constraints)) mql-column)
+                (name* (org-sql--format-mql-column-name name))
+                (type* (org-sql--format-mql-schema-type config tbl-name mql-column))
+                (column-str (format "%s %s" name* type*)))
+          (if (not constraints) column-str
+            (->> (org-sql--format-mql-schema-column-constraints constraints)
+                 (format "%s %s" column-str))))))
+    (-map #'format-column mql-columns)))
 
-(defun org-sql--fmt-updates (tbl)
-  "Format data in TBL as SQL update commands.
-Returns a list of formatted strings."
-  (org-sql--fmt-multi tbl #'org-sql--fmt-update))
+(defun org-sql--format-mql-schema-table-constraints (mql-tbl-constraints)
+  "Return SQL string for MQL-TBL-CONSTRAINTS."
+  (cl-labels
+      ((format-primary
+        (keyvals)
+        (-let* (((&plist :keys) keyvals))
+          (->> (-map #'org-sql--format-mql-column-name keys)
+               (s-join ",")
+               (format "PRIMARY KEY (%s)"))))
+       (format-foreign
+        (keyvals)
+        (-let* (((&plist :ref :keys :parent-keys :on_delete :on_update) keyvals)
+                (keys* (->> keys (-map #'org-sql--format-mql-column-name) (s-join ",")))
+                (parent-keys* (->> parent-keys
+                                   (-map #'org-sql--format-mql-column-name)
+                                   (s-join ",")))
+                (foreign-str (format "FOREIGN KEY (%s) REFERENCES %s (%s)"
+                                     keys* ref parent-keys*))
+                (on-delete* (-some->> on_delete
+                              (symbol-name)
+                              (upcase)
+                              (format "ON DELETE %s")))
+                (on-update* (-some->> on_update
+                              (symbol-name)
+                              (upcase)
+                              (format "ON UPDATE %s"))))
+          (->> (list foreign-str on-delete* on-update*)
+               (-non-nil)
+               (s-join " "))))
+       (format-constraint
+        (mql-constraint)
+        (pcase mql-constraint
+          (`(primary . ,keyvals) (format-primary keyvals))
+          (`(foreign . ,keyvals) (format-foreign keyvals)))))
+    (-map #'format-constraint mql-tbl-constraints)))
 
-(defun org-sql--fmt-deletes (tbl)
-  "Format data in TBL as SQL delete commands.
-Returns a list of formatted strings."
-  (org-sql--fmt-multi tbl #'org-sql--fmt-delete))
+(defun org-sql--format-mql-schema-table (config mql-table)
+  "Return CREATE TABLE (...) SQL string for MQL-TABLE.
+CONFIG is the `org-sql-db-config' list."
+  (-let* (((tbl-name . (&alist 'columns 'constraints)) mql-table))
+    (->> (org-sql--format-mql-schema-table-constraints constraints)
+         (append (org-sql--format-mql-schema-columns config tbl-name columns))
+         (s-join ",")
+         (format "CREATE TABLE IF NOT EXISTS %s (%s);" tbl-name))))
 
-(defun org-sql--fmt-pragma (plist)
-  "Create a SQL statement for setting pragmas in PLIST.
-PLIST contains the pragmas as the properties and their intended
-values as the property values."
-  (let ((pragmas (->> plist
-                      org-sql--plist-get-keys
-                      (mapcar #'org-sql--kw-to-colname))))
-    (->> plist
-         org-sql--plist-get-vals
-         (--zip-with (format "PRAGMA %s=%s;" it other) pragmas)
-         string-join)))
-  
-;;; SQL command abstractions
+(defun org-sql--format-mql-schema (config mql-schema)
+  "Return schema SQL string for MQL-SCHEMA.
+CONFIG is the `org-sql-db-config' list."
+  (let ((create-tables (->> mql-schema
+                            (--map (org-sql--format-mql-schema-table config it))
+                            (s-join ""))))
+    (org-sql--case-mode (car config)
+      (postgres
+       (let ((create-types (->> (org-sql--format-mql-schema-enum-types mql-schema)
+                                (s-join ""))))
+         (concat create-types create-tables)))
+      (sqlite
+       create-tables))))
 
-(defun org-sql-cmd-open-connection ()
-  "Open a new SQL connection to `org-sql-sqlite-path'.
-This also sets the pragma according to `org-sql--default-pragma'
-and `org-sql-pragma'. The process buffer is named `org-sql-buffer'."
-  (unless (get-buffer-process org-sql-buffer)
-    (org-sql--with-advice
-        ((#'sql-get-login :override #'ignore)
-         (#'pop-to-buffer :override #'ignore))
-      (let ((sql-database org-sql-sqlite-path))
-        (sql-sqlite org-sql-buffer)
-        (org-sql--cmd-set-pragma org-sql-pragma)))))
+;; insert
 
-(defun org-sql-cmd-kill-connection ()
-  "Close the SQL connections to `org-sql-sqlite-path' if it exists."
-  (let ((proc (get-buffer-process org-sql-buffer)))
-    (when proc
-      (set-process-query-on-exit-flag proc nil)
-      (kill-process proc)
-      (while (eq 'run (process-status proc))
-        (sleep-for 0 1))))
-  (when (get-buffer org-sql-buffer)
-    (kill-buffer org-sql-buffer)))
+(defun org-sql--format-mql-insert (formatter-alist mql-insert)
+  "Return SQL string for MQL-INSERT.
+FORMATTER-ALIST is an alist of functions given by
+`org-sql--compile-mql-format-function'."
+  (-let* (((tbl-name . keyvals) mql-insert)
+          (formatter-list (alist-get tbl-name formatter-alist))
+          (columns (->> (-slice keyvals 0 nil 2)
+                        (-map #'org-sql--format-mql-column-name)
+                        (s-join ",")))
+          (values (->> (-partition 2 keyvals)
+                       (--map (funcall (alist-get (car it) formatter-list) (cadr it)))
+                       (s-join ","))))
+    (format "INSERT INTO %s (%s) VALUES (%s);" tbl-name columns values)))
 
-(defun org-sql--pragma-merge-default (&optional pragma)
-  "Add PRAGMA to `org-sql--default-pragma'.
-PRAGMA is a plist as described in `org-sql--fmt-pragma'. Return a
-new plist with values from PRAGMA added, except for pragma already in
-`org-sql--default-pragma'."
-  (if (not pragma) org-sql--default-pragma
-    (let ((getv
-           (lambda (p)
-             (or (plist-get org-sql--default-pragma p)
-                 (plist-get pragma p)))))
-      (->>
-       org-sql--default-pragma
-       org-sql--plist-get-keys
-       (append (org-sql--plist-get-keys pragma))
-       delete-dups
-       (mapcan (lambda (p) `(,p ,(funcall getv p))))))))
+;; update
 
-(defun org-sql--cmd-set-pragma (&optional pragma)
-  "Set the pragma of the running SQL connection.
-PRAGMA is a plist of pragma to set. This is merged with
-`org-sql-default-pragma' before executing in `org-sql-buffer'."
-  (->> pragma
-       org-sql--pragma-merge-default
-       org-sql--fmt-pragma
-       org-sql-cmd))
+(defun org-sql--format-mql-update (formatter-alist mql-update)
+  "Return SQL string for MQL-UPDATE.
+FORMATTER-ALIST is an alist of functions given by
+`org-sql--compile-mql-format-function'."
+  (-let* (((tbl-name . (&alist 'set 'where)) mql-update)
+          (formatter-list (alist-get tbl-name formatter-alist))
+          (set* (org-sql--format-mql-plist formatter-list "," set))
+          (where* (org-sql--format-mql-plist formatter-list " and " where)))
+    (format "UPDATE %s SET %s WHERE %s;" tbl-name set* where*)))
 
-;; new sql-redirect function with windows prompt fixed
-;; use advice and system-type = 'windows-nt' varable to wrap the
-;; advice
-  
-(defun org-sql-cmd (cmd)
-  "Execute SQL string CMD in SQLi buffer named as `org-sql-buffer'.
-If buffer process not running, it is started automatically. Returns
-the output of CMD as given by the running SQL shell."
-  (when cmd
-    (org-sql--with-advice
-        ;; this function will throw a "regex too long error"
-        ((#'looking-at :override #'ignore))
-      ;; TODO add a debug option here so the temp buffer is not
-      ;; thrown away
-      (let ((temp-buf "*SQL: Out*")
-            (get-output
-             (lambda (b)
-               (with-current-buffer b
-                 (let ((out (buffer-substring-no-properties
-                             (point-min)
-                             (point-max))))
-                   (kill-buffer b)
-                   out)))))
-        (sql-redirect-one org-sql-buffer cmd temp-buf nil)
-        (->> temp-buf (funcall get-output) string-trim)))))
+;; delete
 
-(defun org-sql-cmd-select (tbl-name &optional cols conds)
-  "Select columns from TBL-NAME where COLS is the list of columns.
-If COLS is nil, all columns will be returned. Columns is expected as
-a list of keywords like ':col1' and ':col2'. CONDS, if supplied, is
-a plist of conditions to test in the select statement. (currently
-joined by AND)"
-  (let* ((colnames
-          (if (not cols) "*"
-            (--> cols
-                 (mapcar #'org-sql--kw-to-colname it)
-                 (string-join it ","))))
-         (tbl-str (symbol-name tbl-name))
-         (cmd (if (not conds)
-                  (format "select %s from %s;" colnames tbl-str)
-                (--> conds
-                     (org-sql--plist-concat it " and ")
-                     (format "select %s from %s where %s;" colnames
-                             tbl-str it)))))
-    (--> cmd (org-sql-cmd it) (org-sql--to-plist it cols))))
+(defun org-sql--format-mql-delete (formatter-alist mql-delete)
+  "Return SQL string for MQL-DELETE.
+FORMATTER-ALIST is an alist of functions given by
+`org-sql--compile-mql-format-function'."
+  (-let* (((tbl-name . (&alist 'where)) mql-delete)
+          (formatter-list (alist-get tbl-name formatter-alist)))
+    (if (not where) (format "DELETE FROM %s;" tbl-name)
+      (->> (org-sql--format-mql-plist formatter-list " and " where)
+           (format "DELETE FROM %s WHERE %s;" tbl-name)))))
 
-;;; org-mode string parsing functions
+;; select
 
-;; TODO this can be refactored with s.el
-(defun org-sql--effort-to-int (effort-str &optional to-string throw-err)
-  "Convert EFFORT-STR into an integer from HH:MM format.
-If it is already an integer, nothing is changed. If TO-STRING is t,
-convert the final number to a string of the number. If THROW-ERR is t,
-throw an error if the string is not recognized."
-  (when effort-str
-    (let ((effort-str (string-trim effort-str)))
-      (save-match-data
-        (cond
-         ((string-match "^\\([0-9]+\\):\\([0-6][0-9]\\)$" effort-str)
-          (let* ((hours (string-to-number (match-string 1 effort-str)))
-                 (minutes (string-to-number (match-string 2 effort-str)))
-                 (sum (+ (* 60 hours) minutes)))
-            (if to-string (number-to-string sum) sum)))
-         ((string-match-p "^[0-9]+$" effort-str)
-          (if to-string effort-str (string-to-number effort-str)))
-         (t (when throw-err
-              (error (concat "Unknown effort format: '" effort-str "'")))))))))
+(defun org-sql--format-mql-select (formatter-alist mql-select)
+  "Return SQL string for MQL-SELECT.
+FORMATTER-ALIST is an alist of functions given by
+`org-sql--compile-mql-format-function'."
+  (-let* (((tbl-name . (&alist 'columns 'where)) mql-select)
+          (formatter-list (alist-get tbl-name formatter-alist))
+          (columns* (or (-some->> (-map #'org-sql--format-mql-column-name columns)
+                          (s-join ","))
+                        "*")))
+    (if (not where) (format "SELECT %s FROM %s;" columns* tbl-name)
+      (->> (org-sql--format-mql-plist formatter-list " AND " where)
+           (format "SELECT %s FROM %s WHERE %s;" columns* tbl-name)))))
 
-(defun org-sql--ts-fmt-unix-time (ts)
-  "Return org timestamp TS as unix time integer.
-Return nil if TS is nil or if TS cannot be understood."
-  (-some-->
-   ts
-   (save-match-data (org-2ft it))
-   (when (> it 0) (+ (round it)))))
+;;; SQL string -> SQL string formatting functions
 
-;; TODO this can be refactored
-(defun org-sql--parse-ts-range (ts &optional fun)
-  "Return 'start' or 'end' of timestamp TS.
-Return value will be a cons cell like (START . END) where START is
-the first half of TS and END is the ending half or nil if it does not
-exist.
+(defun org-sql--format-sql-transaction (mode sql-statements)
+  "Return SQL string for a transaction.
+SQL-STATEMENTS is a list of SQL statements to be included in the
 
-By default, 'start' and 'end' are returned as integers in epoch time.
-If different return values, are desired, supply function FUN which
-takes a timestamp element (from either the start or end if a range) as
-its sole argument."
-  (when ts
-    (let* ((get-epoch-time
-            (lambda (ts)
-              (->> ts
-                   (org-element-property :raw-value)
-                   (org-sql--ts-fmt-unix-time))))
-           (fun (or fun get-epoch-time))
-           (split
-            (lambda (ts &optional end)
-              (--> ts
-                   (org-timestamp-split-range it end)
-                   (funcall fun it)))))
-      (if (eq (org-element-property :type ts) 'inactive-range)
-          (let ((start (funcall split ts))
-                (end (funcall split ts t)))
-            (cons start end))
-        `(,(funcall split ts))))))
+transaction. MODE is the SQL mode."
+  (-let ((bare-transaction (-some->> sql-statements
+                             (s-join "")
+                             (format "BEGIN TRANSACTION;%sCOMMIT;"))))
+    ;; TODO might want to add performance options here
+    (when bare-transaction
+      (org-sql--case-mode mode
+        (sqlite (concat "PRAGMA foreign_keys = ON;" bare-transaction))
+        (postgres bare-transaction)))))
 
-;; TODO is this really necessary?
-(defun org-sql--parse-ts-maybe (txt)
-  "Convert TXT to epoch time format if possible.
-Returns formatted string or TXT if it is not a timestamp."
-  ;; assume the iso parser to return nil on failure
-  (-> txt org-sql--ts-fmt-unix-time (or txt)))
+;;; org-element/org-ml wrapper functions
 
-;;; org-mode element helper functions
-
-;; (defun org-sql--element-ts-raw (prop obj &optional iso)
-;;   "Return the raw-value of the timestamp PROP in OBJ if exists.
-;; If ISO is t, return the timestamp in ISO 8601 format."
-;;   (-some--> obj
-;;             (org-element-property prop it)
-;;             (org-element-property :raw-value it)
-;;             (if iso (org-sql--ts-fmt-unix-time it) it)))
-            
-(defun org-sql--element-split-by-type (type contents &optional right)
-  "Split sequence of org-elements by first instance of TYPE.
-CONTENTS is a list of org-element objects. If RIGHT is t, return the
-list to the right of first-encountered TYPE rather than the left."
-  (if right
-      (cdr (--drop-while (not (eq type (org-element-type it))) contents))
-    (--take-while (not (eq type (org-element-type it))) contents)))
+;; TODO these are all functions that may be included in org-ml in the future
         
-(defun org-sql--element-parent-headline (obj)
-  "Return parent headline element (if any) of org-element OBJ."
-  (when obj
-    (let ((parent (org-element-property :parent obj)))
-      (if (eq 'headline (org-element-type parent))
-          parent
-        (org-sql--element-parent-headline parent)))))
+(defun org-sql--headline-get-path (headline)
+  "Return the path for HEADLINE node.
+Path will be a list of offsets for the parent headline and its
+parents (with HEADLINE on the right end of the list)."
+  (cl-labels
+      ((get-path
+        (acc node)
+        (if (or (null node) (eq 'org-data (car node))) acc
+          (get-path (cons (org-ml-get-property :begin node) acc)
+                    (org-ml-get-property :parent node)))))
+    (get-path nil headline)))
         
-(defun org-sql--element-parent-tree-path (obj &optional acc)
-  "Construct parent tree path for OBJ and concatenate to ACC.
-Returns '/' delimited path of headlines or nil if obj is in a toplevel
-headline."
-  (let ((parent-hl (org-sql--element-parent-headline obj)))
-    (if parent-hl
-        (--> parent-hl
-             (org-element-property :raw-value it)
-             (concat "/" it acc)
-             (org-sql--element-parent-tree-path parent-hl it))
-      acc)))
-      
-(defun org-sql--element-parent-tags (obj &optional acc)
-  "Get all tags from parent headlines of OBJ and concat to ACC.
-ACC is treated as a set; therefore no duplicates are retained."
-  (let ((parent-hl (org-sql--element-parent-headline obj)))
-    (if parent-hl
-        (let* ((tags (->>
-                      parent-hl
-                      (org-element-property :tags)
-                      (mapcar #'org-sql--strip-string)))
-               (i-tags (org-element-property :ARCHIVE_ITAGS parent-hl))
-               (i-tags (when i-tags (split-string i-tags)))
-               (all-tags (delete-dups (append acc tags i-tags))))
-          (org-sql--element-parent-tags parent-hl all-tags))
-      acc)))
+(defun org-sql--headline-get-archive-itags (headline)
+  "Return archive itags from HEADLINE or nil if none."
+  (unless org-sql-exclude-inherited-tags
+    (-some-> (org-ml-headline-get-node-property "ARCHIVE_ITAGS" headline)
+      (split-string))))
 
-(defun org-sql--todo-keywords ()
- "Return `org-todo-keywords' as list of strings w/o selectors.
-Will likely match the value of `org-todo-keywords-1' in many cases,
-but this has the advantage of being always available and
-comprehensive."
- (->>
-  org-todo-keywords
-  copy-tree
-  (mapcan #'cdr)
-  (remove "|")
-  (--map (replace-regexp-in-string "(.*)" "" it))))
+(defun org-sql--headline-get-tags (headline)
+  "Return list of tags from HEADLINE."
+  (->> (org-ml-get-property :tags headline)
+       (-map #'substring-no-properties)))
 
-(defun org-sql--log-note-headings-convert ()
-  "Convert `org-log-note-headings' to a regex matcher.
-This is used to set `org-sql--log-note-headings-regexp'; see this
-constant for further details."
-  (let* ((escapes '("%u" "%U" "%t" "%T" "%d" "%D" "%s" "%S"))
-         (ts-or-todo-regexp
-          (-->
-           (org-sql--todo-keywords)
-           (mapconcat #'regexp-quote it "\\|")
-           (format "\"\\(%s\\|%s\\)\"" org-ts-regexp-inactive it)))
-         (ts-regexp (format "\\(%s\\)" org-ts-regexp))
-         (ts-ia-regexp (format "\\(%s\\)" org-ts-regexp-inactive))
-         (re-no-pad-alist (-zip-pair escapes escapes))
-         (re-match-alist
-          (->>
-           (list "\\(.*\\)"
+(defun org-sql--headline-get-contents (headline)
+  "Return the contents of HEADLINE.
+This includes everything in the headline's section element that
+is not the planning, logbook drawer, or property drawer."
+  (-some->> (org-ml-headline-get-section headline)
+    ;; TODO need a function in org-ml that returns non-meta
+    ;; TODO this only works when `org-log-into-drawer' is defined
+    (--remove (org-ml-is-any-type '(planning property-drawer) it))
+    (--remove (and (org-ml-is-type 'drawer it)
+                   (equal (org-element-property :drawer-name it)
+                          org-log-into-drawer)))))
+
+(defun org-sql--split-paragraph (paragraph)
+  "Split PARAGRAPH by first line-break node."
+  (let ((children (org-ml-get-children paragraph)))
+    (-if-let (lb-index (--find-index (org-ml-is-type 'line-break it) children))
+        (-let* (((head rest*) (-split-at lb-index children))
+                ((break . rest) rest*)
+                ;; assume begin/end should be the same as contents-begin/end
+                (parent (org-ml-get-property :parent (-first-item head)))
+                (b1 (org-ml-get-property :begin parent))
+                (e1 (org-ml-get-property :begin break))
+                (b2 (org-ml-get-property :end break))
+                (e2 (org-ml-get-property :end parent))
+                (head* (->> (apply #'org-ml-build-paragraph head)
+                            (org-ml--set-properties-nocheck
+                             (list :begin b1
+                                   :contents-begin b1
+                                   :end e1
+                                   :contents-end e1))))
+                (rest* (-some->> rest
+                         (apply #'org-ml-build-paragraph)
+                         (org-ml--set-properties-nocheck
+                          (list :begin b2
+                                :contents-begin b2
+                                :end e2
+                                :contents-end e2)))))
+          (if (not rest*) `(nil . ,head*) `(,head* . ,rest*)))
+      `(nil . ,paragraph))))
+
+(defun org-sql--item-get-contents (item)
+  "Return the children of ITEM that are not items."
+  (->> (org-ml-get-children item)
+       (--take-while (not (org-ml-is-type 'plain-list it)))))
+
+(defun org-sql--split-item (item)
+  "Split the contents of ITEM by the first line break."
+  (-let (((first . rest) (org-sql--item-get-contents item)))
+    (when first
+      (if (not (org-ml-is-type 'paragraph first)) (cons nil rest)
+        (-let (((p0 . p1) (org-sql--split-paragraph first)))
+          (if (not p0) `(,p1 . ,rest) `(,p0 . (,p1 . ,rest))))))))
+
+;; org-element tree -> logbook entry (see `org-sql--to-entry')
+
+(defun org-sql--build-log-note-regexp-alist (todo-keywords)
+  "Return a list of regexps that match placeholders in `org-log-note-headings'.
+Each member of list will be like (PLACEHOLDER . REGEXP).
+TODO-KEYWORDS is the list of valid todo state keywords for the buffer, and will
+be used when evaluating the regexp for the \"%S\" and \"%s\" matchers."
+  (cl-flet
+      ((format-capture
+        (regexp)
+        (->> (s-replace-all '(("\\(" . "") ("\\)" . "")) regexp)
+             (format "\\(%s\\)"))))
+    (let* ((ts-or-todo-regexp (->> (-map #'regexp-quote todo-keywords)
+                                   (cons org-ts-regexp-inactive)
+                                   (s-join "\\|")
+                                   (format-capture)
+                                   (format "\"%s\"")))
+           (ts-regexp (format-capture org-ts-regexp))
+           (ts-ia-regexp (format-capture org-ts-regexp-inactive))
+           (keys (-map #'cdr org-sql--log-note-keys)))
+      (->> (list "\\(.*\\)"
                  "\\(.*\\)"
                  ts-ia-regexp
                  ts-regexp
@@ -645,862 +1200,900 @@ constant for further details."
                  ts-regexp
                  ts-or-todo-regexp
                  ts-or-todo-regexp)
-           (--map (concat "[[:space:]]*" it "[[:space:]]*"))
-           (-zip-pair escapes)))
-         (apply2note
-          (lambda (n f) (cons (car n) (funcall f (cdr n)))))
-         (replace-esc
-          (lambda (n re)
-            (funcall apply2note
-                     n
-                     (lambda (s) (org-replace-escapes s re)))))
-         (shrink-space
-          (lambda (n)
-            (funcall apply2note
-                     n
-                     (lambda (s) (replace-regexp-in-string "\s+" " " s))))))
-    (->>
-     org-log-note-headings
-     ;; remove padding information by replacing all escape sequences
-     ;; with their non-padded version and then removing extra spaces
-     (--map (funcall replace-esc it re-no-pad-alist))
-     (--map (funcall shrink-space it))
-     ;; replace all escape sequences with regexps that match
-     ;; the data to be inserted via the escape sequences
-     (--map (funcall replace-esc it re-match-alist))
-     ;; filter out anything that is blank (eg default clock-in)
-     (--remove (equal (cdr it) "")))))
+           (--map (format "[[:space:]]*%s[[:space:]]*" it))
+           (-zip-pair keys)))))
 
-(defconst org-sql--log-note-headings-regexp
-  (org-sql--log-note-headings-convert)
-  "Like `org-log-note-headings' with regexps.
-Each regexp matches the text that will be inserted into the
-escape sequences of `org-log-note-headings'.")
+(defun org-sql--build-log-note-heading-matchers (log-note-headings todo-keywords)
+  "Return a list of matchers for LOG-NOTE-HEADINGS.
 
-(defun org-sql--lb-match-header (header-text)
-  "Match HEADER-TEXT with `org-sql--log-note-headings-regexp'.
-If match successful, returns list whose car is the match type
-and cdr is the match data."
-  (letrec ((scan
-            (lambda (str note-regex-alist)
-              (when note-regex-alist
-                (let* ((cur (car note-regex-alist))
-                       (rem (cdr note-regex-alist))
-                       (type (car cur))
-                       (re (cdr cur)))
-                  (if (string-match re str)
-                      type
-                    (funcall scan str rem))))))
-           (type (funcall scan header-text org-sql--log-note-headings-regexp)))
-    (when type (cons type (match-data)))))
+LOG-NOTE-HEADINGS is an alist like
+`org-log-note-headines' (identical if the user has not changed
+it). TODO-KEYWORDS is a list of todo state keywords for the current buffer.
 
-(defun org-sql--flatten-lb-entries (lb-contents)
-  "Given LB-CONTENTS, return a flattened list of clocks and items.
-LB-CONTENTS is assumed to contain only org-elements clock and
-plain-list, although this is not enforced here."
-  (->> lb-contents
-       (--map (if (eq 'clock (org-element-type it)) (list it)
-                (org-element-map it 'item #'identity)))
-       (apply #'append)))
+Return a list like (TYPE REGEXP (KEYS ...)) where TYPE is the type of the note,
+REGEXP is a regular expression matching the header of the note, and KEYS is an
+ordered list of keywords from `org-sql--log-note-keys' that correspond to each
+capture in REGEXP."
+  (cl-labels
+      ((reverse-lookup
+        (value alist)
+        (car (--find (equal (cdr it) value) alist)))
+       (unpad-headings
+        (heading)
+        (org-replace-escapes heading org-sql--log-note-replacements))
+       (replace-escapes
+        (heading replace-alist)
+        (-> (s-replace-regexp "\s+" " " heading)
+            (org-replace-escapes replace-alist)))
+       (match-keys
+        (heading)
+        (->> (s-match-strings-all "%[[:alpha:]]" heading)
+             (-flatten-n 1)
+             (--map (reverse-lookup it org-sql--log-note-keys)))))
+    (let* ((log-note-headings* (--remove (equal (car it) "") log-note-headings))
+           (regexp-alist (org-sql--build-log-note-regexp-alist todo-keywords))
+           (types (-map #'car log-note-headings*))
+           (unpadded (--map (unpad-headings (cdr it)) log-note-headings*))
+           (regexps (--map (replace-escapes it regexp-alist) unpadded))
+           (keys (-map #'match-keys unpadded)))
+      (-zip-lists types regexps keys))))
 
-(defun org-sql--split-lb-entries (lb-contents)
-  "Split logbook entry list into logbook and non-logbook halves.
+(defun org-sql--match-item-header (fstate header-text)
+  "Return a plist with the matched captures for HEADER-TEXT.
 
-LB-CONTENTS is assumed to have only clock and plain-list org elements
-objects, and this function is meant to evaluate the case where this
-list is not contained within a logbook drawer and thus may have
-non-logbook content at the end if LB-CONTENTS end with a plain-list
-element.
+FSTATE is a list given by `org-sql--to-fstate'.
 
-Non-logbook content is determined by trying to match each item in the
-last plain-list element `org-log-note-headings'. If this last
-plain-list element is preceded by a clock, the first item is ignored
-as it may be a clock note. Note that anything that is not in the last
-run of items that does not match will go into the database with parse
- errors, as these should not happen.
+The returned list will be a list like (TYPE PLIST) where TYPE is
+the matched type of the note based on HEADER-TEXT and PLIST is a
+list of captures corresponding to `org-sql--log-note-keys'."
+  (-let (((&plist :log-note-matcher) fstate))
+    (cl-labels
+        ((match-sum
+          (regexp i)
+          (s-matched-positions-all regexp header-text i))
+         (match-header
+          (acc cell)
+          (if acc acc
+            (-let (((type regexp keys) cell))
+              (-some->> keys
+                (--map-indexed (cons it (match-sum regexp (1+ it-index))))
+                (--filter (cdr it))
+                (apply #'append)
+                (cons type))))))
+      (or (-reduce-from #'match-header nil log-note-matcher) '(none)))))
 
-Returns a cons cell where the car is a list lb-entries and the
-cdr is a list of that are not part of the logbook.
+(defmacro org-sql--to-entry (type &rest plist)
+  "Return a list representing a logbook entry.
+TYPE is the type of the entry and PLIST is data for the entry
+whose keys are a subset of `org-sql--entry-keys'."
+  (declare (indent 1))
+  (let ((input-keys (-slice plist 0 nil 2)))
+    (-some->> (-difference input-keys org-sql--entry-keys)
+      (--map (format "%S" it))
+      (s-join ", ")
+      (error "Keys not valid for entry: %s"))
+    `(list ,type ,@plist)))
 
-The lb-entries are flattened using `org-sql--flatten-lb-entries'."
-  ;; if last element is a plain list, check for non-logbook items
-  (if (eq 'plain-list (org-element-type (-last-item lb-contents)))
-      (let* ((clock-present? (assoc 'clock lb-contents))
-             (last-split (-->
-                          lb-contents
-                          (-last-item it)
-                          (list it)
-                          (org-sql--flatten-lb-entries it)))
-             (butlast-split (-->
-                             lb-contents
-                             (-butlast it)
-                             (org-sql--flatten-lb-entries it)
-                             (if (not clock-present?) it
-                               (append it `(,(-first-item last-split))))))
-             (last-split-part (-->
-                               last-split
-                               (if clock-present? (-drop 1 it) it)
-                               (--split-with
-                                (--> it
-                                     ;; use nil for hl-part here
-                                     ;; because we only care about
-                                     ;; the :type field
-                                     (org-sql--partition-item it nil)
-                                     (alist-get :type it))
-                                it))))
-        (cons (append butlast-split (car last-split-part))
-              (cdr last-split-part)))
-    (list (org-sql--flatten-lb-entries lb-contents))))
+(defun org-sql--item-to-entry (fstate headline-offset item)
+  "Return entry list from ITEM.
+See `org-sql--to-entry' for the meaning of the returned list.
+FSTATE is a list given by `org-sql--to-fstate'. HEADLINE-OFFSET
+is the offset of the headline containing this entry."
+  (-let* (((&plist :file-path) fstate)
+          ((header-node . rest) (org-sql--split-item item))
+          (header-offset (org-ml-get-property :begin header-node))
+          (header-text (org-ml-to-trimmed-string header-node))
+          (note-text (-some->> (-map #'org-ml-to-string rest)
+                       (s-join "")
+                       (s-trim)))
+          ((type . (&plist :user
+                           :user-full
+                           :ts
+                           :ts-active
+                           :short-ts
+                           :short-ts-active
+                           :old-state
+                           :new-state))
+           (org-sql--match-item-header fstate header-text)))
+    (cl-flet
+        ((get-timestamp-node
+          (match-bounds)
+          (when match-bounds
+            (let ((ts-offset (+ header-offset (car match-bounds))))
+              (->> (org-ml-get-children header-node)
+                   (--find (and (org-ml-is-type 'timestamp it)
+                                ;; TODO make this function public
+                                (org-ml--property-is-eq :begin ts-offset it)))))))
+         (get-substring
+          (match-bounds)
+          (when match-bounds
+            (-let (((begin . end) match-bounds))
+              (substring header-text begin end)))))
+      (let ((old-ts (get-timestamp-node old-state))
+            (new-ts (get-timestamp-node new-state)))
+        (org-sql--to-entry type
+          :file-path file-path
+          :entry-offset (org-ml-get-property :begin item)
+          :headline-offset headline-offset
+          :header-text header-text
+          :note-text note-text
+          :user (get-substring user)
+          :user-full (get-substring user-full)
+          :ts (get-timestamp-node ts)
+          :ts-active (get-timestamp-node ts-active)
+          :short-ts (get-timestamp-node short-ts)
+          :short-ts-active (get-timestamp-node short-ts-active)
+          :old-ts old-ts
+          :new-ts new-ts
+          :old-state (unless old-ts (get-substring old-state))
+          :new-state (unless new-ts (get-substring new-state)))))))
 
-;;; org-mode element partitioning functions
+(defun org-sql--clock-to-entry (fstate headline-offset clock entry)
+  "Return entry list from CLOCK.
+See `org-sql--to-entry' for the meaning of the returned list.
+FSTATE is a list given by `org-sql--to-fstate'. HEADLINE-OFFSET
+is the offset of the headline containing this entry. ENTRY is the
+entry immediately following this clock entry if its type is
+'none' (if any), and will be added to this clock entry as a clock
+note if desired (see `org-sql-exclude-clock-notes')."
+  (-let (((&plist :file-path) fstate)
+         ((entry-type . (&plist :header-text :note-text)) entry)
+         (ts (org-ml-get-property :value clock)))
+    (org-sql--to-entry 'clock
+      :file-path file-path
+      :headline-offset headline-offset
+      :entry-offset (org-ml-get-property :begin clock)
+      ;; NOTE if clocks are malformed they may not have a start time
+      :old-ts (-some-> ts
+                (org-ml-timestamp-get-start-time)
+                (org-ml-build-timestamp!))
+      :new-ts (-some-> ts
+                (org-ml-timestamp-get-end-time)
+                (org-ml-build-timestamp!))
+      :note-text (when (eq entry-type 'none)
+                   (or (-some->> note-text
+                         (format "%s\n%s" header-text))
+                       header-text)))))
 
-(defun org-sql--partition-headline (headline fp)
-  "Partition org-element HEADLINE into alist.
+(defun org-sql--logbook-to-entries (fstate headline-offset children)
+  "Return a list of entries for logbook CHILDREN.
+FSTATE is a list given by `org-sql--to-fstate'. HEADLINE-OFFSET
+is the offset of the headline containing this logbook. See
+`org-sql--to-entry' for the meaning of each member in the
+returned list."
+  (-let (((&plist :file-path) fstate))
+    (cl-labels
+        ((plain-list-to-entries
+          (plain-list)
+          (->> (org-ml-get-children plain-list)
+               (--map (org-sql--item-to-entry fstate headline-offset it))))
+         (clocks-to-entries
+          (pair)
+          (-let (((a . b) pair))
+            (if (not (eq (car a) 'clock)) a
+              (org-sql--clock-to-entry fstate headline-offset a b))))
+         (filter-clock-notes
+          (acc next)
+          (let ((last-type (car (car acc)))
+                (next-type (car next)))
+            (if (and (eq next-type 'none) (eq last-type 'clock)) acc
+              (cons next acc)))))
+      (let* ((plain-list-converted
+              (->> children
+                   (--filter (org-ml-is-any-type '(clock plain-list) it))
+                   (--mapcat (if (org-ml-is-type 'clock it) (list it)
+                               (plain-list-to-entries it)))))
+             (staggered
+              (--> (-drop 1 plain-list-converted)
+                   (--map-when (org-ml-is-type 'clock it) nil it)
+                   (-snoc it nil))))
+        (->> (-zip-pair plain-list-converted staggered)
+             (-map #'clocks-to-entries)
+             (-reduce-from #'filter-clock-notes nil)
+             (reverse))))))
 
-The alist will be structured as such:
+;; org-element tree -> MQL inserts (see `org-sql--mql-insert')
 
-:filepath - path to the headline's file as given by FP
-:headline - original headline element
-:section - the section contents of the headline if found
-:subheadlines - list of subheadlines if any"
- (unless headline (error "No headline given"))
- (unless fp (error "No file path given"))
- (let* ((hl-contents (org-element-contents headline))
-        (section (->> hl-contents (assoc 'section) org-element-contents))
-        (subheadlines (if section (cdr hl-contents) hl-contents)))
-   `((:headline . ,headline)
-     (:filepath . ,fp)
-     (:section . ,section)
-     (:subheadlines . ,subheadlines))))
+(defun org-sql--add-mql-insert-clock (acc entry)
+  "Add MQL-insert for clock ENTRY to ACC."
+  (-let (((&plist :entry-offset
+                  :note-text
+                  :headline-offset
+                  :file-path
+                  :old-ts
+                  :new-ts)
+          (cdr entry)))
+    (org-sql--add-mql-insert acc clocks
+      :file_path file-path
+      :headline_offset headline-offset
+      :clock_offset entry-offset
+      :time_start (-some-> old-ts
+                    (org-ml-timestamp-get-start-time)
+                    (org-ml-time-to-unixtime))
+      :time_end (-some-> new-ts
+                  (org-ml-timestamp-get-start-time)
+                  (org-ml-time-to-unixtime))
+      ;; TODO this option can be moved to optimize the logbook flatten function
+      :clock_note (unless org-sql-exclude-clock-notes note-text))))
 
-(defun org-sql--partition-item (item hl-part)
-  "Partition org-element ITEM into alist.
+(defun org-sql--add-mql-insert-headline-logbook-item (acc entry)
+  "Add MQL-insert for item ENTRY to ACC."
+  (-let (((entry-type . (&plist :entry-offset
+                                :header-text
+                                :note-text
+                                :headline-offset
+                                :file-path
+                                :ts))
+          entry))
+    (org-sql--add-mql-insert acc logbook_entries
+      :file_path file-path
+      :headline_offset headline-offset
+      :entry_offset entry-offset
+      :entry_type (symbol-name entry-type)
+      :time_logged (-some->> ts
+                     (org-ml-timestamp-get-start-time)
+                     (org-ml-time-to-unixtime))
+      :header header-text
+      :note note-text)))
 
-ITEM is assumed to be part of a logbook. Return a alist with the
-following structure:
+(defun org-sql--add-mql-insert-state-change (acc entry)
+  "Add MQL-insert for state change ENTRY to ACC."
+  (-let (((&plist :entry-offset :file-path :old-state :new-state) (cdr entry)))
+    (--> (org-sql--add-mql-insert-headline-logbook-item acc entry)
+         (org-sql--add-mql-insert it state_changes
+           :file_path file-path
+           :entry_offset entry-offset
+           :state_old old-state
+           :state_new new-state))))
 
-:hl-part - the partitioned headline HL-PART surrounding the item,
-  which is an object as described in `org-sql--partition-headline'
-:item - the original item element
-:header-text - the first line of the note which is standardized using
-  `org-log-note-headings'
-:note-text - the remainder of the note text as a trimmed string with
-  no text properties (will be nil if item has no line-break element)
-:type - the type of the item's header text (may be nil if unknown)
-:match-data - match data associated with finding the type as done
-  using `org-sql--log-note-headings-regexp' (may be nil if undetermined).
+(defun org-sql--add-mql-insert-planning-change (acc entry)
+  "Add MQL-insert for planning change ENTRY to ACC."
+  (-let (((&plist :entry-offset :file-path :headline-offset :old-ts) (cdr entry)))
+    (--> (org-sql--add-mql-insert-headline-logbook-item acc entry)
+         (org-sql--add-mql-insert-timestamp it old-ts headline-offset file-path)
+         (org-sql--add-mql-insert it planning_changes
+           :file_path file-path
+           :entry_offset entry-offset
+           :timestamp_offset (org-ml-get-property :begin old-ts)))))
 
-Anatomy of a logbook item (non-clocking):
-- header-text with linebreak //
-  note-text ... more text
-- another header-text linebreak
+(defun org-sql--add-mql-insert-headline-logbook (acc fstate headline)
+  "Add MQL-insert for logbook in HEADLINE to ACC.
+FSTATE is a list given by `org-sql--to-fstate'."
+  (-let (((&plist :file-path) fstate)
+         (headline-offset (org-ml-get-property :begin headline)))
+    (cl-flet
+        ((add-entry
+          (acc entry)
+          (let ((entry-type (car entry))
+                (headline-offset (org-ml-get-property :begin headline)))
+            (if (memq entry-type org-sql-excluded-logbook-types) acc
+              (cl-case entry-type
+                ((redeadline deldeadline reschedule delschedule)
+                 (org-sql--add-mql-insert-planning-change acc entry))
+                (state
+                 (org-sql--add-mql-insert-state-change acc entry))
+                (clock
+                 (org-sql--add-mql-insert-clock acc entry))
+                (t
+                 (org-sql--add-mql-insert-headline-logbook-item acc entry)))))))
+      (->> (org-ml-headline-get-logbook headline)
+           (org-sql--logbook-to-entries fstate headline-offset)
+           (-reduce-from #'add-entry acc)))))
 
-The header text is solely used for determining :type and :match-data."
-  (let* ((contents (->> item (assoc 'paragraph) org-element-contents))
-         (header-text (->> contents
-                           (org-sql--element-split-by-type 'line-break)
-                           org-element-interpret-data
-                           org-sql--strip-string))
-         (note-text (--> contents
-                         (org-sql--element-split-by-type 'line-break it t)
-                         org-element-interpret-data
-                         org-sql--strip-string))
-         (header-match (org-sql--lb-match-header header-text)))
-    `((:item . ,item)
-      (:hl-part . ,hl-part)
-      (:header-text . ,header-text)
-      (:note-text . ,note-text)
-      (:type . ,(car header-match))
-      (:match-data . ,(cdr header-match)))))
+(defun org-sql--add-mql-insert-headline-properties (acc headline file-path)
+  "Add MQL-insert for each property in HEADLINE to ACC.
+FILE-PATH is the path to the file containing this headline."
+  (if (eq 'all org-sql-excluded-properties) acc
+    ;; TODO only do this once
+    (let ((ignore-list (append org-sql--ignored-properties-default
+                               org-sql-excluded-properties))
+          (headline-offset (org-ml-get-property :begin headline)))
+      (cl-flet
+          ((is-ignored
+            (node-property)
+            (member (org-ml-get-property :key node-property) ignore-list))
+           (add-property
+            (acc np)
+            (let ((property-offset (org-ml-get-property :begin np)))
+              (--> (org-sql--add-mql-insert acc properties
+                     :file_path file-path
+                     :property_offset property-offset
+                     :key_text (org-ml-get-property :key np)
+                     :val_text (org-ml-get-property :value np))
+                   (org-sql--add-mql-insert it headline_properties
+                     :file_path file-path
+                     :headline_offset headline-offset
+                     :property_offset property-offset)))))
+        (->> (org-ml-headline-get-node-properties headline)
+             (-remove #'is-ignored)
+             (-reduce-from #'add-property acc))))))
 
-;;; org element extraction functions
-;;
-;; These are functions used to pull data from the org-data tree
-;; given by `org-element-parse-buffer'. They all adhere to the same
-;; idiom where they take an accumulator as the first argument and
-;; return a modified accumulator with the data to be added to the
-;; database. The accumulator is an alist of plists that represents
-;; the data to be inserted:
-;; ((TABLE1 ((:COL1 VAL1 :COL2 VOL2) ..))
-;;  (TABLE2 ((:COL1 VAL1 :COL2 VOL2) ..) ..))
-;; where TABLEX is the table name, COLY is a column within TABLEX
-;; and VALY is the value to add to COLY within TABLEX. Note that
-;; COLY is supplied as a keyword where ':column-name' represents
-;; 'column_name' in the database.
+(defun org-sql--add-mql-insert-headline-tags (acc headline file-path)
+  "Add MQL-insert for each tag in HEADLINE to ACC.
+FILE-PATH is the path to the file containing this headline."
+  (if (eq 'all org-sql-excluded-tags) acc
+    (let ((offset (org-ml-get-property :begin headline)))
+      (cl-flet
+          ((add-tag
+            (acc tag inherited)
+            (org-sql--add-mql-insert acc headline_tags
+              :file_path file-path
+              :headline_offset offset
+              :tag tag
+              :is_inherited (if inherited 1 0)))
+           (filter-ignored
+            (tags)
+            (-difference tags org-sql-excluded-tags)))
+        (let ((tags (filter-ignored (org-sql--headline-get-tags headline)))
+              (i-tags (->> (org-sql--headline-get-archive-itags headline)
+                           (filter-ignored))))
+          (--> acc
+               (--reduce-from (add-tag acc it nil) it tags)
+               (--reduce-from (add-tag acc it t) it i-tags)))))))
 
-(defun org-sql--extract (acc fun objs &rest args)
-  "Iterate through OBJS and add them to accumulator ACC with FUN.
-FUN is a function that takes a single object from OBJS, the accumulator,
-and ARGS. FUN adds OBJ to ACC and returns new ACC."
-  (while objs
-    (setq acc (apply fun acc (car objs) args)
-          objs (cdr objs)))
-  acc)
+(defun org-sql--add-mql-insert-headline-links (acc headline file-path)
+  "Add MQL-insert for each link in HEADLINE to ACC.
+FILE-PATH is the path to the file containing this headline."
+  (if (eq 'all org-sql-excluded-link-types) acc
+    (let ((offset (org-ml-get-property :begin headline))
+          (links (->> (org-ml-match '(section :any * link) headline)
+                      (--remove (member (org-ml-get-property :type it)
+                                        org-sql-excluded-link-types)))))
+      (cl-flet
+          ((add-link
+            (acc link)
+            (org-sql--add-mql-insert acc links
+              :file_path file-path
+              :headline_offset offset
+              :link_offset (org-ml-get-property :begin link)
+              :link_path (org-ml-get-property :path link)
+              :link_text (->> (org-ml-get-children link)
+                              (-map #'org-ml-to-string)
+                              (s-join ""))
+              :link_type (org-ml-get-property :type link))))
+        (-reduce-from #'add-link acc links)))))
 
-(defun org-sql--extract-lb-planning-change (acc logbook-data item-part
-                                                planning-type)
-  "Add data from planning-change logbook entry to accumulator ACC.
-ITEM-PART is a partitioned logbook item as described in
-`org-sql--partition-item'. LOGBOOK-DATA is a plist as passed from
-`org-sql--extract-lb-item' PLANNING-TYPE is the type of the timestamp
-that was changed (either 'deadline' or 'scheduled')."
-  (let* ((hl-part (alist-get :hl-part item-part))
-         (ts-old (->> item-part
-                      (alist-get :item)
-                      (assoc 'paragraph)
-                      (org-element-contents)
-                      ;; assume old timestamp is always the first
-                      (assoc 'timestamp)))
-         (pc-data
-          (list
-           :file_path (plist-get logbook-data :file_path)
-           :entry_offset (plist-get logbook-data :entry_offset)
-           :timestamp_offset (org-element-property :begin ts-old))))
-    (->
-     acc
-     (org-sql--alist-put 'logbook logbook-data)
-     (org-sql--alist-put 'planning_changes pc-data)
-     (org-sql--extract-ts ts-old hl-part planning-type))))
+(defun org-sql--add-mql-insert-timestamp (acc timestamp headline-offset file-path)
+  "Add MQL-insert for TIMESTAMP to ACC.
+FILE-PATH is the path to the file containing this headline.
+HEADLINE-OFFSET is the offset to the headline containing this
+timestamp."
+  (cl-flet
+      ((get-resolution
+        (time)
+        ;; TODO this should be public in org-ml
+        (when time (if (org-ml--time-is-long time) 1 0))))
+    (let ((start (org-ml-timestamp-get-start-time timestamp))
+          (end (org-ml-timestamp-get-end-time timestamp)))
+      (org-sql--add-mql-insert acc timestamps
+        :file_path file-path
+        :headline_offset headline-offset
+        :timestamp_offset (org-ml-get-property :begin timestamp)
+        :is_active (if (org-ml-timestamp-is-active timestamp) 1 0)
+        :warning_type (org-ml-get-property :warning-type timestamp)
+        :warning_value (org-ml-get-property :warning-value timestamp)
+        :warning_unit (org-ml-get-property :warning-unit timestamp)
+        :repeat_type (org-ml-get-property :repeater-type timestamp)
+        :repeat_value (org-ml-get-property :repeater-value timestamp)
+        :repeat_unit (org-ml-get-property :repeater-unit timestamp)
+        :time_start (org-ml-time-to-unixtime start)
+        :start_is_long (get-resolution start)
+        :time_end (-some-> end (org-ml-time-to-unixtime))
+        :end_is_long (get-resolution end)
+        :raw_value (org-ml-get-property :raw-value timestamp)))))
 
-(defun org-sql--extract-lb-state-change (acc logbook-data item-part)
-  "Add data from state-change logbook entry to accumulator ACC.
-ITEM-PART is a partitioned logbook item as described in
-`org-sql--partition-item'. LOGBOOK-DATA is a plist as passed from
-`org-sql--extract-lb-item'"
-  (save-match-data
-    (set-match-data (alist-get :match-data item-part))
-    (let* ((header-text (alist-get :header-text item-part))
-           (state-data
-            (list :file_path (plist-get logbook-data :file_path)
-                  :entry_offset (plist-get logbook-data :entry_offset)
-                  :state_old (match-string 3 header-text)
-                  :state_new (match-string 1 header-text))))
-      (-> acc
-          (org-sql--alist-put 'logbook logbook-data)
-          (org-sql--alist-put 'state_changes state-data)))))
+(defun org-sql--add-mql-insert-headline-timestamps (acc headline file-path)
+  "Add MQL-insert for each timestamp in HEADLINE to ACC.
+FILE-PATH is the path to the file containing this headline."
+  (if (eq org-sql-excluded-contents-timestamp-types 'all) acc
+    (-if-let (pattern (-some--> org-sql--content-timestamp-types
+                        (-difference it org-sql-excluded-contents-timestamp-types)
+                        (--map `(:type ',it) it)
+                        `(:any * (:and timestamp (:or ,@it)))))
+        (let ((timestamps (-some->> (org-sql--headline-get-contents headline)
+                            (org-ml-match pattern)))
+              (headline-offset (org-ml-get-property :begin headline)))
+          (--reduce-from
+           (org-sql--add-mql-insert-timestamp acc it headline-offset file-path)
+           acc timestamps))
+      acc)))
 
-(defun org-sql--item-time-logged (item-part)
-  "Return time-logged of ITEM-PART or nil if it cannot be determined.
-ITEM-PART is a partitioned item given by `org-sql--partition-item'."
-  (let* ((type (alist-get :type item-part))
-         (time-index
+(defun org-sql--add-mql-insert-headline-planning (acc headline file-path)
+  "Add MQL-insert for each planning timestamp in HEADLINE to ACC.
+FILE-PATH is the path to the file containing this headline."
+  (-if-let (planning (org-ml-headline-get-planning headline))
+      (let ((offset (org-ml-get-property :begin headline)))
+        (cl-flet
+            ((add-planning-maybe
+              (acc type)
+              (-if-let (ts (org-ml-get-property type planning))
+                  (--> (org-sql--add-mql-insert-timestamp acc ts offset file-path)
+                       (org-sql--add-mql-insert it planning_entries
+                         :file_path file-path
+                         :headline_offset offset
+                         :planning_type (->> (symbol-name type)
+                                             (s-chop-prefix ":")
+                                             (intern))
+                         :timestamp_offset (org-ml-get-property :begin ts)))
+                acc)))
+          (--> '(:closed :deadline :scheduled)
+               (-difference it org-sql-excluded-headline-planning-types)
+               (-reduce-from #'add-planning-maybe acc it))))
+    acc))
+
+(defun org-sql--add-mql-insert-headline-closures (acc headline file-path)
+  "Add MQL-insert for parent closures from HEADLINE to ACC.
+FILE-PATH is the path to the file containing this headline."
+  (let ((offset (org-ml-get-property :begin headline)))
+    (cl-flet
+        ((add-closure
+          (acc parent-offset depth)
+          (org-sql--add-mql-insert acc headline_closures
+            :file_path file-path
+            :headline_offset offset
+            :parent_offset parent-offset
+            :depth depth)))
+      (->> (org-sql--headline-get-path headline)
+           (reverse)
+           (--map-indexed (list it it-index))
+           (reverse)
+           (--reduce-from (apply #'add-closure acc it) acc)))))
+
+(defun org-sql--add-mql-insert-headline (acc headline file-path)
+  "Add MQL-insert HEADLINE metadata to ACC.
+FILE-PATH is the path to the file containing this headline."
+  (cl-flet
+      ((effort-to-int
+        (s)
+        (pcase (-some->> s
+                 (string-trim)
+                 (s-match "^\\(\\([0-9]+\\)\\|\\([0-9]+\\):\\([0-6][0-9]\\)\\)$")
+                 (-drop 2))
+          (`(nil ,h ,m) (+ (* 60 (string-to-number h)) (string-to-number m)))
+          (`(,m) (string-to-number m)))))
+    (org-sql--add-mql-insert acc headlines
+      :file_path file-path
+      :headline_offset (org-ml-get-property :begin headline)
+      :headline_text (org-ml-get-property :raw-value headline)
+      :keyword (org-ml-get-property :todo-keyword headline)
+      :effort (-> (org-ml-headline-get-node-property "Effort" headline)
+                  (effort-to-int))
+      :priority (-some->> (org-ml-get-property :priority headline)
+                  (byte-to-string))
+      :is_archived (if (org-ml-get-property :archivedp headline) 1 0)
+      :is_commented (if (org-ml-get-property :commentedp headline) 1 0)
+      :content (-some->> (org-sql--headline-get-contents headline)
+                 (-map #'org-ml-to-string)
+                 (s-join "")))))
+
+(defun org-sql--add-mql-insert-headlines (acc fstate)
+  "Add MQL-insert headlines in FSTATE to ACC.
+FSTATE is a list given by `org-sql--to-fstate'."
+  (-let (((&plist :file-path :headlines) fstate))
+    (cl-labels
+        ((add-headline
+          (acc hl)
+          (let ((sub (org-ml-headline-get-subheadlines hl)))
+            (--> (org-sql--add-mql-insert-headline acc hl file-path)
+                 (org-sql--add-mql-insert-headline-closures it hl file-path)
+                 (org-sql--add-mql-insert-headline-planning it hl file-path)
+                 ;; TODO these next two could be merged/optimized
+                 (org-sql--add-mql-insert-headline-timestamps it hl file-path)
+                 (org-sql--add-mql-insert-headline-links it hl file-path)
+                 (org-sql--add-mql-insert-headline-tags it hl file-path)
+                 (org-sql--add-mql-insert-headline-properties it hl file-path)
+                 (org-sql--add-mql-insert-headline-logbook it fstate hl)
+                 (-reduce-from #'add-headline it sub)))))
+      (-reduce-from #'add-headline acc headlines))))
+
+(defun org-sql--add-mql-insert-file-tags (acc fstate)
+  "Add MQL-insert for each file tag in file to ACC.
+FSTATE is a list given by `org-sql--to-fstate'."
+  (-let (((&plist :file-path :top-section) fstate))
+    (cl-flet
+        ((add-tag
+          (acc tag)
+          (org-sql--add-mql-insert acc file_tags
+            :file_path file-path
+            :tag tag)))
+      (->> (--filter (org-ml-is-type 'keyword it) top-section)
+           (--filter (equal (org-ml-get-property :key it) "FILETAGS"))
+           (--mapcat (s-split " " (org-ml-get-property :value it)))
+           (-uniq)
+           (-reduce-from #'add-tag acc)))))
+
+(defun org-sql--add-mql-insert-file-properties (acc fstate)
+  "Add MQL-insert for each file property in file to ACC.
+FSTATE is a list given by `org-sql--to-fstate'."
+  (-let (((&plist :file-path :top-section) fstate))
+    (cl-flet
+        ((add-property
+          (acc keyword)
+          (-let ((offset (org-ml-get-property :begin keyword))
+                 ((key value) (--> (org-ml-get-property :value keyword)
+                                   (s-split-up-to " " it 1))))
+            (--> (org-sql--add-mql-insert acc properties
+                   :file_path file-path
+                   :property_offset offset
+                   :key_text key
+                   :val_text value)
+                 (org-sql--add-mql-insert it file_properties
+                   :file_path file-path
+                   :property_offset offset)))))
+      (->> (--filter (org-ml-is-type 'keyword it) top-section)
+           (--filter (equal (org-ml-get-property :key it) "PROPERTY"))
+           (-reduce-from #'add-property acc)))))
+
+(defun org-sql--add-mql-insert-file (acc fstate)
+  "Add MQL-insert for file in FSTATE to ACC.
+FSTATE is a list given by `org-sql--to-fstate'."
+  (-let (((&plist :file-path :md5 :attributes) fstate))
+    (-> (org-sql--add-mql-insert acc files
+          :file_path file-path
+          :md5 md5
+          :size (file-attribute-size attributes)))))
+
+(defun org-sql--fstate-to-mql-insert (fstate)
+  "Return all MQL-inserts for FSTATE.
+FSTATE is a list given by `org-sql--to-fstate'."
+  (-> nil
+      (org-sql--add-mql-insert-file fstate)
+      (org-sql--add-mql-insert-file-properties fstate)
+      (org-sql--add-mql-insert-file-tags fstate)
+      (org-sql--add-mql-insert-headlines fstate)
+      (reverse)))
+
+(defun org-sql--fmeta-to-mql-update (fmeta)
+  "Return MQL-update for FMETA.
+FMETA is a list given by `org-sql--to-fmeta'."
+  (-let (((&plist :disk-path :hash) fmeta))
+    (org-sql--mql-update files (:file_path disk-path) (:md5 hash))))
+
+(defun org-sql--fmeta-to-mql-delete (fmeta)
+  "Return MQL-delete for FMETA.
+FMETA is a list given by `org-sql--to-fmeta'."
+  (-let (((&plist :db-path) fmeta))
+    (org-sql--mql-delete files (:file_path db-path))))
+
+;; fmeta function (see `org-sql--to-fmeta')
+
+(defun org-sql--merge-fmeta (disk-fmeta db-fmeta)
+  "Return a list of merged fmeta.
+Each member of the returned list and the arguments is a list
+given by `org-sql--to-fmeta'. DISK-FMETA is fmeta for org files
+on disk and DB-FMETA is fmeta for files in the database. This
+function will merge the two inputs such that those with common
+hashes will be considered equal and the final list will have only
+unique hashes."
+  (cl-labels
+      ((hash<
+        (a b)
+        (-let (((&plist :hash a-hash) a)
+               ((&plist :hash b-hash) b))
+          (string< a-hash b-hash)))
+       (combine
+        (a b)
+        (-let (((&plist :disk-path :hash) a)
+               ((&plist :db-path :hash) b))
+          (org-sql--to-fmeta disk-path db-path hash)))
+       (merge
+        (acc as bs)
+        (pcase (cons as bs)
+         (`(nil . nil) acc)
+         (`(,as* . nil) (append (reverse as*) acc))
+         (`(nil . ,bs*) (append (reverse bs*) acc))
+         (`((,a . ,as*) . (,b . ,bs*))
           (cond
-           ((memq type '(done note refile)) 1)
-           ((memq type '(reschedule delschedule redeadline deldeadline)) 3)
-           ((eq type 'state) 5))))
-    (when time-index
-      (set-match-data (alist-get :match-data item-part))
-      (->> item-part
-           (alist-get :header-text)
-           (match-string time-index)
-           org-sql--ts-fmt-unix-time))))
+           ((hash< a b) (merge (cons a acc) as* bs))
+           ((hash< b a) (merge (cons b acc) as bs*))
+           (t (merge (cons (combine a b) acc) as* bs*)))))))
+    (merge nil (sort disk-fmeta #'hash<) (sort db-fmeta #'hash<))))
 
-(defun org-sql--extract-lb-item (acc item-part)
-  "Add data from logbook entry ITEM-PART to accumulator ACC.
-ITEM-PART is a partitioned logbook item as described in
-`org-sql--partition-item'."
-  (let* ((type (alist-get :type item-part))
-         (hl-part (alist-get :hl-part item-part))
-         (logbook-data
-          (list :file_path (alist-get :filepath hl-part)
-                :headline_offset (->> hl-part
-                                      (alist-get :headline)
-                                      (org-element-property :begin))
-                :entry_offset (->> item-part
-                                   (alist-get :item)
-                                   (org-element-property :begin))
-                :entry_type type
-                :time_logged (org-sql--item-time-logged item-part)
-                :header (alist-get :header-text item-part)
-                :note (alist-get :note-text item-part))))
-    (if (not (or (null type) (memq type org-sql-included-logbook-types)))
-        acc
-      (cond
-       ((eq type 'state)
-        (org-sql--extract-lb-state-change acc logbook-data item-part))
+(defun org-sql--classify-fmeta (disk-fmeta db-fmeta)
+  "Return a list of classified file actions.
+DISK-FMETA and DB-FMETA are lists of file cells where each member is like
+\(md5 . filepath). Return an alist where the keys represent the
+actions to take on the files on disk/in the database. The keys of
+the alist will be 'noops', 'inserts', 'updates', and 'deletes'."
+  (cl-flet
+      ((get-path
+        (key alist)
+        (alist-get key alist nil nil #'equal))
+       (get-group
+        (transaction)
+        (-let (((&plist :disk-path :db-path) transaction))
+          ;; for a given md5, check the corresponding path given for its disk
+          ;; location and in the db to determine the action to take
+          (cond
+           ;; if paths are equal, do nothing
+           ((equal disk-path db-path) 'noops)
+           ;; if paths non-nil but unequal, assume disk path changed and update
+           ((and disk-path db-path) 'updates)
+           ;; if path on in db doesn't exist, assume new file and insert
+           ((and disk-path (not db-path) 'inserts))
+           ;; if path on on disk doesn't exist, assume removed file and delete
+           ((and (not disk-path) db-path) 'deletes)
+           ;; at least one path should be non-nil, else there is a problem
+           (t (error "Transaction classifier: this should not happen"))))))
+    (->> (org-sql--merge-fmeta disk-fmeta db-fmeta)
+         (-group-by #'get-group))))
 
-       ((memq type '(redeadline deldeadline))
-        (org-sql--extract-lb-planning-change acc logbook-data item-part
-                                             'deadline))
+;;;
+;;; STATEFUL FUNCTIONS
+;;;
 
-       ((memq type '(reschedule delschedule))
-        (org-sql--extract-lb-planning-change acc logbook-data item-part
-                                             'scheduled))
+;;; low-level IO
 
-       ;; ((memq type '(done refile note))
-       ;;  (org-sql--extract-lb-other acc logbook-data))
+(defun org-sql--run-command (path &rest args)
+  "Execute PATH with ARGS.
+Return a cons cell like (RETURNCODE . OUTPUT)."
+  (apply #'org-sql--run-command* path nil args))
 
-       ;; TODO, need a better way to handle unrecognized logbook items
-       (t (org-sql--alist-put acc 'logbook logbook-data))))))
+(defun org-sql--run-command* (path file &rest args)
+  "Execute PATH with ARGS and FILE routed to stdin.
+Return a cons cell like (RETURNCODE . OUTPUT)."
+  (with-temp-buffer
+    (let ((rc (apply #'call-process path file (current-buffer) nil args)))
+      (cons rc (buffer-string)))))
 
-(defun org-sql--extract-lb-clock (acc clock hl-part &optional item)
-  "Add data from logbook CLOCK to accumulator ACC.
-HL-PART is an object as returned by `org-sql--partition-headline'
-and represents the headline surrounding the clock.
-If ITEM is provided, check that this is a valid note that can be
-added to the clock, else add it as a normal logbook entry."
-  (let* ((item-part (org-sql--partition-item item hl-part))
-         (item-type (alist-get :type item-part))
-         (clock-data
-          (lambda ()
-            (let* ((hl (alist-get :headline hl-part))
-                   (ts-range (->> clock
-                                  (org-element-property :value)
-                                  org-sql--parse-ts-range)))
-              (list :file_path (alist-get :filepath hl-part)
-                    :headline_offset (org-element-property :begin hl)
-                    :clock_offset (org-element-property :begin clock)
-                    :time_start (car ts-range)
-                    :time_end (cdr ts-range))))))
-    (cond
-     ;; if item doesn't have type assume it is a clock note
-     ((and org-sql-store-clocks item-part (not item-type)
-           org-sql-store-clock-notes)
-      (->> (list :clock_note (alist-get :header-text item-part))
-           (append (funcall clock-data))
-           (org-sql--alist-put acc 'clocking)))
+;;; fmeta -> fstate
 
-     ;; but don't add a clock note if we don't want it
-     ((and org-sql-store-clocks item-part (not item-type))
-      (org-sql--alist-put acc 'clocking (funcall clock-data)))
+(defun org-sql--fmeta-get-fstate (fmeta)
+  "Return the fstate for FMETA.
+FSTATE is a list as given by `org-sql--to-fstate'."
+  (-let* (((&plist :disk-path :hash) fmeta)
+          (attributes (file-attributes disk-path)))
+    (with-current-buffer (find-file-noselect disk-path t)
+      (let ((tree (org-element-parse-buffer))
+            (todo-keywords (-map #'substring-no-properties org-todo-keywords-1)))
+        (org-sql--to-fstate disk-path hash attributes todo-keywords tree)))))
 
-     ;; if item has type then add it as a separate item with clock
-     ((and org-sql-store-clocks item-part item-type)
-      (-> acc
-          (org-sql--alist-put 'clocking (funcall clock-data))
-          (org-sql--extract-lb-item item-part)))
+;;; reading fmeta from external state
 
-     ;; if no item just add the clock
-     ((and org-sql-store-clocks (not item-part))
-      (org-sql--alist-put acc 'clocking (funcall clock-data)))
+(defun org-sql--disk-get-fmeta ()
+  "Get a list of fmeta for org files on disk.
+Each fmeta will have it's :db-path set to nil. Only files in
+`org-sql-files' will be considered."
+  (cl-flet
+      ((get-md5
+        (fp)
+        (-let (((rc . hash) (org-sql--run-command "md5sum" fp)))
+          (if (= 0 rc) (car (s-split-up-to " " hash 1))
+            (error "Could not get md5"))))
+       (expand-if-dir
+        (fp)
+        (if (not (file-directory-p fp)) `(,fp)
+          (directory-files fp t "\\`.*\\.org\\(_archive\\)?\\'"))))
+    (if (stringp org-sql-files)
+        (error "`org-sql-files' must be a list of paths")
+      (->> (-mapcat #'expand-if-dir org-sql-files)
+           (-filter #'file-exists-p)
+           (--map (org-sql--to-fmeta it nil (get-md5 it)))))))
 
-     ;; if we don't want clocks but there is still an item,
-     ;; add it as a logbook entry if it has a type
-     ((and (not org-sql-store-clocks) item-part item-type)
-      (org-sql--extract-lb-item acc item-part))
+(defun org-sql--db-get-fmeta ()
+  "Get a list of fmeta for the database.
+Each fmeta will have it's :disk-path set to nil."
+  (-let* ((columns '(:file_path :md5))
+          ;; TODO add compile check for this
+          (sql-select (org-sql--format-mql-select nil `(files (columns ,@columns))))
+          ((rc . out) (org-sql--send-sql sql-select)))
+    (if (/= 0 rc) (error out)
+      (->> (s-trim out)
+           (org-sql--parse-output-to-plist columns)
+           (--map (-let (((&plist :md5 h :file_path p) it))
+                    (org-sql--to-fmeta nil p h)))))))
 
-     ;; else return acc unaltered
-     (t acc))))
+(defun org-sql--get-transactions ()
+  "Return SQL string of the update transaction.
+This transaction will bring the database to represent the same
+state as the orgfiles on disk."
+  (-let* ((disk-fmeta (org-sql--disk-get-fmeta))
+          (db-fmeta (org-sql--db-get-fmeta))
+          (mode (car org-sql-db-config))
+          (formatter-alist
+           (->> org-sql--mql-schema
+                (--map (org-sql--compile-mql-schema-formatter-alist mode it))))
+          ((&alist 'updates 'inserts 'deletes)
+           (org-sql--classify-fmeta disk-fmeta db-fmeta)))
+    (cl-flet
+        ((inserts-to-sql
+          (fmeta)
+          (->> (org-sql--fmeta-get-fstate fmeta)
+               (org-sql--fstate-to-mql-insert)
+               (--map (org-sql--format-mql-insert formatter-alist it))))
+         (updates-to-sql
+          (fmeta)
+          (->> (org-sql--fmeta-to-mql-update fmeta)
+               (org-sql--format-mql-update formatter-alist)))
+         (deletes-to-sql
+          (fmeta)
+          (->> (org-sql--fmeta-to-mql-delete fmeta)
+               (org-sql--format-mql-delete formatter-alist))))
+      (->> (append (-map #'deletes-to-sql deletes)
+                   (-map #'updates-to-sql updates)
+                   (-mapcat #'inserts-to-sql inserts))
+           (org-sql--format-sql-transaction mode)))))
 
-(defun org-sql--extract-lb-items (acc items hl-part)
-  "Add data from logbook ITEMS to accumulator ACC.
-HL-PART is an object as returned by `org-sql--partition-headline'
-and represents the headline surrounding the items."
-  (let ((from
-         (lambda (acc item hl-part)
-           (->> hl-part
-                (org-sql--partition-item item)
-                (org-sql--extract-lb-item acc)))))
-    (org-sql--extract acc from items hl-part)))
+(defun org-sql-dump-update-transactions ()
+  "Dump the update transaction to a separate buffer."
+  (let ((out (org-sql--get-transactions)))
+    (switch-to-buffer "SQL: Org-update-dump")
+    (insert (s-replace ";" ";\n" out))))
 
-(defun org-sql--extract-lb-one (acc entry hl-part)
-  "Add data from logbook ENTRY to accumulator ACC.
-HL-PART is an object as returned by `org-sql--partition-headline'
-and represents the headline surrounding the entry."
-  (let ((type (org-element-type entry)))
-    (cond
-     ((eq type 'clock)
-      (org-sql--extract-lb-clock acc entry hl-part))
-     ((eq type 'item)
-      (--> entry
-           (org-sql--partition-item it hl-part)
-           (org-sql--extract-lb-item acc it)))
-     ;; TODO add an "UNKNOWN" logbook parser
-     (t acc))))
+;;; SQL command wrappers
 
-(defun org-sql--extract-lb-contents (acc lb-flat hl-part)
-  "Add list of logbook items LB-FLAT from HL-PART to accumulator ACC.
-HL-PART is an object as returned by `org-sql--partition-headline'
-and LB-FLAT is a flatted logbook entry list as given by
-`org-sql--flatten-lb-entries'."
-  (while lb-flat
-    ;; Need two of the next entries here because clocks may
-    ;; have notes associated with them, but the only
-    ;; distinguishing characteristic they have is that they
-    ;; don't match anything in org-log-note-headings. If we
-    ;; end up processing two entries at once, skip over two
-    ;; instead of one on the next iteration.
-    (let* ((cur1 (car lb-flat))
-           (cur2 (cadr lb-flat))
-           (type1 (org-element-type cur1))
-           (type2 (org-element-type cur2))
-           (try-clock-note (and (eq type1 'clock) (eq type2 'item))))
-      (if try-clock-note
-          (setq acc (org-sql--extract-lb-clock acc cur1 hl-part cur2)
-                lb-flat (cddr lb-flat))
-        (setq acc (org-sql--extract-lb-one acc cur1 hl-part)
-              lb-flat (cdr lb-flat)))))
-  acc)
+(defun org-sql--exec-sqlite-command (config-keys &rest args)
+  "Execute a sqlite command with ARGS.
+CONFIG-KEYS is the plist component if `org-sql-db-config'."
+  (-let (((&plist :path) config-keys))
+    (apply #'org-sql--run-command org-sql--sqlite-exe (cons path args))))
 
-(defun org-sql--extract-lb-drawer (acc hl-part)
-  "Given HL-PART, find logbook drawer and add to accumulator ACC.
-HL-PART is an object as returned by `org-sql--partition-headline'."
-  (--> hl-part
-       (alist-get :section it)
-       (--first (equal org-log-into-drawer
-                       (org-element-property :drawer-name it))
-                it)
-       (org-element-contents it)
-       (org-sql--flatten-lb-entries it)
-       (org-sql--extract-lb-contents acc it hl-part)))
+(defun org-sql--exec-postgres-command-sub (exe config-keys &rest args)
+  "Execute a postgres command with ARGS.
+CONFIG-KEYS is the plist component if `org-sql-db-config'. EXE is
+a symbol for the executate to run and is one of 'psql',
+'createdb', or 'dropdb'. The connection options for the postgres
+server. will be handled here."
+  (-let* (((&plist :hostname :port :username :password) config-keys)
+          (h (-some->> hostname (list "-h")))
+          (p (-some->> port (list "-p")))
+          (u (-some->> username (list "-U")))
+          (w '("-w"))
+          (process-environment
+           (if (not password) process-environment
+             (cons (format "PGPASSWORD=%s" password) process-environment)))
+          (exe* (cl-case exe
+                  (psql org-sql--psql-exe)
+                  (createdb org-sql--postgres-createdb-exe)
+                  (dropdb org-sql--postgres-dropdb-exe)
+                  (t (error "Invalid postgres exe: %s" exe)))))
+    (apply #'org-sql--run-command exe* (append h p u w args))))
 
-(defun org-sql--extract-properties (acc hl-part)
-   "Add properties data from HL-PART and add to accumulator ACC.
-HL-PART is an object as returned by `org-sql--partition-headline'."
-   (if (eq 'all org-sql-ignored-properties) acc
-     (let ((node-props
-            (->> hl-part
-                 (alist-get :section)
-                 (assoc 'property-drawer)
-                 (org-element-contents)
-                 (--remove (member (org-element-property :key it)
-                                   org-sql--ignored-properties-default))
-                 (--remove (member (org-element-property :key it)
-                                   org-sql-ignored-properties))))
-           (from
-            (lambda (acc np hl-part)
-              (->>
-               (list :file_path (alist-get :filepath hl-part)
-                     :headline_offset (->>
-                                       hl-part
-                                       (alist-get :headline)
-                                       (org-element-property :begin))
-                     :property_offset (org-element-property :begin np)
-                     :key_text (org-element-property :key np)
-                     :val_text (->>
-                                np
-                                (org-element-property :value)
-                                org-sql--parse-ts-maybe)
-                     ;; TODO add inherited flag
-                     :inherited nil)
-               (org-sql--alist-put acc 'properties)))))
-       (org-sql--extract acc from node-props hl-part))))
+(defun org-sql--exec-postgres-command (config-keys &rest args)
+  "Execute a postgres command with ARGS.
+CONFIG-KEYS is the plist component if `org-sql-db-config'. Note this
+uses the 'psql' client command in the background."
+  (-let* (((&plist :database) config-keys)
+          (d (-some->> database (list "-d")))
+          (f (list "-At")))
+    (apply #'org-sql--exec-postgres-command-sub 'psql config-keys (append d f args))))
 
-(defun org-sql--extract-tags (acc hl-part)
-  "Extract tags data from HL-PART and add to accumulator ACC.
-HL-PART is an object as returned by `org-sql--partition-headline'."
-  (if (eq 'all org-sql-ignored-tags) acc
-    (let* ((hl (alist-get :headline hl-part))
-           ;; first retrieve tags and strip text props and whitespace
-           (tags (--> hl
-                      (org-element-property :tags it)
-                      (mapcar #'org-sql--strip-string it)
-                      (-difference it org-sql-ignored-tags)))
-           ;; split-string returns nil if it gets ""
-           (i-tags (->
-                    (org-element-property :ARCHIVE_ITAGS hl)
-                    (or "")
-                    split-string
-                    (-difference org-sql-ignored-tags)))
-           ;; then retrieve i-tags, optionally going up to parents
-           (i-tags (when org-sql-use-tag-inheritance
-                     (org-sql--element-parent-tags hl i-tags)))
-           (from
-            (lambda (acc tag hl-part &optional inherited)
-              (->>
-               (list :file_path (alist-get :filepath hl-part)
-                     :headline_offset (->>
-                                       hl-part
-                                       (alist-get :headline)
-                                       (org-element-property :begin))
-                     :tag tag
-                     :inherited (if inherited 1 0))
-                (org-sql--alist-put acc 'tags)))))
-      (-> acc
-          (org-sql--extract from tags hl-part)
-          (org-sql--extract from i-tags hl-part t)))))
+(defun org-sql--send-sql (sql-cmd)
+  "Execute SQL-CMD.
+The database connection will be handled transparently."
+  (-let* (((mode . keyvals) org-sql-db-config))
+    (org-sql--case-mode mode
+      (sqlite
+       (org-sql--exec-sqlite-command keyvals sql-cmd))
+      (postgres
+       (org-sql--exec-postgres-command keyvals "-c" sql-cmd)))))
 
-(defun org-sql--extract-links (acc hl-part)
-  "Add link data from headline HL-PART to accumulator ACC.
-HL-PART is an object as returned by `org-sql--partition-headline'."
-  (if (eq 'all org-sql-ignored-link-types) acc
-    (let* ((links (--> (alist-get :section hl-part)
-                       (org-element-map it 'link #'identity)
-                       (--remove
-                        (member (org-element-property :type it)
-                                org-sql-ignored-link-types)
-                        it)))
-           (from
-            (lambda (acc ln hl-part)
-              (let ((hl (alist-get :headline hl-part)))
-                (->>
-                 (list :file_path (alist-get :filepath hl-part)
-                       :headline_offset (org-element-property :begin hl)
-                       :link_offset (org-element-property :begin ln)
-                       :link_path (org-element-property :path ln)
-                       :link_text (->> ln
-                                       org-element-contents
-                                       org-element-interpret-data
-                                       org-sql--strip-string)
-                       :link_type (org-element-property :type ln))
-                 (org-sql--alist-put acc 'links))))))
-      (org-sql--extract acc from links hl-part))))
+;; TODO is this necessary now that I am not using a shell to execute?
+(defun org-sql--send-sql* (sql-cmd)
+  "Execute SQL-CMD as a separate file input.
+The database connection will be handled transparently."
+  (if (not sql-cmd) '(0 . "")
+    (-let* ((tmp-path (format "/tmp/org-sql-cmd-%s" (round (float-time))))
+            ((mode . keyvals) org-sql-db-config))
+      (f-write sql-cmd 'utf-8 tmp-path)
+      (let ((res
+             (org-sql--case-mode mode
+               (sqlite
+                (org-sql--exec-sqlite-command keyvals (format ".read %s" tmp-path)))
+               (postgres
+                (org-sql--exec-postgres-command keyvals "-f" tmp-path)))))
+        (f-delete tmp-path)
+        res))))
 
-(defun org-sql--extract-ts (acc ts hl-part &optional pt)
-  "Add timestamp TS data from headline HL-PART to accumulator ACC.
-HL-PART is an object as returned by `org-sql--partition-headline'.
-PT is a string representing the planning type and is one of 'closed,'
-'scheduled,' or 'deadline' although these values are not enforced by
-this function."
-  (let* ((ts-range (org-sql--parse-ts-range ts))
-         (get-resolution
-          (lambda (ts)
-            (when ts
-              (if (org-element-property :hour-start ts)
-                  'minute
-                'day))))
-         (ts-range-res (org-sql--parse-ts-range ts get-resolution))
-         (fp (alist-get :filepath hl-part))
-         (ts-offset (org-element-property :begin ts))
-         (ts-data
-          (list
-           :file_path fp
-           :headline_offset (->> hl-part
-                                 (alist-get :headline)
-                                 (org-element-property :begin))
-           :timestamp_offset ts-offset
-           ;; don't care if they are ranges here, this is reflected in
-           ;; the time_end value
-           :type (--> ts
-                      (org-element-property :type it)
-                      (cond ((eq it 'inactive-range) 'inactive)
-                            ((eq it 'active-range) 'active)
-                            (t it)))
-           :planning_type pt
-           :warning_type (org-element-property :warning-type ts)
-           :warning_value (org-element-property :warning-value ts)
-           :warning_unit (org-element-property :warning-unit ts)
-           :repeat_type (org-element-property :repeater-type ts)
-           :repeat_value (org-element-property :repeater-value ts)
-           :repeat_unit (org-element-property :repeater-unit ts)
-           :time (car ts-range)
-           :resolution (car ts-range-res)
-           :time_end (cdr ts-range)
-           :resolution_end (cdr ts-range-res)
-           :raw_value (org-element-property :raw-value ts))))
-    (org-sql--alist-put acc 'timestamp ts-data)))
+;;; high-level database operations
 
-(defun org-sql--extract-hl-contents (acc hl-part)
-  "Add contents from partitioned header HL-PART to accumulator ACC.
-HL-PART is an object as returned by `org-sql--partition-headline'."
-  ;; start by getting the 'section contents, which is everything
-  ;; except for the planning element, logbook drawer, and property
-  ;; drawer
-  (let* ((sec (->>
-               hl-part
-               (alist-get :section)
-               (--remove (eq 'planning (org-element-type it)))
-               (--remove (eq 'property-drawer (org-element-type it)))
-               (--remove (equal (org-element-property :drawer-name it)
-                                org-log-into-drawer))))
-         (sec-split (--split-with
-                     (or (eq 'clock (org-element-type it))
-                         (eq 'plain-list (org-element-type it)))
-                     sec))
-         (lb-split (-> sec-split car org-sql--split-lb-entries))
-         (sec-rem (->> sec-split cdr (append (cdr lb-split))))
-         (hl-ts
-          (->>
-           (org-element-map sec-rem 'timestamp #'identity)
-           (--filter (memq (org-element-property :type it)
-                           org-sql-included-contents-timestamp-types)))))
-    (->
-     acc
-     (org-sql--extract-lb-contents (car lb-split) hl-part)
-     (org-sql--extract #'org-sql--extract-ts hl-ts hl-part))))
+(defun org-sql--db-exists ()
+  "Return t if the configured database exists."
+  (-let (((mode . keyvals) org-sql-db-config))
+    (org-sql--case-mode mode
+      (sqlite
+       (-let (((&plist :path) keyvals))
+         (file-exists-p path)))
+      (postgres
+       (-let (((&plist :database) keyvals)
+              ((rc . out) (org-sql--exec-postgres-command-sub 'psql keyvals "-qtl")))
+         (if (/= 0 rc) (error out)
+           (->> (s-split "\n" out)
+                (--map (s-trim (car (s-split "|" it))))
+                (--find (equal it database)))))))))
 
-(defun org-sql--extract-hl-planning (acc hl-part)
-  "Add planning timestamps from HL-PART to accumulator ACC.
-HL-PART is an object as returned by `org-sql--partition-headline'.
-This will include planning timestamps according to
-`org-sql-included-headline-planning-types'."
-  (let ((hl (alist-get :headline hl-part)))
-    (dolist (type org-sql-included-headline-planning-types)
-      (let* ((ts (org-element-property type hl))
-             (pt (org-sql--kw-to-colname type)))
-        (when ts
-          (setq acc (org-sql--extract-ts acc ts hl-part pt)))))
-    acc))
+(defun org-sql--db-has-valid-schema ()
+  "Return t if the configured database has a valid schema.
+Note that this currently only tests the existence of the schema's tables."
+  (-let* ((table-names (--map (symbol-name (car it)) org-sql--mql-schema))
+          ((sql-cmd parse-fun)
+           (org-sql--case-mode (car org-sql-db-config)
+             (sqlite
+              (list ".tables"
+                    (lambda (s)
+                      (--mapcat (s-split " " it t) (s-lines s)))))
+             (postgres
+              (list "\\dt"
+                    (lambda (s)
+                      (->> (s-trim s)
+                           (s-lines)
+                           (--map (nth 1 (s-split "|" it)))))))))
+          ((rc . out) (org-sql--send-sql sql-cmd)))
+    (if (/= 0 rc) (error out)
+      (org-sql--sets-equal table-names (funcall parse-fun out) :test #'equal))))
 
-(defun org-sql--extract-hl-meta (acc hl-part)
-  "Add general data from headline HL-PART to accumulator ACC.
-HL-PART is an object as returned by `org-sql--partition-headline'."
-  (let* ((hl (alist-get :headline hl-part))
-         (hl-data
-          (list
-           :file_path (alist-get :filepath hl-part)
-           :headline_offset (org-element-property :begin hl)
-           :tree_path (org-sql--element-parent-tree-path hl)
-           :headline_text (org-element-property :raw-value hl)
-           :keyword (->> hl
-                         (org-element-property :todo-keyword)
-                         org-sql--strip-string)
-           :effort (--> hl
-                        (org-element-property :EFFORT it)
-                        (org-sql--effort-to-int it t))
-           :priority (-some->> hl
-                               (org-element-property :priority)
-                               byte-to-string)
-           :archived (if (org-element-property :archivedp hl) 1 0)
-           :commented (if (org-element-property :commentedp hl) 1 0)
-           :content nil)))
-    (->
-     acc
-     (org-sql--alist-put 'headlines hl-data)
-     (org-sql--extract-hl-contents hl-part)
-     (org-sql--extract-hl-planning hl-part))))
+(defun org-sql--db-create ()
+  "Create the configured database."
+  (-let (((mode . keyvals) org-sql-db-config))
+    (org-sql--case-mode mode
+      (sqlite
+       ;; this is a silly command that should work on all platforms (eg doesn't
+       ;; require `touch' to make an empty file)
+       (org-sql--exec-sqlite-command keyvals ".schema"))
+      (postgres
+       (-let (((&plist :database) keyvals))
+         (org-sql--exec-postgres-command-sub 'createdb keyvals database))))))
 
-(defun org-sql--extract-hl (acc headlines fp)
-  "Extract data from HEADLINES and add to accumulator ACC.
-FP is the path to the file containing the headlines."
-  (let ((from
-         (lambda (acc hl fp)
-           (let* ((hl-part (org-sql--partition-headline hl fp))
-                  (hl-sub (alist-get :subheadlines hl-part)))
-             (-> acc
-                 (org-sql--extract-hl-meta hl-part)
-                 (org-sql--extract-links hl-part)
-                 (org-sql--extract-tags hl-part)
-                 (org-sql--extract-properties hl-part)
-                 (org-sql--extract-lb-drawer hl-part)
-                 (org-sql--extract-hl hl-sub fp))))))
-    (org-sql--extract acc from headlines fp)))
+(defun org-sql--db-create-tables ()
+  "Create the schema for the configured database."
+  (let ((sql-cmd (org-sql--format-mql-schema org-sql-db-config org-sql--mql-schema)))
+    (org-sql--send-sql sql-cmd)))
 
-(defun org-sql--extract-file (cell acc)
-  "Extract the file in the car of CELL for a sql insertion.
-The results are accumulated in ACC which is returned on exit."
-  (let* ((fp (car cell))
-         (md5sum (cdr cell))
-         (fsize (->> fp file-attributes file-attribute-size))
-         (headlines (-->
-                     fp
-                     (find-file-noselect it t)
-                     (with-current-buffer it (org-element-parse-buffer))
-                     (org-element-contents it)
-                     (if (assoc 'section it) (cdr it) it)))
-         (file-data (list :file_path fp
-                          :md5 md5sum
-                          :size fsize)))
-    (-> acc
-        (org-sql--alist-put 'files file-data)
-        (org-sql--extract-hl headlines fp))))
+(defun org-sql--delete-db ()
+  "Delete the configured database."
+  (-let (((mode . keyvals) org-sql-db-config))
+    (org-sql--case-mode mode
+      (sqlite
+       (-let (((&plist :path) keyvals))
+         (delete-file path)))
+      (postgres
+       (-let (((&plist :database) keyvals))
+         (org-sql--exec-postgres-command-sub 'dropdb keyvals database))))))
 
-;;; database syncing functions
+;;;
+;;; PUBLIC API
+;;; 
 
-(defun org-sql-sync-insert (cell acc)
-  "Add insertion commands for CELL in accumulator ACC. Return new ACC."
-  (->> (plist-get acc 'insert)
-       (org-sql--extract-file cell)
-       (plist-put acc 'insert)))
-
-(defun org-sql-sync-update (cell acc)
-  "Add update commands for CELL in accumulator ACC. Return new ACC."
-  (let ((updt-acc (plist-get acc 'update)))
-    (->> `((:file_path ,(car cell)) . (:md5 ,(cdr cell)))
-         (org-sql--alist-put updt-acc 'files)
-         (plist-put acc 'update))))
-
-(defun org-sql-sync-delete (cell acc)
-  "Add deletion commands for CELL in accumulator ACC. Return new ACC."
-  (let ((dlt-acc (plist-get acc 'delete)))
-    (->>  `(:file_path ,(car cell))
-          (org-sql--alist-put dlt-acc 'files)
-          (plist-put acc 'delete))))
-
-;; TODO can probs rewrite this in a clearer way using partitioning
-;; from dash
-(defun org-sql-sync-one (cell fp-qry acc)
-  "Match CELL with entries FP-QRY and process accordingly.
-CELL is a cons cell given by `org-sql-files-on-disk' and FP-QRY
-is a list of cons cells given by `org-sql-files-from-db'.
-
-By comparing the file path and md5 in CELL with those contained in
-FP-QRY, this function will determine the sync state between disk and
-db for the file represented by CELL. These scenarios can occur:
-
-- both filepath and md5 match: do nothing, fully synced
-
-- filepath doesn't match: assume the file was renamed and update db
-  with filepath from CELL
-
-- md5 doesn't match: assume file was modified; delete the path from
-  the db and repopulate the filepath from CELL
-
-- neither match: assume file is new and untracked; insert filepath
-  from CELL into db
-
-Returns a cons cell of the new accumulator ACC and the remaining
-FP-QRY. If a match is found is it removed fro FP-QRY before returning.
-
-Note that this does not test if there are entries in the db that
-have no files on disk. This is dealt with in `org-sql-sync'."
-  ;; if perfect match, do nothing
-  (if (cl-find cell fp-qry :test #'equal)
-      (cons acc (remove cell fp-qry))
-    (let* ((match-cells
-            (lambda (a b fun)
-              (let ((car-a (car a))
-                    (cdr-a (cdr a))
-                    (car-b (car b))
-                    (cdr-b (cdr b)))
-                (funcall fun car-a car-b cdr-a cdr-b))))
-           (match-fp
-            (lambda (fp-a fp-b md5-a md5-b)
-              (and (equal fp-a fp-b) (not (equal md5-a md5-b)))))
-           (match-md5
-            (lambda (fp-a fp-b md5-a md5-b)
-              (and (not (equal fp-a fp-b)) (equal md5-a md5-b))))
-           (match-fp*
-            (lambda (b)
-              (funcall match-cells cell b match-fp)))
-           (match-md5*
-            (lambda (b)
-              (funcall match-cells cell b match-md5)))
-           (found-fp (cl-find-if (lambda (q) (funcall match-fp* q)) fp-qry)))
-      (cond
-       ;; if fp matches, delete qry in db and insert cell
-       (found-fp
-        (cons (org-sql-sync-insert cell (org-sql-sync-delete found-fp acc))
-              (remove found-fp fp-qry)))
-       ;; if md5 matches, update fp in db
-       ((cl-find-if (lambda (q) (funcall match-md5* q)) fp-qry)
-        (cons (org-sql-sync-update cell acc)
-              (cl-remove-if (lambda (q) (funcall match-md5* q)) fp-qry)))
-       ;; if none match, insert cell
-       (t
-        (cons (org-sql-sync-insert cell acc) fp-qry))))))
-
-(defun org-sql-sync-all (fp-dsk fp-qry)
-  "Synchronize state between disk and db.
-
-FP-DSK and FP-QRY are lists of cons cells as returned via
-`org-sql-files-in-disk' and `org-sql-files-in-db' respectively.
-This function iterates through all cells in FP-QRY, interrogating
-their sync state via `org-sql-sync-one' (this takes care of any
-insertion and update operations for cells in FP-DSK). Anything in
-FP-QRY that is not matched with anything in FP-DSK is assumed to be
-deleted and is removed at the end of this function.
-
-This creates and returns an accumulator object which is an alist of
-alists of plists which holds the operations to be performed on the
-database."
-  (let (acc)
-    ;; sync each cell in fp-dsk first and remove matching fp-qry cells
-    (while fp-dsk
-      (let ((found (--> fp-dsk
-                        (car it)
-                        (org-sql-sync-one it fp-qry acc))))
-        (setq fp-dsk (cdr fp-dsk)
-              acc (car found)
-              fp-qry (cdr found))))
-    ;; remove all leftover entries in the db
-    (while fp-qry
-      (setq acc (org-sql-sync-delete (car fp-qry) acc)
-            fp-qry (cdr fp-qry)))
-    acc))
-
-(defun org-sql-files ()
-  "Return full list of absolute file paths via `org-sql-files'."
-  (->>
-   org-sql-files
-   (--map (if (file-directory-p it)
-              (directory-files it t "\\`.*\\.org\\(_archive\\)?\\'")
-            (list it)))
-   (apply #'append)
-   (-filter #'file-exists-p)))
-
-(defun org-sql-files-on-disk ()
-  "Return alist for file paths in `org-sql-files'.
-In each cell, the car is the file path and cdr is the file's MD5."
-  (let ((cons-md5
-         (lambda (fp)
-           (->> fp
-                (format "md5sum %s | awk '{print $1}'")
-                shell-command-to-string
-                string-trim
-                (cons fp)))))
-    (->> (org-sql-files) (--map (funcall cons-md5 it)))))
-
-(defun org-sql-files-in-db ()
-  "Get all files and their metadata from the database.
-Returns an alist where the each car is the file_path column value
-and each cdr is the plist of metadata."
-  (when (file-exists-p org-sql-sqlite-path)
-    (->> '(:file_path :md5)
-         (org-sql-cmd-select 'files)
-         (mapcar #'org-sql--plist-get-vals)
-         (--map (cons (car it) (cadr it))))))
-
-(defun org-sql-get-transactions ()
-  "Return plist of the transactions to be performed on the db.
-The plist has three properties (delete, insert, update) for the three
-type of commands that are performed on the database during an update."
-  (let ((fp-dsk (org-sql-files-on-disk))
-        (map-trns
-         (lambda (op fun trans)
-           (->>
-            (plist-get trans op)
-            (--map (funcall fun it))
-            org-sql--fmt-trans
-            (plist-put trans op)))))
-    (->>
-     (org-sql-files-in-db)
-     (org-sql-sync-all fp-dsk)
-     (funcall map-trns 'insert #'org-sql--fmt-inserts)
-     (funcall map-trns 'update #'org-sql--fmt-updates)
-     (funcall map-trns 'delete #'org-sql--fmt-deletes))))
+;;; non-interactive
 
 (defun org-sql-init-db ()
-  "Add schemas to database if they do not exist already.
-This assumes an active connection is open."
-  ;; assume that the db will be created when a new connection is opened
-  (->> org-sql--schemas (mapcar #'org-sql-cmd)))
-
-(defun org-sql-delete-db ()
-  "Deletes the database from disk."
-  (when (file-exists-p org-sql-sqlite-path)
-    (delete-file org-sql-sqlite-path)))
+  "Initialize the Org-SQL database."
+  (org-sql--db-create)
+  (org-sql--db-create-tables))
 
 (defun org-sql-update-db ()
-  "Update the database. This assumes an active connection is open."
-  (let ((trans (org-sql-get-transactions)))
-    ;; the order below likely doesn't matter if the pragma is set
-    ;; to defer foreign key constraints, but it is easy to debug now
-    ;; so whatever
-    `(,(-> trans (plist-get 'delete) (org-sql-cmd))
-      ,(-> trans (plist-get 'update) (org-sql-cmd))
-      ,(-> trans (plist-get 'insert) (org-sql-cmd)))))
+  "Update the Org-SQL database.
+This means the state of all files from `org-sql-files' will be
+pushed and updated to the database."
+  (let ((inhibit-message t))
+    (org-save-all-org-buffers))
+  (org-sql--send-sql* (org-sql--get-transactions)))
 
 (defun org-sql-clear-db ()
-  "Clear the database. This assumes an active connections is open."
+  "Clear the Org-SQL database without deleting it."
   ;; only delete from files as we assume actions here cascade down
-  (-> (org-sql--fmt-delete 'files nil t)
-      list
-      (org-sql--fmt-trans)
-      (org-sql-cmd)))
+  (->> (org-sql--mql-delete files nil)
+       (org-sql--format-mql-delete nil)
+       (org-sql--send-sql)))
 
-;;; interactive user functions
+(defun org-sql-reset-db ()
+  "Reset the Org-SQL database.
+This will delete the database and create a new one with the
+required schema."
+  (org-sql--delete-db)
+  (org-sql-init-db))
+
+;;; interactive
 
 (defun org-sql-user-update ()
   "Update the Org SQL database."
   (interactive)
   ;; TODO need to see if schema is correct?
-  ;; for now this assumes the db exists and has a valid schema
-  (org-sql-cmd-open-connection)
   (message "Updating Org SQL database")
   (let ((out (org-sql-update-db)))
     (when org-sql-debug
-      (message "Debug output for org-sql update")
-      ;; assume `OUT' is a list of the output for the three
-      ;; transactions used in the update (delete, update, insert)
-      (--> (--map (cond
-                   ((null it) "Not run")
-                   ((equal it "") "Run successfully")
-                   (t it))
-                  out)
-           (-zip-pair '("DELETE" "UPDATE" "INSERT") it)
-           (--map (format "%s transactions: %s" (car it) (cdr it)) it)
-           (-each it #'message))))
+      (print "Debug output for org-sql update")
+      (print (if (equal out "") "Run Successfully" out))))
   (message "Org SQL update complete"))
 
 (defun org-sql-user-clear-all ()
@@ -1508,36 +2101,26 @@ This assumes an active connection is open."
   (interactive)
   (if (y-or-n-p "Really clear all? ")
       (progn
-        (org-sql-cmd-open-connection)
         (message "Clearing Org SQL database")
         (let ((out (org-sql-clear-db)))
           (when org-sql-debug
-            (message "Debug output for org-sql clear-all")
-            ;; assume `OUT' is a blank string (success) or the error
-            ;; message
-            (let ((msg (if (equal out "") "Run Successfully" out)))
-              (message "DELETE transaction: %s" msg))))
+            (print "Debug output for org-sql clear-all")
+            (print (if (equal out "") "Run Successfully" out))))
         (message "Org SQL clear completed"))
     (message "Aborted")))
 
 (defun org-sql-user-reset ()
   "Reset the database with default schema."
   (interactive)
-  (if (or (not (file-exists-p org-sql-sqlite-path))
+  (if (or (not (org-sql--db-exists))
           (y-or-n-p "Really reset database? "))
       (progn
-        (org-sql-cmd-kill-connection)
         (org-sql-delete-db)
-        (org-sql-cmd-open-connection)
         (message "Resetting Org SQL database")
         (let ((out (org-sql-init-db)))
           (when org-sql-debug
-            ;; assume `OUT' is a list of the output of all the
-            ;; CREATE TABLE transactions when making the schema
-            (message "Debug output for org-sql reset")
-            (--> (--map (if (equal it "") "Run successfully" it) out)
-                 (--map (format "CREATE TABLE transaction: %s" it) it)
-                 (-each it #'message))))
+            (print "Debug output for org-sql user-reset")
+            (print (if (equal out "") "Run Successfully" out))))
         (message "Org SQL reset completed"))
     (message "Aborted")))
 
