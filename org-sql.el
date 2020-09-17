@@ -1584,15 +1584,18 @@ timestamp."
 (defun org-sql--add-mql-insert-headline-timestamps (acc headline file-path)
   "Add MQL-insert for each timestamp in HEADLINE to ACC.
 FILE-PATH is the path to the file containing this headline."
-  (-if-let (pattern (-some--> org-sql--content-timestamp-types
-                      (-difference it org-sql-excluded-contents-timestamp-types)
-                      (--map `(:type ',it) it)
-                      `(:any * (:and timestamp (:or ,@it)))))
-      (let ((timestamps (-some->> (org-sql--headline-get-contents headline)
-                          (org-ml-match pattern)))
-            (headline-offset (org-ml-get-property :begin headline)))
-        (--reduce-from (org-sql--add-mql-insert-timestamp acc it headline-offset file-path) acc timestamps))
-    acc))
+  (if (eq org-sql-excluded-contents-timestamp-types 'all) acc
+    (-if-let (pattern (-some--> org-sql--content-timestamp-types
+                        (-difference it org-sql-excluded-contents-timestamp-types)
+                        (--map `(:type ',it) it)
+                        `(:any * (:and timestamp (:or ,@it)))))
+        (let ((timestamps (-some->> (org-sql--headline-get-contents headline)
+                            (org-ml-match pattern)))
+              (headline-offset (org-ml-get-property :begin headline)))
+          (--reduce-from
+           (org-sql--add-mql-insert-timestamp acc it headline-offset file-path)
+           acc timestamps))
+      acc)))
 
 (defun org-sql--add-mql-insert-headline-planning (acc headline file-path)
   "Add MQL-insert for each planning timestamp in HEADLINE to ACC.

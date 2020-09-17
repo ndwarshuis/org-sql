@@ -71,6 +71,18 @@ list then join the cdr of IN with newlines."
   `(expect-sql* ,in ,tbl (->> (buffer-get-sml)
                               (--filter (member (car it) ',names)))))
 
+(defmacro expect-sql-tbls-multi (names in &rest forms)
+  (declare (indent 2))
+  (unless (= 0 (mod (length forms) 3))
+    (error "Missing form"))
+  (let ((specs
+         (->> (-partition 3 forms)
+              (--map (-let (((title let-forms tbl) it))
+                       `(it ,title
+                          (let (,@let-forms)
+                            (expect-sql-tbls ,names ,in ,tbl))))))))
+    `(progn ,@specs)))
+
 (describe "meta-query language insert spec"
   (before-all
     (org-mode))
@@ -98,7 +110,6 @@ list then join the cdr of IN with newlines."
                            :depth 0))))
 
   (it "two headlines"
-    ;; NOTE reverse order
     (expect-sql (list "* headline"
                       "* another headline")
       `(,testing-files-sml
@@ -203,143 +214,144 @@ list then join the cdr of IN with newlines."
                            :parent_offset 1
                            :depth 0))))
 
-  (it "closed headline"
-    (let* ((ts "[2112-01-01 Thu]"))
-      (expect-sql (list "* headline"
-                        (format "CLOSED: %s" ts))
-        `(,testing-files-sml
-          (headlines :file_path ,testing-filepath
+  ;; planning entries
+
+  (let ((ts0 "<2112-01-01 Thu>")
+        (ts1 "<2112-01-02 Fri>")
+        (ts2 "[2112-01-03 Sat]"))
+    (expect-sql-tbls-multi (planning_entries timestamps)
+        (list "* headline"
+              (format "SCHEDULED: %s DEADLINE: %s CLOSED: %s" ts0 ts1 ts2))
+      "multiple planning entries (included)"
+      nil
+      `((timestamps :file_path ,testing-filepath
+                    :headline_offset 1
+                    :timestamp_offset 75
+                    :is_active 0
+                    :warning_type nil
+                    :warning_value nil
+                    :warning_unit nil
+                    :repeat_type nil
+                    :repeat_value nil
+                    :repeat_unit nil
+                    :time_start ,(org-ts-to-unixtime ts2)
+                    :start_is_long 0
+                    :time_end nil
+                    :end_is_long nil
+                    :raw_value ,ts2)
+        (planning_entries :file_path ,testing-filepath
+                          :headline_offset 1
+                          :planning_type closed
+                          :timestamp_offset 75)
+        (timestamps :file_path ,testing-filepath
+                    :headline_offset 1
+                    :timestamp_offset 50
+                    :is_active 1
+                    :warning_type nil
+                    :warning_value nil
+                    :warning_unit nil
+                    :repeat_type nil
+                    :repeat_value nil
+                    :repeat_unit nil
+                    :time_start ,(org-ts-to-unixtime ts1)
+                    :start_is_long 0
+                    :time_end nil
+                    :end_is_long nil
+                    :raw_value ,ts1)
+        (planning_entries :file_path ,testing-filepath
+                          :headline_offset 1
+                          :planning_type deadline
+                          :timestamp_offset 50)
+        (timestamps :file_path ,testing-filepath
+                    :headline_offset 1
+                    :timestamp_offset 23
+                    :is_active 1
+                    :warning_type nil
+                    :warning_value nil
+                    :warning_unit nil
+                    :repeat_type nil
+                    :repeat_value nil
+                    :repeat_unit nil
+                    :time_start ,(org-ts-to-unixtime ts0)
+                    :start_is_long 0
+                    :time_end nil
+                    :end_is_long nil
+                    :raw_value ,ts0)
+        (planning_entries :file_path ,testing-filepath
+                          :headline_offset 1
+                          :planning_type scheduled
+                          :timestamp_offset 23))
+
+      "multiple planning entries (exclude some)"
+      ((org-sql-excluded-headline-planning-types '(:closed)))
+      `((timestamps :file_path ,testing-filepath
+                    :headline_offset 1
+                    :timestamp_offset 50
+                    :is_active 1
+                    :warning_type nil
+                    :warning_value nil
+                    :warning_unit nil
+                    :repeat_type nil
+                    :repeat_value nil
+                    :repeat_unit nil
+                    :time_start ,(org-ts-to-unixtime ts1)
+                    :start_is_long 0
+                    :time_end nil
+                    :end_is_long nil
+                    :raw_value ,ts1)
+        (planning_entries :file_path ,testing-filepath
+                          :headline_offset 1
+                          :planning_type deadline
+                          :timestamp_offset 50)
+        (timestamps :file_path ,testing-filepath
+                    :headline_offset 1
+                    :timestamp_offset 23
+                    :is_active 1
+                    :warning_type nil
+                    :warning_value nil
+                    :warning_unit nil
+                    :repeat_type nil
+                    :repeat_value nil
+                    :repeat_unit nil
+                    :time_start ,(org-ts-to-unixtime ts0)
+                    :start_is_long 0
+                    :time_end nil
+                    :end_is_long nil
+                    :raw_value ,ts0)
+        (planning_entries :file_path ,testing-filepath
+                          :headline_offset 1
+                          :planning_type scheduled
+                          :timestamp_offset 23))
+
+      "multiple planning entries (exclude all)"
+      ((org-sql-excluded-headline-planning-types '(:closed :scheduled :deadline)))
+      nil))
+
+  ;; headline tags
+
+  (expect-sql-tbls-multi (headline_tags) (list "* headline :onetag:"
+                                               "* headline :twotag:")
+    "multiple tags (included)"
+    nil
+    `((headline_tags :file_path ,testing-filepath
                      :headline_offset 1
-                     :headline_text "headline"
-                     :keyword nil
-                     :effort nil
-                     :priority nil
-                     :is_archived 0
-                     :is_commented 0
-                     :content nil)
-          (headline_closures :file_path ,testing-filepath
-                             :headline_offset 1
-                             :parent_offset 1
-                             :depth 0)
-          (timestamps :file_path ,testing-filepath
-                      :headline_offset 1
-                      :timestamp_offset 20
-                      :is_active 0
-                      :warning_type nil
-                      :warning_value nil
-                      :warning_unit nil
-                      :repeat_type nil
-                      :repeat_value nil
-                      :repeat_unit nil
-                      :time_start ,(org-ts-to-unixtime ts)
-                      :start_is_long 0
-                      :time_end nil
-                      :end_is_long nil
-                      :raw_value ,ts)
-          (planning_entries :file_path ,testing-filepath
-                            :headline_offset 1
-                            :planning_type closed
-                            :timestamp_offset 20)))))
+                     :tag "onetag"
+                     :is_inherited 0)
+      (headline_tags :file_path ,testing-filepath
+                     :headline_offset 21
+                     :tag "twotag"
+                     :is_inherited 0))
 
-  (it "scheduled/closed/deadlined headline"
-    (let ((ts0 "<2112-01-01 Thu>")
-          (ts1 "<2112-01-02 Fri>")
-          (ts2 "[2112-01-03 Sat]"))
-      (expect-sql
-          (list "* headline"
-                (format "SCHEDULED: %s DEADLINE: %s CLOSED: %s" ts0 ts1 ts2))
-        `(,testing-files-sml
-          (headlines :file_path ,testing-filepath
-                     :headline_offset 1
-                     :headline_text "headline"
-                     :keyword nil
-                     :effort nil
-                     :priority nil
-                     :is_archived 0
-                     :is_commented 0
-                     :content nil)
-          (headline_closures :file_path ,testing-filepath
-                             :headline_offset 1
-                             :parent_offset 1
-                             :depth 0)
-          (timestamps :file_path ,testing-filepath
-                      :headline_offset 1
-                      :timestamp_offset 75
-                      :is_active 0
-                      :warning_type nil
-                      :warning_value nil
-                      :warning_unit nil
-                      :repeat_type nil
-                      :repeat_value nil
-                      :repeat_unit nil
-                      :time_start ,(org-ts-to-unixtime ts2)
-                      :start_is_long 0
-                      :time_end nil
-                      :end_is_long nil
-                      :raw_value ,ts2)
-          (planning_entries :file_path ,testing-filepath
-                            :headline_offset 1
-                            :planning_type closed
-                            :timestamp_offset 75)
-          (timestamps :file_path ,testing-filepath
-                      :headline_offset 1
-                      :timestamp_offset 50
-                      :is_active 1
-                      :warning_type nil
-                      :warning_value nil
-                      :warning_unit nil
-                      :repeat_type nil
-                      :repeat_value nil
-                      :repeat_unit nil
-                      :time_start ,(org-ts-to-unixtime ts1)
-                      :start_is_long 0
-                      :time_end nil
-                      :end_is_long nil
-                      :raw_value ,ts1)
-          (planning_entries :file_path ,testing-filepath
-                            :headline_offset 1
-                            :planning_type deadline
-                            :timestamp_offset 50)
-          (timestamps :file_path ,testing-filepath
-                      :headline_offset 1
-                      :timestamp_offset 23
-                      :is_active 1
-                      :warning_type nil
-                      :warning_value nil
-                      :warning_unit nil
-                      :repeat_type nil
-                      :repeat_value nil
-                      :repeat_unit nil
-                      :time_start ,(org-ts-to-unixtime ts0)
-                      :start_is_long 0
-                      :time_end nil
-                      :end_is_long nil
-                      :raw_value ,ts0)
-          (planning_entries :file_path ,testing-filepath
-                            :headline_offset 1
-                            :planning_type scheduled
-                            :timestamp_offset 23)))))
+    "multiple tags (exclude one)"
+    ((org-sql-excluded-tags '("onetag")))
+    `((headline_tags :file_path ,testing-filepath
+                     :headline_offset 21
+                     :tag "twotag"
+                     :is_inherited 0))
 
-  ;; tags table
-
-  (it "single tag"
-    (expect-sql-tbls (headline_tags) "* headline :sometag:"
-      `((headline_tags :file_path ,testing-filepath
-                       :headline_offset 1
-                       :tag "sometag"
-                       :is_inherited 0))))
-
-  (it "multiple tags"
-    (expect-sql-tbls (headline_tags) (list "* headline :onetag:"
-                                           "* headline :twotag:")
-      `((headline_tags :file_path ,testing-filepath
-                       :headline_offset 1
-                       :tag "onetag"
-                       :is_inherited 0)
-        (headline_tags :file_path ,testing-filepath
-                       :headline_offset 21
-                       :tag "twotag"
-                       :is_inherited 0))))
+    "multiple tags (exclude all)"
+    ((org-sql-excluded-tags 'all))
+    nil)
 
   (it "single tag (child headline)"
     (setq org-sql-use-tag-inheritance t)
@@ -350,26 +362,22 @@ list then join the cdr of IN with newlines."
                        :tag "onetag"
                        :is_inherited 0))))
 
-  (it "inherited tag (ARCHIVE_ITAGS)"
-    ;; TODO clean up the variable settings elsewhere
-    (expect-sql-tbls (headline_tags) (list "* parent"
-                                           ":PROPERTIES:"
-                                           ":ARCHIVE_ITAGS: sometag"
-                                           ":END:")
-      `((headline_tags :file_path ,testing-filepath
-                       :headline_offset 1
-                       :tag "sometag"
-                       :is_inherited 1))))
+  (expect-sql-tbls-multi (headline_tags) (list "* parent"
+                                               ":PROPERTIES:"
+                                               ":ARCHIVE_ITAGS: sometag"
+                                               ":END:")
+    "inherited tag (included)"
+    nil
+    `((headline_tags :file_path ,testing-filepath
+                     :headline_offset 1
+                     :tag "sometag"
+                     :is_inherited 1))
 
-  (it "inherited tag (option off)"
-    ;; TODO clean up the variable settings elsewhere
-    (setq org-sql-use-tag-inheritance nil)
-    (expect-sql-tbls (headline_tags) (list "* parent :onetag:"
-                                           "** nested")
-      `((headline_tags :file_path ,testing-filepath
-                       :headline_offset 1
-                       :tag "onetag"
-                       :is_inherited 0))))
+    "inherited tag (excluded)"
+    ((org-sql-exclude-inherited-tags t))
+    nil)
+
+  ;; file tags
   
   (it "single file tag"
     (expect-sql-tbls (file_tags) (list "#+FILETAGS: foo"
@@ -475,27 +483,67 @@ list then join the cdr of IN with newlines."
                       :end_is_long nil
                       :raw_value ,ts)))))
 
-  (it "timestamp  (content)"
-    (let* ((ts "<2112-01-01 Thu>"))
-      (expect-sql-tbls (timestamps) (list "* parent"
-                                          ts)
-        `((timestamps :file_path ,testing-filepath
-                      :headline_offset 1
-                      :timestamp_offset 10
-                      :is_active 1
-                      :warning_type nil
-                      :warning_value nil
-                      :warning_unit nil
-                      :repeat_type nil
-                      :repeat_value nil
-                      :repeat_unit nil
-                      :time_start ,(org-ts-to-unixtime ts)
-                      :start_is_long 0
-                      :time_end nil
-                      :end_is_long nil
-                      :raw_value ,ts)))))
+  (let* ((ts1 "<2112-01-01 Thu>")
+         (ts2 "[2112-01-02 Fri]"))
+    (expect-sql-tbls-multi (timestamps) (list "* parent"
+                                              ts1
+                                              ts2)
+      "content timestamps (included)"
+      nil
+      `((timestamps :file_path ,testing-filepath
+                    :headline_offset 1
+                    :timestamp_offset 10
+                    :is_active 1
+                    :warning_type nil
+                    :warning_value nil
+                    :warning_unit nil
+                    :repeat_type nil
+                    :repeat_value nil
+                    :repeat_unit nil
+                    :time_start ,(org-ts-to-unixtime ts1)
+                    :start_is_long 0
+                    :time_end nil
+                    :end_is_long nil
+                    :raw_value ,ts1)
+        (timestamps :file_path ,testing-filepath
+                    :headline_offset 1
+                    :timestamp_offset 27
+                    :is_active 0
+                    :warning_type nil
+                    :warning_value nil
+                    :warning_unit nil
+                    :repeat_type nil
+                    :repeat_value nil
+                    :repeat_unit nil
+                    :time_start ,(org-ts-to-unixtime ts2)
+                    :start_is_long 0
+                    :time_end nil
+                    :end_is_long nil
+                    :raw_value ,ts2))
 
-  (it "timestamp  (content-nested)"
+      "content timestamps (exclude some)"
+      ((org-sql-excluded-contents-timestamp-types '(inactive)))
+      `((timestamps :file_path ,testing-filepath
+                    :headline_offset 1
+                    :timestamp_offset 10
+                    :is_active 1
+                    :warning_type nil
+                    :warning_value nil
+                    :warning_unit nil
+                    :repeat_type nil
+                    :repeat_value nil
+                    :repeat_unit nil
+                    :time_start ,(org-ts-to-unixtime ts1)
+                    :start_is_long 0
+                    :time_end nil
+                    :end_is_long nil
+                    :raw_value ,ts1))
+
+      "content timestamps (exclude all)"
+      ((org-sql-excluded-contents-timestamp-types 'all))
+      nil))
+
+  (it "timestamp (content-nested)"
     (let* ((ts "<2112-01-01 Thu>"))
       (expect-sql-tbls (timestamps) (list "* parent"
                                           "** child"
@@ -540,15 +588,36 @@ list then join the cdr of IN with newlines."
 
   ;; link table
 
-  (it "single link"
-    (expect-sql-tbls (links) (list "* parent"
-                                   "https://example.com")
-      `((links :file_path ,testing-filepath
-               :headline_offset 1
-               :link_offset 10
-               :link_path "//example.com"
-               :link_text ""
-               :link_type "https"))))
+  (expect-sql-tbls-multi (links) (list "* parent"
+                                       "https://example.org"
+                                       "file:///the/glass/prison")
+    "multiple links (included)"
+    nil
+    `((links :file_path ,testing-filepath
+             :headline_offset 1
+             :link_offset 10
+             :link_path "//example.org"
+             :link_text ""
+             :link_type "https")
+      (links :file_path ,testing-filepath
+             :headline_offset 1
+             :link_offset 30
+             :link_path "/the/glass/prison"
+             :link_text ""
+             :link_type "file"))
+
+    "multiple links (exclude some)"
+    ((org-sql-excluded-link-types '("file")))
+    `((links :file_path ,testing-filepath
+             :headline_offset 1
+             :link_offset 10
+             :link_path "//example.org"
+             :link_text ""
+             :link_type "https"))
+
+    "multiple links (exclude all)"
+    ((org-sql-excluded-link-types 'all))
+    nil)
 
   (it "single link (nested)"
     (expect-sql-tbls (links) (list "* parent"
@@ -557,23 +626,6 @@ list then join the cdr of IN with newlines."
       `((links :file_path ,testing-filepath
                :headline_offset 10
                :link_offset 19
-               :link_path "//example.com"
-               :link_text ""
-               :link_type "https"))))
-
-  (it "two links"
-    (expect-sql-tbls (links) (list "* parent"
-                                   "https://example.org"
-                                   "https://example.com")
-      `((links :file_path ,testing-filepath
-               :headline_offset 1
-               :link_offset 10
-               :link_path "//example.org"
-               :link_text ""
-               :link_type "https")
-        (links :file_path ,testing-filepath
-               :headline_offset 1
-               :link_offset 30
                :link_path "//example.com"
                :link_text ""
                :link_type "https"))))
@@ -587,22 +639,6 @@ list then join the cdr of IN with newlines."
                :link_path "//example.org"
                :link_text "relevant"
                :link_type "https"))))
-
-  (it "file link"
-    (expect-sql-tbls (links) (list "* parent"
-                                   "file:///tmp/eternalblue.exe")
-      `((links :file_path ,testing-filepath
-               :headline_offset 1
-               :link_offset 10
-               :link_path "/tmp/eternalblue.exe"
-               :link_text ""
-               :link_type "file"))))
-
-  (it "single link (ignored)"
-    (let ((org-sql-excluded-link-types 'all))
-      (expect-sql-tbls (links) (list "* parent"
-                                     "file:///tmp/eternalblue.exe")
-        nil)))
 
   ;; property table
 
@@ -687,21 +723,31 @@ list then join the cdr of IN with newlines."
                   :time_end nil
                   :clock_note nil)))))
 
-  (it "single clock (note)"
-    (let* ((org-log-into-drawer "LOGBOOK")
-           (ts "[2112-01-01 Fri 00:00]")
+    (let* ((ts "[2112-01-01 Fri 00:00]")
            (clock (format "CLOCK: %s" ts)))
-      (expect-sql-tbls (clocks) (list "* parent"
-                                      ":LOGBOOK:"
-                                      clock
-                                      "- random"
-                                      ":END:")
+      (expect-sql-tbls-multi (clocks) (list "* parent"
+                                            ":LOGBOOK:"
+                                            clock
+                                            "- random"
+                                            ":END:") 
+        "single clock (note - included)"
+        ((org-log-into-drawer "LOGBOOK"))
         `((clocks :file_path ,testing-filepath
                   :headline_offset 1
                   :clock_offset 20
                   :time_start ,(org-ts-to-unixtime ts)
                   :time_end nil
-                  :clock_note "random")))))
+                  :clock_note "random"))
+
+        "single clock (note - excluded)"
+        ((org-log-into-drawer "LOGBOOK")
+         (org-sql-exclude-clock-notes t))
+        `((clocks :file_path ,testing-filepath
+                  :headline_offset 1
+                  :clock_offset 20
+                  :time_start ,(org-ts-to-unixtime ts)
+                  :time_end nil
+                  :clock_note nil))))
 
   (it "multiple clocks"
     (let* ((org-log-into-drawer "LOGBOOK")
@@ -727,56 +773,66 @@ list then join the cdr of IN with newlines."
                   :time_end nil
                   :clock_note nil)))))
 
-  (it "logbook item (note)"
-    (let* ((org-log-into-drawer "LOGBOOK")
-           (ts "[2112-01-01 Fri 00:00]")
-           (header (format "Note taken on %s" ts))
-           (note "fancy note"))
-      (expect-sql-tbls (logbook_entries) (list "* parent"
-                                               ":LOGBOOK:"
-                                               (format "- %s \\\\" header)
-                                               (format "  %s" note)
-                                               ":END:")
-        `((logbook_entries :file_path ,testing-filepath
-                           :headline_offset 1
-                           :entry_offset 20
-                           :entry_type "note"
-                           :time_logged ,(org-ts-to-unixtime ts)
-                           :header ,header
-                           :note ,note)))))
-
-  (it "logbook item (state change)"
-    (let* ((org-log-into-drawer "LOGBOOK")
-           (ts "[2112-01-01 Fri 00:00]")
-           (header (format "State \"DONE\"       from \"TODO\"       %s" ts)))
-      (expect-sql-tbls (logbook_entries state_changes)
-          (list "* parent"
-                ":LOGBOOK:"
-                (format "- %s" header)
-                ":END:")
-        `((logbook_entries :file_path ,testing-filepath
-                           :headline_offset 1
-                           :entry_offset 20
-                           :entry_type "state"
-                           :time_logged ,(org-ts-to-unixtime ts)
-                           :header ,header
-                           :note nil)
-          (state_changes :file_path ,testing-filepath
+  (let* ((ts "[2112-01-01 Fri 00:00]")
+         (header (format "Note taken on %s" ts))
+         (note "fancy note"))
+    (expect-sql-tbls-multi (logbook_entries) (list "* parent"
+                                                   ":LOGBOOK:"
+                                                   (format "- %s \\\\" header)
+                                                   (format "  %s" note)
+                                                   ":END:")
+      "logbook item (note - included)"
+      ((org-log-into-drawer "LOGBOOK"))
+      `((logbook_entries :file_path ,testing-filepath
+                         :headline_offset 1
                          :entry_offset 20
-                         :state_old "TODO"
-                         :state_new "DONE")))))
+                         :entry_type "note"
+                         :time_logged ,(org-ts-to-unixtime ts)
+                         :header ,header
+                         :note ,note))
 
-  (it "logbook item (reschedule)"
-    (let* ((org-log-into-drawer "LOGBOOK")
-           (ts0 "[2112-01-01 Fri 00:00]")
-           (ts1 "[2112-01-01 Fri 01:00]")
-           (header (format "Rescheduled from \"%s\" on %s" ts0 ts1)))
-      (expect-sql-tbls (logbook_entries timestamps planning_changes)
-          (list "* parent"
-                ":LOGBOOK:"
-                (format "- %s" header)
-                ":END:")
-        `((logbook_entries :file_path ,testing-filepath
+      "logbook item (note - exclude)"
+      ((org-log-into-drawer "LOGBOOK")
+       (org-sql-excluded-logbook-types '(note)))
+      nil))
+
+  (let* ((ts "[2112-01-01 Fri 00:00]")
+         (header (format "State \"DONE\"       from \"TODO\"       %s" ts)))
+    (expect-sql-tbls-multi (logbook_entries state_changes)
+        (list "* parent"
+              ":LOGBOOK:"
+              (format "- %s" header)
+              ":END:")
+      "logbook item (state change - included)"
+      ((org-log-into-drawer "LOGBOOK"))
+      `((logbook_entries :file_path ,testing-filepath
+                         :headline_offset 1
+                         :entry_offset 20
+                         :entry_type "state"
+                         :time_logged ,(org-ts-to-unixtime ts)
+                         :header ,header
+                         :note nil)
+        (state_changes :file_path ,testing-filepath
+                       :entry_offset 20
+                       :state_old "TODO"
+                       :state_new "DONE"))
+
+      "logbook item (state change - excluded)"
+      ((org-log-into-drawer "LOGBOOK")
+       (org-sql-excluded-logbook-types '(state)))
+      nil))
+
+  (let* ((ts0 "[2112-01-01 Fri 00:00]")
+         (ts1 "[2112-01-01 Fri 01:00]")
+         (header (format "Rescheduled from \"%s\" on %s" ts0 ts1)))
+    (expect-sql-tbls-multi (logbook_entries timestamps planning_changes)
+        (list "* parent"
+              ":LOGBOOK:"
+              (format "- %s" header)
+              ":END:")
+      "logbook item (rescheduled - included)"
+      ((org-log-into-drawer "LOGBOOK"))
+      `((logbook_entries :file_path ,testing-filepath
                            :headline_offset 1
                            :entry_offset 20
                            :entry_type "reschedule"
@@ -800,147 +856,177 @@ list then join the cdr of IN with newlines."
                       :raw_value ,ts0)
           (planning_changes :file_path ,testing-filepath
                             :entry_offset 20
-                            :timestamp_offset 40)))))
+                            :timestamp_offset 40))
 
-  (it "logbook item (redeadline)"
-    (let* ((org-log-into-drawer "LOGBOOK")
-           (ts0 "[2112-01-01 Fri 00:00]")
-           (ts1 "[2112-01-01 Fri 01:00]")
-           (header (format "New deadline from \"%s\" on %s" ts0 ts1)))
-      (expect-sql-tbls (logbook_entries timestamps planning_changes)
-          (list "* parent"
-                ":LOGBOOK:"
-                (format "- %s" header)
-                ":END:")
-        `((logbook_entries :file_path ,testing-filepath
-                           :headline_offset 1
-                           :entry_offset 20
-                           :entry_type "redeadline"
-                           :time_logged ,(org-ts-to-unixtime ts1)
-                           :header ,header
-                           :note nil)
-          (timestamps :file_path ,testing-filepath
-                      :headline_offset 1
-                      :timestamp_offset 41
-                      :is_active 0
-                      :warning_type nil
-                      :warning_value nil
-                      :warning_unit nil
-                      :repeat_type nil
-                      :repeat_value nil
-                      :repeat_unit nil
-                      :time_start ,(org-ts-to-unixtime ts0)
-                      :start_is_long 1
-                      :time_end nil
-                      :end_is_long nil
-                      :raw_value ,ts0)
-          (planning_changes :file_path ,testing-filepath
-                            :entry_offset 20
-                            :timestamp_offset 41)))))
+      "logbook item (rescheduled - excluded)"
+      ((org-log-into-drawer "LOGBOOK")
+       (org-sql-excluded-logbook-types '(reschedule)))
+      nil))
 
-  (it "logbook item (delschedule)"
-    (let* ((org-log-into-drawer "LOGBOOK")
-           (ts0 "[2112-01-01 Fri 00:00]")
-           (ts1 "[2112-01-01 Fri 01:00]")
-           (header (format "Not scheduled, was \"%s\" on %s" ts0 ts1)))
-      (expect-sql-tbls (logbook_entries timestamps planning_changes)
-          (list "* parent"
-                ":LOGBOOK:"
-                (format "- %s" header)
-                ":END:")
-        `((logbook_entries :file_path ,testing-filepath
-                           :headline_offset 1
-                           :entry_offset 20
-                           :entry_type "delschedule"
-                           :time_logged ,(org-ts-to-unixtime ts1)
-                           :header ,header
-                           :note nil)
-          (timestamps :file_path ,testing-filepath
-                      :headline_offset 1
-                      :timestamp_offset 42
-                      :is_active 0
-                      :warning_type nil
-                      :warning_value nil
-                      :warning_unit nil
-                      :repeat_type nil
-                      :repeat_value nil
-                      :repeat_unit nil
-                      :time_start ,(org-ts-to-unixtime ts0)
-                      :start_is_long 1
-                      :time_end nil
-                      :end_is_long nil
-                      :raw_value ,ts0)
-          (planning_changes :file_path ,testing-filepath
-                            :entry_offset 20
-                            :timestamp_offset 42)))))
+  (let* ((ts0 "[2112-01-01 Fri 00:00]")
+         (ts1 "[2112-01-01 Fri 01:00]")
+         (header (format "New deadline from \"%s\" on %s" ts0 ts1)))
+    (expect-sql-tbls-multi (logbook_entries timestamps planning_changes)
+        (list "* parent"
+              ":LOGBOOK:"
+              (format "- %s" header)
+              ":END:")
+      "logbook item (redeadline - included)"
+      ((org-log-into-drawer "LOGBOOK"))
+      `((logbook_entries :file_path ,testing-filepath
+                         :headline_offset 1
+                         :entry_offset 20
+                         :entry_type "redeadline"
+                         :time_logged ,(org-ts-to-unixtime ts1)
+                         :header ,header
+                         :note nil)
+        (timestamps :file_path ,testing-filepath
+                    :headline_offset 1
+                    :timestamp_offset 41
+                    :is_active 0
+                    :warning_type nil
+                    :warning_value nil
+                    :warning_unit nil
+                    :repeat_type nil
+                    :repeat_value nil
+                    :repeat_unit nil
+                    :time_start ,(org-ts-to-unixtime ts0)
+                    :start_is_long 1
+                    :time_end nil
+                    :end_is_long nil
+                    :raw_value ,ts0)
+        (planning_changes :file_path ,testing-filepath
+                          :entry_offset 20
+                          :timestamp_offset 41))
 
-  (it "logbook item (deldeadline)"
-    (let* ((org-log-into-drawer "LOGBOOK")
-           (ts0 "[2112-01-01 Fri 00:00]")
-           (ts1 "[2112-01-01 Fri 01:00]")
-           (header (format "Removed deadline, was \"%s\" on %s" ts0 ts1)))
-      (expect-sql-tbls (logbook_entries timestamps planning_changes)
-          (list "* parent"
-                ":LOGBOOK:"
-                (format "- %s" header)
-                ":END:")
-        `((logbook_entries :file_path ,testing-filepath
-                           :headline_offset 1
-                           :entry_offset 20
-                           :entry_type "deldeadline"
-                           :time_logged ,(org-ts-to-unixtime ts1)
-                           :header ,header
-                           :note nil)
-          (timestamps :file_path ,testing-filepath
-                      :headline_offset 1
-                      :timestamp_offset 45
-                      :is_active 0
-                      :warning_type nil
-                      :warning_value nil
-                      :warning_unit nil
-                      :repeat_type nil
-                      :repeat_value nil
-                      :repeat_unit nil
-                      :time_start ,(org-ts-to-unixtime ts0)
-                      :start_is_long 1
-                      :time_end nil
-                      :end_is_long nil
-                      :raw_value ,ts0)
-          (planning_changes :file_path ,testing-filepath
-                            :entry_offset 20
-                            :timestamp_offset 45)))))
+      "logbook item (redeadline - excluded)"
+      ((org-log-into-drawer "LOGBOOK")
+       (org-sql-excluded-logbook-types '(redeadline)))
+      nil))
 
-  (it "logbook item (refile)"
-    (let* ((org-log-into-drawer "LOGBOOK")
-           (ts "[2112-01-01 Fri 00:00]")
-           (header (format "Refiled on %s" ts)))
-      (expect-sql-tbls (logbook_entries) (list "* parent"
-                                               ":LOGBOOK:"
-                                               (format "- %s" header)
-                                               ":END:")
-        `((logbook_entries :file_path ,testing-filepath
-                           :headline_offset 1
-                           :entry_offset 20
-                           :entry_type "refile"
-                           :time_logged ,(org-ts-to-unixtime ts)
-                           :header ,header
-                           :note nil)))))
+  (let* ((ts0 "[2112-01-01 Fri 00:00]")
+         (ts1 "[2112-01-01 Fri 01:00]")
+         (header (format "Not scheduled, was \"%s\" on %s" ts0 ts1)))
+    (expect-sql-tbls-multi (logbook_entries timestamps planning_changes)
+        (list "* parent"
+              ":LOGBOOK:"
+              (format "- %s" header)
+              ":END:")
+      "logbook item (delschedule - included)"
+      ((org-log-into-drawer "LOGBOOK"))
+      `((logbook_entries :file_path ,testing-filepath
+                         :headline_offset 1
+                         :entry_offset 20
+                         :entry_type "delschedule"
+                         :time_logged ,(org-ts-to-unixtime ts1)
+                         :header ,header
+                         :note nil)
+        (timestamps :file_path ,testing-filepath
+                    :headline_offset 1
+                    :timestamp_offset 42
+                    :is_active 0
+                    :warning_type nil
+                    :warning_value nil
+                    :warning_unit nil
+                    :repeat_type nil
+                    :repeat_value nil
+                    :repeat_unit nil
+                    :time_start ,(org-ts-to-unixtime ts0)
+                    :start_is_long 1
+                    :time_end nil
+                    :end_is_long nil
+                    :raw_value ,ts0)
+        (planning_changes :file_path ,testing-filepath
+                          :entry_offset 20
+                          :timestamp_offset 42))
 
-  (it "logbook item (done)"
-    (let* ((org-log-into-drawer "LOGBOOK")
-           (ts "[2112-01-01 Fri 00:00]")
-           (header (format "CLOSING NOTE %s" ts)))
-      (expect-sql-tbls (logbook_entries) (list "* parent"
-                                               ":LOGBOOK:"
-                                               (format "- %s" header)
-                                               ":END:")
-        `((logbook_entries :file_path ,testing-filepath
-                           :headline_offset 1
-                           :entry_offset 20
-                           :entry_type "done"
-                           :time_logged ,(org-ts-to-unixtime ts)
-                           :header ,header
-                           :note nil)))))
+      "logbook item (delschedule - excluded)"
+      ((org-log-into-drawer "LOGBOOK")
+       (org-sql-excluded-logbook-types '(delschedule)))
+      nil))
+
+  (let* ((ts0 "[2112-01-01 Fri 00:00]")
+         (ts1 "[2112-01-01 Fri 01:00]")
+         (header (format "Removed deadline, was \"%s\" on %s" ts0 ts1)))
+    (expect-sql-tbls-multi (logbook_entries timestamps planning_changes)
+        (list "* parent"
+              ":LOGBOOK:"
+              (format "- %s" header)
+              ":END:")
+      "logbook item (deldeadline - included)"
+      ((org-log-into-drawer "LOGBOOK"))
+      `((logbook_entries :file_path ,testing-filepath
+                         :headline_offset 1
+                         :entry_offset 20
+                         :entry_type "deldeadline"
+                         :time_logged ,(org-ts-to-unixtime ts1)
+                         :header ,header
+                         :note nil)
+        (timestamps :file_path ,testing-filepath
+                    :headline_offset 1
+                    :timestamp_offset 45
+                    :is_active 0
+                    :warning_type nil
+                    :warning_value nil
+                    :warning_unit nil
+                    :repeat_type nil
+                    :repeat_value nil
+                    :repeat_unit nil
+                    :time_start ,(org-ts-to-unixtime ts0)
+                    :start_is_long 1
+                    :time_end nil
+                    :end_is_long nil
+                    :raw_value ,ts0)
+        (planning_changes :file_path ,testing-filepath
+                          :entry_offset 20
+                          :timestamp_offset 45))
+
+      "logbook item (deldeadline - excluded)"
+      ((org-log-into-drawer "LOGBOOK")
+       (org-sql-excluded-logbook-types '(deldeadline)))
+      nil))
+
+  (let* ((ts "[2112-01-01 Fri 00:00]")
+         (header (format "Refiled on %s" ts)))
+    (expect-sql-tbls-multi (logbook_entries) (list "* parent"
+                                                   ":LOGBOOK:"
+                                                   (format "- %s" header)
+                                                   ":END:")
+      "logbook item (refile - included)"
+      ((org-log-into-drawer "LOGBOOK"))
+      `((logbook_entries :file_path ,testing-filepath
+                         :headline_offset 1
+                         :entry_offset 20
+                         :entry_type "refile"
+                         :time_logged ,(org-ts-to-unixtime ts)
+                         :header ,header
+                         :note nil))
+
+      "logbook item (refile - excluded)"
+      ((org-log-into-drawer "LOGBOOK")
+       (org-sql-excluded-logbook-types '(refile)))
+      nil))
+
+  (let* ((ts "[2112-01-01 Fri 00:00]")
+         (header (format "CLOSING NOTE %s" ts)))
+    (expect-sql-tbls-multi (logbook_entries) (list "* parent"
+                                                   ":LOGBOOK:"
+                                                   (format "- %s" header)
+                                                   ":END:")
+      "logbook item (done - included)"
+      ((org-log-into-drawer "LOGBOOK"))
+      `((logbook_entries :file_path ,testing-filepath
+                         :headline_offset 1
+                         :entry_offset 20
+                         :entry_type "done"
+                         :time_logged ,(org-ts-to-unixtime ts)
+                         :header ,header
+                         :note nil))
+
+      "logbook item (done - excluded)"
+      ((org-log-into-drawer "LOGBOOK")
+       (org-sql-excluded-logbook-types '(done)))
+      nil))
 
   (it "logbook item (clock + non-note)"
     (let* ((org-log-into-drawer "LOGBOOK")
@@ -1046,9 +1132,7 @@ list then join the cdr of IN with newlines."
                   :clock_offset 58
                   :time_start ,(org-ts-to-unixtime ts0)
                   :time_end ,(org-ts-to-unixtime ts1)
-                  :clock_note "this is a clock note")))))
-
-  )
+                  :clock_note "this is a clock note"))))))
 
 (defun format-with (mode type value)
   (funcall (org-sql--compile-mql-format-function mode type) value))
