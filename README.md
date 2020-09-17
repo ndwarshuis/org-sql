@@ -313,7 +313,7 @@ Each rows stores one link
 | link_text |  |  | x | TEXT / TEXT | text of this link |
 | link_type |  |  |  | TEXT / TEXT | type of this link (eg http, mu4e, file, etc) |
 
-<!-- 0.0.1 -->
+<!-- 1.0.1 -->
 
 # Contributing
 
@@ -395,6 +395,10 @@ make docs
 ```
 
 # Changelog
+
+## 1.0.1
+
+- various bugfixes
 
 ## 1.0.0 (relative to previous unversioned release)
 

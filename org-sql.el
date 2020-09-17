@@ -6,7 +6,7 @@
 ;; Keywords: org-mode, data
 ;; Homepage: https://github.com/ndwarshuis/org-sql
 ;; Package-Requires: ((emacs "26.1") (s "1.12") (dash "2.15") (org-ml "3.0.2"))
-;; Version: 1.0.0
+;; Version: 1.0.1
 
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -484,7 +484,7 @@ to store them. This is in addition to any properties specifified by
 ;; TODO add sqlite pragma (synchronous and journalmode)
 ;; TODO add postgres transaction options
 (defcustom org-sql-db-config
-  '(sqlite :path (expand-file-name "org-sql.db" org-directory))
+  (list 'sqlite :path (expand-file-name "org-sql.db" org-directory))
   "Configuration for the org-sql database.
 
 This is a list like (DB-TYPE OPTION-PLIST). The valid keys and
@@ -1867,6 +1867,7 @@ Each fmeta will have it's :db-path set to nil. Only files in
     (if (stringp org-sql-files)
         (error "`org-sql-files' must be a list of paths")
       (->> (-mapcat #'expand-if-dir org-sql-files)
+           (-map #'expand-file-name)
            (-filter #'file-exists-p)
            (--map (org-sql--to-fmeta it nil (get-md5 it)))))))
 
@@ -2115,7 +2116,7 @@ required schema."
   (if (or (not (org-sql--db-exists))
           (y-or-n-p "Really reset database? "))
       (progn
-        (org-sql-delete-db)
+        (org-sql--delete-db)
         (message "Resetting Org SQL database")
         (let ((out (org-sql-init-db)))
           (when org-sql-debug
