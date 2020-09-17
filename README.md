@@ -200,7 +200,7 @@ Each row stores one headline in a given org file and its metadata
 | headline_text |  |  |  | text | raw text of the headline |
 | keyword |  |  | x | text | the TODO state keyword |
 | effort |  |  | x | integer | the value of the Effort property in minutes |
-| priority |  |  | x | char | character value of the priority |
+| priority |  |  | x | text | character value of the priority |
 | is_archived |  |  |  | boolean | true if the headline has an archive tag |
 | is_commented |  |  |  | boolean | true if the headline has a comment keyword |
 | content |  |  | x | text | the headline contents |
@@ -211,10 +211,32 @@ Each row stores the ancestor and depth of a headline relationship (eg closure ta
 
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - headlines |  | text | path to the file containing this headline |
+| file_path | x | file_path - headlines, file_path - headlines |  | text | path to the file containing this headline |
 | headline_offset | x | headline_offset - headlines |  | integer | offset of this headline |
 | parent_offset | x | headline_offset - headlines |  | integer | offset of this headline's parent |
 | depth |  |  | x | integer | levels between this headline and the referred parent |
+
+### timestamps
+
+Each row stores one timestamp
+
+| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type | Description |
+|  -  |  -  |  -  |  -  |  -  |  -  |
+| file_path | x | file_path - headlines |  | text | path to the file containing this timestamp |
+| headline_offset |  | headline_offset - headlines |  | integer | offset of the headline containing this timestamp |
+| timestamp_offset | x |  |  | integer | offset of this timestamp |
+| raw_value |  |  |  | text | text representation of this timestamp |
+| is_active |  |  |  | boolean | true if the timestamp is active |
+| warning_type |  |  | x | enum | warning type of this timestamp (`all`, or `first`) |
+| warning_value |  |  | x | integer | warning shift of this timestamp |
+| warning_unit |  |  | x | enum | warning unit of this timestamp  (`hour`, `day`, `week`, `month`, or `year`) |
+| repeat_type |  |  | x | enum | repeater type of this timestamp (`catch-up`, `restart`, or `cumulate`) |
+| repeat_value |  |  | x | integer | repeater shift of this timestamp |
+| repeat_unit |  |  | x | enum | repeater unit of this timestamp (`hour`, `day`, `week`, `month`, or `year`) |
+| time_start |  |  |  | integer | the start time (or only time) of this timestamp |
+| time_end |  |  | x | integer | the end time of this timestamp |
+| start_is_long |  |  |  | boolean | true if the start time is in long format |
+| end_is_long |  |  | x | boolean | true if the end time is in long format |
 
 ### planning_entries
 
@@ -224,7 +246,7 @@ Each row stores the metadata for headline planning timestamps.
 |  -  |  -  |  -  |  -  |  -  |  -  |
 | file_path | x | file_path - timestamps |  | text | path to the file containing the entry |
 | headline_offset | x |  |  | integer | file offset of the headline with this tag |
-| planning_type | x |  |  | text | the type of this planning entry (`closed`, `scheduled`, or `deadline`) |
+| planning_type | x |  |  | enum | the type of this planning entry (`closed`, `scheduled`, or `deadline`) |
 | timestamp_offset |  | timestamp_offset - timestamps |  | integer | file offset of this entries timestamp |
 
 ### file_tags
@@ -253,7 +275,7 @@ Each row stores one property
 
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - headlines |  | text | path to the file containing this property |
+| file_path | x | file_path - files |  | text | path to the file containing this property |
 | property_offset | x |  |  | integer | file offset of this property in the org file |
 | key_text |  |  |  | text | this property's key |
 | val_text |  |  |  | text | this property's value |
@@ -337,28 +359,6 @@ Each rows stores one link
 | link_path |  |  |  | text | target of this link (eg url, file path, etc) |
 | link_text |  |  | x | text | text of this link |
 | link_type |  |  |  | text | type of this link (eg http, mu4e, file, etc) |
-
-### timestamps
-
-Each row stores one timestamp
-
-| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type | Description |
-|  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - headlines |  | text | path to the file containing this timestamp |
-| headline_offset |  | headline_offset - headlines |  | integer | offset of the headline containing this timestamp |
-| timestamp_offset | x |  |  | integer | offset of this timestamp |
-| raw_value |  |  |  | text | text representation of this timestamp |
-| is_active |  |  |  | boolean | true if the timestamp is active |
-| warning_type |  |  | x | text | warning type of this timestamp (`all`, or `first`) |
-| warning_value |  |  | x | integer | warning shift of this timestamp |
-| warning_unit |  |  | x | text | warning unit of this timestamp  (`hour`, `day`, `week`, `month`, or `year`) |
-| repeat_type |  |  | x | text | repeater type of this timestamp (`catch-up`, `restart`, or `cumulate`) |
-| repeat_value |  |  | x | integer | repeater shift of this timestamp |
-| repeat_unit |  |  | x | text | repeater unit of this timestamp (`hour`, `day`, `week`, `month`, or `year`) |
-| time_start |  |  |  | integer | the start time (or only time) of this timestamp |
-| time_end |  |  | x | integer | the end time of this timestamp |
-| start_is_long |  |  |  | boolean | true if the start time is in long format |
-| end_is_long |  |  | x | boolean | true if the end time is in long format |
 
 <!-- 0.0.1 -->
 

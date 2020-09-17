@@ -80,7 +80,7 @@
         (-let (((&plist :ref :keys :parent-keys) foreign-meta))
           (-some--> (--find-index (eq it column-name) keys)
             (nth it parent-keys)
-            (org-sql--kw-to-colname it)
+            (org-sql--format-mql-column-name it)
             (format "%s - %s" it ref)))))
     (->> (--filter (eq 'foreign (car it)) constraints-meta)
          (--map (find-format (cdr it)))
@@ -88,11 +88,10 @@
          (s-join ", "))))
 
 (defun org-sql-doc-format-column (column-meta constraints-meta)
-  (-let* (((column-name . meta) column-meta)
-          ((&plist :desc :type :constraints :allowed) meta)
+  (-let* (((column-name . (&plist :desc :type :constraints :allowed)) column-meta)
           ((&alist 'primary) constraints-meta)
-          (primary-keys (-slice (plist-get primary :keys) 0 nil 2))
-          (column-name* (org-sql--kw-to-colname column-name))
+          (primary-keys (plist-get primary :keys))
+          (column-name* (org-sql--format-mql-column-name column-name))
           (is-primary (if (memq column-name primary-keys) "x" ""))
           (null-allowed (if (or (memq 'notnull constraints)
                                 (memq column-name primary-keys))
@@ -147,7 +146,7 @@
     (insert-file-contents-literally "./readme-template.md")
 
     (goto-and-remove "[[ schema-docs ]]")
-    (insert (->> org-sql--metaschema
+    (insert (->> org-sql--mql-schema
                  (-map #'org-sql-doc-format-schema)
                  (s-join "\n\n")))
 
