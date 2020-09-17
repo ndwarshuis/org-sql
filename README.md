@@ -183,182 +183,182 @@ The databases are arranged as follows according to their foreign key contraints:
 
 Each row stores metadata for one tracked org file
 
-| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type | Description |
+| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x |  |  | text | path to the org file |
-| md5 |  |  |  | text | md5 checksum of the org file |
-| size |  |  |  | integer | size of the org file in bytes |
+| file_path | x |  |  | TEXT / TEXT | path to the org file |
+| md5 |  |  |  | TEXT / TEXT | md5 checksum of the org file |
+| size |  |  |  | INTEGER / INTEGER | size of the org file in bytes |
 
 ### headlines
 
 Each row stores one headline in a given org file and its metadata
 
-| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type | Description |
+| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - files |  | text | path to file containin the headline |
-| headline_offset | x |  |  | integer | file offset of the headline's first character |
-| headline_text |  |  |  | text | raw text of the headline |
-| keyword |  |  | x | text | the TODO state keyword |
-| effort |  |  | x | integer | the value of the Effort property in minutes |
-| priority |  |  | x | text | character value of the priority |
-| is_archived |  |  |  | boolean | true if the headline has an archive tag |
-| is_commented |  |  |  | boolean | true if the headline has a comment keyword |
-| content |  |  | x | text | the headline contents |
+| file_path | x | file_path - files |  | TEXT / TEXT | path to file containin the headline |
+| headline_offset | x |  |  | INTEGER / INTEGER | file offset of the headline's first character |
+| headline_text |  |  |  | TEXT / TEXT | raw text of the headline |
+| keyword |  |  | x | TEXT / TEXT | the TODO state keyword |
+| effort |  |  | x | INTEGER / INTEGER | the value of the Effort property in minutes |
+| priority |  |  | x | TEXT / TEXT | character value of the priority |
+| is_archived |  |  |  | INTEGER / BOOLEAN | true if the headline has an archive tag |
+| is_commented |  |  |  | INTEGER / BOOLEAN | true if the headline has a comment keyword |
+| content |  |  | x | TEXT / TEXT | the headline contents |
 
 ### headline_closures
 
 Each row stores the ancestor and depth of a headline relationship (eg closure table)
 
-| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type | Description |
+| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - headlines, file_path - headlines |  | text | path to the file containing this headline |
-| headline_offset | x | headline_offset - headlines |  | integer | offset of this headline |
-| parent_offset | x | headline_offset - headlines |  | integer | offset of this headline's parent |
-| depth |  |  | x | integer | levels between this headline and the referred parent |
+| file_path | x | file_path - headlines, file_path - headlines |  | TEXT / TEXT | path to the file containing this headline |
+| headline_offset | x | headline_offset - headlines |  | INTEGER / INTEGER | offset of this headline |
+| parent_offset | x | headline_offset - headlines |  | INTEGER / INTEGER | offset of this headline's parent |
+| depth |  |  | x | INTEGER / INTEGER | levels between this headline and the referred parent |
 
 ### timestamps
 
 Each row stores one timestamp
 
-| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type | Description |
+| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - headlines |  | text | path to the file containing this timestamp |
-| headline_offset |  | headline_offset - headlines |  | integer | offset of the headline containing this timestamp |
-| timestamp_offset | x |  |  | integer | offset of this timestamp |
-| raw_value |  |  |  | text | text representation of this timestamp |
-| is_active |  |  |  | boolean | true if the timestamp is active |
-| warning_type |  |  | x | enum | warning type of this timestamp (`all`, or `first`) |
-| warning_value |  |  | x | integer | warning shift of this timestamp |
-| warning_unit |  |  | x | enum | warning unit of this timestamp  (`hour`, `day`, `week`, `month`, or `year`) |
-| repeat_type |  |  | x | enum | repeater type of this timestamp (`catch-up`, `restart`, or `cumulate`) |
-| repeat_value |  |  | x | integer | repeater shift of this timestamp |
-| repeat_unit |  |  | x | enum | repeater unit of this timestamp (`hour`, `day`, `week`, `month`, or `year`) |
-| time_start |  |  |  | integer | the start time (or only time) of this timestamp |
-| time_end |  |  | x | integer | the end time of this timestamp |
-| start_is_long |  |  |  | boolean | true if the start time is in long format |
-| end_is_long |  |  | x | boolean | true if the end time is in long format |
+| file_path | x | file_path - headlines |  | TEXT / TEXT | path to the file containing this timestamp |
+| headline_offset |  | headline_offset - headlines |  | INTEGER / INTEGER | offset of the headline containing this timestamp |
+| timestamp_offset | x |  |  | INTEGER / INTEGER | offset of this timestamp |
+| raw_value |  |  |  | TEXT / TEXT | text representation of this timestamp |
+| is_active |  |  |  | INTEGER / BOOLEAN | true if the timestamp is active |
+| warning_type |  |  | x | TEXT / ENUM | warning type of this timestamp (`all`, or `first`) |
+| warning_value |  |  | x | INTEGER / INTEGER | warning shift of this timestamp |
+| warning_unit |  |  | x | TEXT / ENUM | warning unit of this timestamp  (`hour`, `day`, `week`, `month`, or `year`) |
+| repeat_type |  |  | x | TEXT / ENUM | repeater type of this timestamp (`catch-up`, `restart`, or `cumulate`) |
+| repeat_value |  |  | x | INTEGER / INTEGER | repeater shift of this timestamp |
+| repeat_unit |  |  | x | TEXT / ENUM | repeater unit of this timestamp (`hour`, `day`, `week`, `month`, or `year`) |
+| time_start |  |  |  | INTEGER / INTEGER | the start time (or only time) of this timestamp |
+| time_end |  |  | x | INTEGER / INTEGER | the end time of this timestamp |
+| start_is_long |  |  |  | INTEGER / BOOLEAN | true if the start time is in long format |
+| end_is_long |  |  | x | INTEGER / BOOLEAN | true if the end time is in long format |
 
 ### planning_entries
 
 Each row stores the metadata for headline planning timestamps.
 
-| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type | Description |
+| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - timestamps |  | text | path to the file containing the entry |
-| headline_offset | x |  |  | integer | file offset of the headline with this tag |
-| planning_type | x |  |  | enum | the type of this planning entry (`closed`, `scheduled`, or `deadline`) |
-| timestamp_offset |  | timestamp_offset - timestamps |  | integer | file offset of this entries timestamp |
+| file_path | x | file_path - timestamps |  | TEXT / TEXT | path to the file containing the entry |
+| headline_offset | x |  |  | INTEGER / INTEGER | file offset of the headline with this tag |
+| planning_type | x |  |  | TEXT / ENUM | the type of this planning entry (`closed`, `scheduled`, or `deadline`) |
+| timestamp_offset |  | timestamp_offset - timestamps |  | INTEGER / INTEGER | file offset of this entries timestamp |
 
 ### file_tags
 
 Each row stores one tag at the file level
 
-| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type | Description |
+| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - files |  | text | path to the file containing the tag |
-| tag | x |  |  | text | the text value of this tag |
+| file_path | x | file_path - files |  | TEXT / TEXT | path to the file containing the tag |
+| tag | x |  |  | TEXT / TEXT | the text value of this tag |
 
 ### headline_tags
 
 Each row stores one tag
 
-| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type | Description |
+| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - headlines |  | text | path to the file containing the tag |
-| headline_offset | x | headline_offset - headlines |  | integer | file offset of the headline with this tag |
-| tag | x |  |  | text | the text value of this tag |
-| is_inherited | x |  |  | boolean | true if this tag is from the ITAGS property |
+| file_path | x | file_path - headlines |  | TEXT / TEXT | path to the file containing the tag |
+| headline_offset | x | headline_offset - headlines |  | INTEGER / INTEGER | file offset of the headline with this tag |
+| tag | x |  |  | TEXT / TEXT | the text value of this tag |
+| is_inherited | x |  |  | INTEGER / BOOLEAN | true if this tag is from the ITAGS property |
 
 ### properties
 
 Each row stores one property
 
-| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type | Description |
+| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - files |  | text | path to the file containing this property |
-| property_offset | x |  |  | integer | file offset of this property in the org file |
-| key_text |  |  |  | text | this property's key |
-| val_text |  |  |  | text | this property's value |
+| file_path | x | file_path - files |  | TEXT / TEXT | path to the file containing this property |
+| property_offset | x |  |  | INTEGER / INTEGER | file offset of this property in the org file |
+| key_text |  |  |  | TEXT / TEXT | this property's key |
+| val_text |  |  |  | TEXT / TEXT | this property's value |
 
 ### file_properties
 
 Each row stores a property at the file level
 
-| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type | Description |
+| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - files, file_path - properties |  | text | path to file containin the property |
-| property_offset | x | property_offset - properties |  | integer | file offset of this property in the org file |
+| file_path | x | file_path - files, file_path - properties |  | TEXT / TEXT | path to file containin the property |
+| property_offset | x | property_offset - properties |  | INTEGER / INTEGER | file offset of this property in the org file |
 
 ### headline_properties
 
 Each row stores a property at the headline level
 
-| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type | Description |
+| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - headlines |  | text | path to file containin the property |
-| property_offset | x |  |  | integer | file offset of this property in the org file |
-| headline_offset |  | headline_offset - headlines |  | integer | file offset of the headline with this property |
+| file_path | x | file_path - headlines |  | TEXT / TEXT | path to file containin the property |
+| property_offset | x |  |  | INTEGER / INTEGER | file offset of this property in the org file |
+| headline_offset |  | headline_offset - headlines |  | INTEGER / INTEGER | file offset of the headline with this property |
 
 ### clocks
 
 Each row stores one clock entry
 
-| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type | Description |
+| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - headlines |  | text | path to the file containing this clock |
-| headline_offset |  | headline_offset - headlines |  | integer | offset of the headline with this clock |
-| clock_offset | x |  |  | integer | file offset of this clock |
-| time_start |  |  | x | integer | timestamp for the start of this clock |
-| time_end |  |  | x | integer | timestamp for the end of this clock |
-| clock_note |  |  | x | text | the note entry beneath this clock |
+| file_path | x | file_path - headlines |  | TEXT / TEXT | path to the file containing this clock |
+| headline_offset |  | headline_offset - headlines |  | INTEGER / INTEGER | offset of the headline with this clock |
+| clock_offset | x |  |  | INTEGER / INTEGER | file offset of this clock |
+| time_start |  |  | x | INTEGER / INTEGER | timestamp for the start of this clock |
+| time_end |  |  | x | INTEGER / INTEGER | timestamp for the end of this clock |
+| clock_note |  |  | x | TEXT / TEXT | the note entry beneath this clock |
 
 ### logbook_entries
 
 Each row stores one logbook entry (except for clocks)
 
-| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type | Description |
+| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - headlines |  | text | path to the file containing this entry |
-| headline_offset |  | headline_offset - headlines |  | integer | offset of the headline with this entry |
-| entry_offset | x |  |  | integer | offset of this logbook entry |
-| entry_type |  |  | x | text | type of this entry (see `org-log-note-headlines`) |
-| time_logged |  |  | x | integer | timestamp for when this entry was taken |
-| header |  |  | x | text | the first line of this entry (usually standardized) |
-| note |  |  | x | text | the text of this entry underneath the header |
+| file_path | x | file_path - headlines |  | TEXT / TEXT | path to the file containing this entry |
+| headline_offset |  | headline_offset - headlines |  | INTEGER / INTEGER | offset of the headline with this entry |
+| entry_offset | x |  |  | INTEGER / INTEGER | offset of this logbook entry |
+| entry_type |  |  | x | TEXT / TEXT | type of this entry (see `org-log-note-headlines`) |
+| time_logged |  |  | x | INTEGER / INTEGER | timestamp for when this entry was taken |
+| header |  |  | x | TEXT / TEXT | the first line of this entry (usually standardized) |
+| note |  |  | x | TEXT / TEXT | the text of this entry underneath the header |
 
 ### state_changes
 
 Each row stores additional metadata for a state change logbook entry
 
-| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type | Description |
+| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - logbook_entries |  | text | path to the file containing this entry |
-| entry_offset | x | entry_offset - logbook_entries |  | integer | offset of the logbook entry for this state change |
-| state_old |  |  |  | text | former todo state keyword |
-| state_new |  |  |  | text | updated todo state keyword |
+| file_path | x | file_path - logbook_entries |  | TEXT / TEXT | path to the file containing this entry |
+| entry_offset | x | entry_offset - logbook_entries |  | INTEGER / INTEGER | offset of the logbook entry for this state change |
+| state_old |  |  |  | TEXT / TEXT | former todo state keyword |
+| state_new |  |  |  | TEXT / TEXT | updated todo state keyword |
 
 ### planning_changes
 
 Each row stores additional metadata for a planning change logbook entry
 
-| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type | Description |
+| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - timestamps, file_path - logbook_entries |  | text | path to the file containing this entry |
-| entry_offset | x | entry_offset - logbook_entries |  | integer | offset of the logbook entry for this planning change |
-| timestamp_offset |  | timestamp_offset - timestamps |  | integer | offset of the former timestamp |
+| file_path | x | file_path - timestamps, file_path - logbook_entries |  | TEXT / TEXT | path to the file containing this entry |
+| entry_offset | x | entry_offset - logbook_entries |  | INTEGER / INTEGER | offset of the logbook entry for this planning change |
+| timestamp_offset |  | timestamp_offset - timestamps |  | INTEGER / INTEGER | offset of the former timestamp |
 
 ### links
 
 Each rows stores one link
 
-| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type | Description |
+| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - headlines |  | text | path to the file containing this link |
-| headline_offset |  | headline_offset - headlines |  | integer | offset of the headline with this link |
-| link_offset | x |  |  | integer | file offset of this link |
-| link_path |  |  |  | text | target of this link (eg url, file path, etc) |
-| link_text |  |  | x | text | text of this link |
-| link_type |  |  |  | text | type of this link (eg http, mu4e, file, etc) |
+| file_path | x | file_path - headlines |  | TEXT / TEXT | path to the file containing this link |
+| headline_offset |  | headline_offset - headlines |  | INTEGER / INTEGER | offset of the headline with this link |
+| link_offset | x |  |  | INTEGER / INTEGER | file offset of this link |
+| link_path |  |  |  | TEXT / TEXT | target of this link (eg url, file path, etc) |
+| link_text |  |  | x | TEXT / TEXT | text of this link |
+| link_type |  |  |  | TEXT / TEXT | type of this link (eg http, mu4e, file, etc) |
 
 <!-- 0.0.1 -->
 

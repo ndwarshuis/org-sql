@@ -87,6 +87,13 @@
          (-non-nil)
          (s-join ", "))))
 
+(defun org-sql-doc-format-type (mql-column)
+  (let ((sqlite-type (org-sql--format-mql-schema-type '(sqlite) "" mql-column))
+        (postgres-type
+         (--> (org-sql--format-mql-schema-type '(postgres) "" mql-column)
+              (if (s-starts-with? "enum" it) "ENUM" it))))
+    (format "%s / %s" sqlite-type postgres-type)))
+
 (defun org-sql-doc-format-column (column-meta constraints-meta)
   (-let* (((column-name . (&plist :desc :type :constraints :allowed)) column-meta)
           ((&alist 'primary) constraints-meta)
@@ -98,7 +105,7 @@
                             ""
                           "x"))
           (foreign (org-sql-doc-format-foreign column-name constraints-meta))
-          (type* (symbol-name type))
+          (type* (org-sql-doc-format-type column-meta))
           (allowed* (org-sql-doc-format-allowed-values allowed))
           (desc* (org-sql-doc-format-quotes desc))
           (desc-full (if allowed* (format "%s (%s)" desc* allowed*) desc*)))
@@ -114,7 +121,7 @@
                                "Is Primary"
                                "Foreign Keys (parent - table)"
                                "NULL Allowed"
-                               "Type"
+                               "Type (SQLite / Postgres)"
                                "Description"))
           (table-line (->> (-repeat (length table-headers) " - ")
                            (org-sql-doc-format-table-row)))
