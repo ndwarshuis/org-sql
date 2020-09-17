@@ -79,29 +79,15 @@ One can also use `use-package` to automate this entire process
 
 ## General Behavior
 
-- `org-sql-sqlite-path`: the path to the sqlite database to be created
+- `org-sql-db-config`: a list describing the database to use and how to connect
+  to it (see this variable's help page for more details)
 - `org-sql-files`: list of org files to insert into database
-- `org-sql-pragma`: pragma to use for new connections (useful for performance
-  tuning)
-- `org-sql-buffer`: the name of the buffer for the SQLite connection
 - `org-sql-debug`: turn on SQL transaction debug output in the message buffer
 
 ## Database Storage
 
-These options control what data gets stored in the database, and are useful to minimize the size of the database as well as the time it takes to update:
-- `org-sql-ignored-properties`: list of properties to ignore
-- `org-sql-ignored-tags`: list of tags to ignore
-- `org-sql-ignored-link-types`: list link types to ignore (eg mu4e, file)
-- `org-sql-included-healine-planning-types`: planning types (eg `:closed`,
-  `:scheduled`) to include
-- `org-sql-included-contents-timestamp-types`: type of timestamps (eg `active`,
-  `inactive`) to include
-- `org-sql-included-logbook-types`: types of logbook entries to include (eg
-  `note`, `reschedule`, etc)
-- `org-sql-use-tag-inheritance`: add inherited tags to the database
-- `org-sql-store-clocks`: whether to include clocks (nil implies no clock notes
-  are desired either)
-- `org-sql-store-clock-notes`: whether to include clock notes
+Options following the pattern `org-sql-exclude-X` dictate what to exclude from
+the database. By default all these variables are nil (include everything).
 
 ## Logbooks
 
@@ -138,44 +124,33 @@ pattern matching, which is not totally reliable.
 
 Run `org-sql-user-reset`. This will create a new database and initialize it with
 the default schema. It will also delete an existing database before creating the
-new one if it exists in `org-sql-sqlite-path`.
-
+new one if it exists.
 
 ## Updating
 
 Run `org-sql-user-update`. This will synchronize the database with all files as
 indicated in `org-sql-files` by first checking if the file is in the database
 and inserting it if not. If the file is already present, it will check the md5
-to assess if updates are needed. This function will insert the *entire* content
-of any org file that is either new or changed.
+to assess if updates are needed. Note that for any file in the database,
+changing even one character in the file on disk will trigger an deletion of the
+file in the database followed by an insertion of the *entire* org file.
 
-Note that the database will take several seconds to minutes if inserting many
-files depending on the speed of your device (particularly IO) and the
-size/number of files. This operation will also block Emacs until complete.
+This may take several seconds/minutes if inserting many files depending on the
+speed of your device (particularly IO) and the size/number of files. This
+operation will also block Emacs until complete.
 
-## Clearing all data
+## Removing all data
 
 Run `org-sql-user-clear-all`. This will clear all data but leave the schema.
 
 # Database Layout
 
-The database is arranged by files at the top level and by `org-mode` features
-moving down to child tables. Primary keys are foreign keys are marked with P and
-F in parens respecively. All dates are converted into unix time integers before
-entering into the database.
+## General design features
 
-## Hierarchy
-
-The databases are arranged as follows according to their foreign key contraints:
-
-- files
-  - headlines
-    - tags
-    - properties
-    - clocking
-    - logbook
-      - state_changes
-      - planning_changes
+- the schema is identical except for types between all database implementations
+  (SQLite, Postgres, etc)
+- all foreign keys are set with `UPDATE CASCADE` and `DELETE CASCADE`
+- all time values are stores as unixtime (integers in seconds)
 
 ## Schema
 
