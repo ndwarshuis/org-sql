@@ -65,7 +65,6 @@
 ;;; CONSTANTS
 ;;;
 
-
 (defconst org-sql--log-note-keys
   '((:user .  "%u")
     (:user-full . "%U")
@@ -509,6 +508,19 @@ For 'postgres', the following options are in OPTION-PLIST:
   since setting this option will store the password in plain
   text, consider using a `.pgpass' file\\)"
   ;; TODO add type
+  :group 'org-sql)
+
+(defcustom org-sql-log-note-headings-overrides nil
+  "Alist of `org-log-note-headings' for specific files.
+The car of each cell is the file path, and the cdr is another
+alist like `org-log-note-headings' that will be used when
+processing that file. This is useful if some files were created
+with different patterns for their logbooks as Org-mode itself
+does not provide any options to control this besides the global
+`org-log-note-headings'."
+  :type '(alist :key-type string
+                :value-type (alist :key-type symbol
+                                   :value-type string))
   :group 'org-sql)
 
 (defcustom org-sql-files nil
@@ -1476,7 +1488,7 @@ FSTATE is a list given by `org-sql--to-fstate'."
                  (org-sql--add-mql-insert-clock acc entry))
                 (t
                  (org-sql--add-mql-insert-headline-logbook-item acc entry)))))))
-      (->> (org-ml-headline-get-logbook headline)
+      (->> (org-ml-headline-get-logbook-drawer "LOGBOOK" nil headline)
            (org-sql--logbook-to-entries fstate headline-offset)
            (-reduce-from #'add-entry acc)))))
 
