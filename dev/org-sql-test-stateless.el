@@ -59,7 +59,8 @@ list then join the cdr of IN with newlines."
 
 (defun buffer-get-sml ()
   (->> (org-ml-parse-this-buffer)
-       (org-sql--to-fstate testing-filepath testing-md5 nil '("TODO" "DONE"))
+       (org-sql--to-fstate testing-filepath testing-md5 nil
+                           org-log-note-headings '("TODO" "DONE"))
        (org-sql--fstate-to-mql-insert)))
 
 (defmacro expect-sql (in tbl)

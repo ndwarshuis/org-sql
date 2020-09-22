@@ -5,7 +5,7 @@
 ;; Author: Nathan Dwarshuis <natedwarshuis@gmail.com>
 ;; Keywords: org-mode, data
 ;; Homepage: https://github.com/ndwarshuis/org-sql
-;; Package-Requires: ((emacs "26.1") (s "1.12") (dash "2.15") (org-ml "3.0.2"))
+;; Package-Requires: ((emacs "26.1") (s "1.12") (dash "2.15") (org-ml "4.0.0"))
 ;; Version: 1.0.1
 
 ;; This program is free software; you can redistribute it and/or modify
@@ -790,7 +790,8 @@ the plist in order for the delete to be applied."
 
 ;; external state
 
-(defun org-sql--to-fstate (file-path hash attributes todo-keywords tree)
+(defun org-sql--to-fstate (file-path hash attributes log-note-headings
+                                     todo-keywords tree)
   "Return a plist representing the state of an org buffer.
 The plist will include:
 - `:file-path': the path to this org file on disk (given by
@@ -805,7 +806,7 @@ The plist will include:
 - `:log-note-matcher': a list of log-note-matchers for this org
   file as returned by
   `org-sql--build-log-note-heading-matchers' (which depends on
-  TODO-KEYWORDS)"
+  TODO-KEYWORDS and LOG-NOTE-HEADINGS)"
   (let* ((children (org-ml-get-children tree))
          (top-section (-some->> (assoc 'section children)
                         (org-ml-get-children))))
@@ -815,7 +816,7 @@ The plist will include:
           :top-section top-section
           :headlines (if top-section (cdr children) children)
           :log-note-matcher (org-sql--build-log-note-heading-matchers
-                             org-log-note-headings todo-keywords))))
+                             log-note-headings todo-keywords))))
 
 (defun org-sql--to-fmeta (disk-path db-path hash)
   "Return a plist representing org file status.
@@ -1854,11 +1855,16 @@ Return a cons cell like (RETURNCODE . OUTPUT)."
   "Return the fstate for FMETA.
 FSTATE is a list as given by `org-sql--to-fstate'."
   (-let* (((&plist :disk-path :hash) fmeta)
-          (attributes (file-attributes disk-path)))
+          (attributes (file-attributes disk-path))
+          (log-note-headings
+           (or (alist-get disk-path org-sql-log-note-headings-overrides
+                          nil nil #'equal)
+               org-log-note-headings)))
     (with-current-buffer (find-file-noselect disk-path t)
       (let ((tree (org-element-parse-buffer))
             (todo-keywords (-map #'substring-no-properties org-todo-keywords-1)))
-        (org-sql--to-fstate disk-path hash attributes todo-keywords tree)))))
+        (org-sql--to-fstate disk-path hash attributes log-note-headings
+                            todo-keywords tree)))))
 
 ;;; reading fmeta from external state
 
