@@ -623,7 +623,6 @@ ignored."
 ;;; STATELESS FUNCTIONS
 ;;;
 
-
 ;;; compile/macro checking
 
 ;; case selection statements for sql mode and type
@@ -1205,6 +1204,8 @@ be used when evaluating the regexp for the \"%S\" and \"%s\" matchers."
            (ts-regexp (format-capture org-ts-regexp))
            (ts-ia-regexp (format-capture org-ts-regexp-inactive))
            (keys (-map #'cdr org-sql--log-note-keys)))
+      ;; TODO the user/user-full variables have nothing stopping them from
+      ;; constraining spaces, in which case this will fail
       (->> (list "\\(.*\\)"
                  "\\(.*\\)"
                  ts-ia-regexp
@@ -1231,6 +1232,9 @@ capture in REGEXP."
       ((reverse-lookup
         (value alist)
         (car (--find (equal (cdr it) value) alist)))
+       ;; TODO this will fail if the pattern is in the front; a more direct way
+       ;; would be to match the pattern directly; see `org-replace-escapes' for
+       ;; the regexp that is used when replacing
        (unpad-headings
         (heading)
         (org-replace-escapes heading org-sql--log-note-replacements))
