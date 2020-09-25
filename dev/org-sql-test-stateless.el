@@ -22,7 +22,6 @@
 ;;; Code:
 
 (require 'org-sql)
-(require 'org-clock)
 (require 's)
 (require 'buttercup)
 
@@ -103,12 +102,16 @@ list then join the cdr of IN with newlines."
                 (apply #'append)
                 (cons (car e)))))
        (let* ((item (org-ml-parse-item-at 1))
+              (headline (->> (org-ml-build-headline! :title-text "dummy")
+                             ;; TODO shouldn't this be settable?
+                             (org-ml--set-property-nocheck :begin 1)))
               (fstate (org-sql--to-fstate testing-filepath testing-md5 nil
                                           ,log-note-headings '("TODO" "DONE")
                                           org-log-into-drawer
                                           org-clock-into-drawer
                                           nil))
-              (entry (->> (org-sql--item-to-entry fstate 1 item)
+              (hstate (org-sql--to-hstate fstate headline))
+              (entry (->> (org-sql--item-to-entry hstate item)
                           (props-to-string (list :ts
                                                  :ts-active
                                                  :short-ts
@@ -448,6 +451,8 @@ list then join the cdr of IN with newlines."
 
 (describe "meta-query language insert spec"
   (before-all
+    ;; (setq max-lisp-eval-depth 5000)
+    ;; (setq max-specpdl-size 5000)
     (org-mode))
 
   (before-each
