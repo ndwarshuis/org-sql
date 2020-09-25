@@ -22,6 +22,7 @@
 ;;; Code:
 
 (require 'org-sql)
+(require 'org-clock)
 (require 's)
 (require 'buttercup)
 
@@ -60,7 +61,9 @@ list then join the cdr of IN with newlines."
 (defun buffer-get-sml ()
   (->> (org-ml-parse-this-buffer)
        (org-sql--to-fstate testing-filepath testing-md5 nil
-                           org-log-note-headings '("TODO" "DONE"))
+                           org-log-note-headings '("TODO" "DONE")
+                           org-log-into-drawer
+                           org-clock-into-drawer)
        (org-sql--fstate-to-mql-insert)))
 
 (defmacro expect-sql (in tbl)
@@ -101,7 +104,10 @@ list then join the cdr of IN with newlines."
                 (cons (car e)))))
        (let* ((item (org-ml-parse-item-at 1))
               (fstate (org-sql--to-fstate testing-filepath testing-md5 nil
-                                          ,log-note-headings '("TODO" "DONE") nil))
+                                          ,log-note-headings '("TODO" "DONE")
+                                          org-log-into-drawer
+                                          org-clock-into-drawer
+                                          nil))
               (entry (->> (org-sql--item-to-entry fstate 1 item)
                           (props-to-string (list :ts
                                                  :ts-active

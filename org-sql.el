@@ -789,8 +789,39 @@ the plist in order for the delete to be applied."
 
 ;; external state
 
+(defun org-sql--get-file-log-into-drawer (log-note-headings top-section)
+  (cl-flet*
+      ((is-startup
+        (node)
+        (and (org-ml-is-type 'keyword node)
+             (equal "STARTUP" (org-ml-get-property :key node))))
+       (set-log-into
+        (acc node)
+        (if (not (is-startup node)) acc
+          (pcase (org-ml-get-property :value node)
+             ("logdrawer" t)
+             ("nologdrawer" nil)
+             (_ acc)))))
+    (-reduce-from #'set-log-into log-note-headings top-section)))
+
+(defun org-sql--get-logbook-drawer-name (log-into-drawer)
+  (pcase log-into-drawer
+    ((and (pred stringp) x) x)
+    (`t "LOGBOOK")
+    (`nil nil)
+    (e (error "Invalid log-into-drawer: %s" e))))
+
+(defun org-sql--get-clock-drawer-name (clock-into-drawer)
+  (pcase clock-into-drawer
+    ((and (pred stringp x) x) x)
+    ((pred integerp x) "LOGBOOK")
+    (`t "LOGBOOK")
+    (`nil nil)
+    (e (error "Invalid clock-into-drawer: %s" e))))
+
 (defun org-sql--to-fstate (file-path hash attributes log-note-headings
-                                     todo-keywords tree)
+                                     todo-keywords log-into-drawer
+                                     clock-into-drawer tree)
   "Return a plist representing the state of an org buffer.
 The plist will include:
 - `:file-path': the path to this org file on disk (given by
@@ -802,18 +833,28 @@ The plist will include:
   org-file's top section before the first headline
 - `:headline': a list of org-element TREE headlines in this org
   file
+- `:log-into-drawer': the value of `org-log-into-drawer' for this
+  file
+- `:clock-into-drawer': the value of `org-clock-into-drawer' for
+  this file
 - `:log-note-matcher': a list of log-note-matchers for this org
   file as returned by
   `org-sql--build-log-note-heading-matchers' (which depends on
   TODO-KEYWORDS and LOG-NOTE-HEADINGS)"
   (let* ((children (org-ml-get-children tree))
          (top-section (-some->> (assoc 'section children)
-                        (org-ml-get-children))))
+                        (org-ml-get-children)))
+         (log-into-drawer*
+          (->> (org-sql--get-file-log-into-drawer log-into-drawer top-section)
+               (org-sql--get-logbook-drawer-name)))
+         (clock-into-drawer* (org-sql--get-clock-drawer-name clock-into-drawer)))
     (list :file-path file-path
           :md5 hash
           :attributes attributes
           :top-section top-section
           :headlines (if top-section (cdr children) children)
+          :log-into-drawer log-into-drawer*
+          :clock-into-drawer clock-into-drawer
           :log-note-matcher (org-sql--build-log-note-heading-matchers
                              log-note-headings todo-keywords))))
 
@@ -1868,7 +1909,9 @@ FSTATE is a list as given by `org-sql--to-fstate'."
       (let ((tree (org-element-parse-buffer))
             (todo-keywords (-map #'substring-no-properties org-todo-keywords-1)))
         (org-sql--to-fstate disk-path hash attributes log-note-headings
-                            todo-keywords tree)))))
+                            todo-keywords org-log-into-drawer
+                            org-clock-into-drawer
+                            tree)))))
 
 ;;; reading fmeta from external state
 
