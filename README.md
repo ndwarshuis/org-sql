@@ -66,6 +66,14 @@ dictate what not to store in the database. By default all these variables are
 nil (include everything). See the help page for each of these for further
 details.
 
+## Logbook Parsing
+
+`org-sql` will parse logbook entries by trying to match their headings using
+`org-log-note-headings`. Org-mode provides no way to set this variable on a
+per-file basis, so `org-sql` provides the variable 
+`org-sql-log-note-headings-overrides` which is an alist matching a file path to
+the desired variation of `org-log-note-headlings`.
+
 # Usage
 
 ## Initializing
@@ -99,27 +107,68 @@ This has currently only been tested on Linux and will likely break on Windows
 (it may work on MacOS). Support for other operating systems is planned for
 future releases.
 
-## Logbook entries
+## Logbook drawer variables
 
-Due to a limitation in `org-ml` (used as the backend for parsing org files here)
-logbooks will only be detected and parsed if `org-log-into-drawer` is non-nil
-(which means logbook entries go into a separate drawer, `LOGBOOK` by default).
-Even when this limitation is fixed, there is no guarantee that logbook entries
-without a drawer will be parsed correctly (since these are just free clock
-entries and plain-lists in the headline section with everything else). For this
-reason, it is recommended to set `org-log-into-drawer` to non-nil anyways.
-
-Additionally, `org-ml` will not pay attention to file-level logbook settings (eg
+`org-ml` will currently not pay attention to file-level logbook settings (eg
 `#+STARTUP: nologdrawer`) or subtree settings (eg the `LOG_INTO_DRAWER`
 property) and as such `org-ml` will only parse subtrees and store logbooks
 according to `org-log-into-drawer`.
 
-## Logbook header types
+## Logbook and clock entries
 
-`org-ml` parse logbook entries by trying to match their headings using
-`org-log-note-headings`. There is no way to set this variable on a per-file or
-per-tree basis, so all parsed file will be treated the same according to this
-variable.
+### Short version
+
+Set `org-clock-into-drawer` and `org-log-into-drawer` to be distinct drawers,
+which will guarantee that both logbook entries and clocks are isolated from each
+other and the rest of the headline which will enable 100% accurate parsing.
+
+### Long version
+
+Org-mode stores these two types of metadata near the top of each header.
+
+Clocks look like this (with an optional closing note):
+
+```
+* headline
+CLOCK: [2020-01-01 Thu 00:00]--[2020-01-01 Thu 01:00] => 01:00
+- clock out note (optional)
+```
+
+Logbook entries are more complicated and follow the patterns described in
+`org-log-note-headings`. These are some examples:
+
+```
+* DONE headline
+- CLOSING NOTE [2020-01-01 Thu 00:00] \\
+  here is a closing note
+- Note taken on [2020-01-01 Thu 00:00] \\
+  here is an arbitrary note
+- Refiled on [2020-01-01 Thu 00:00] \\
+```
+
+These may or may not be stored in drawers, and the consequences are as follows:
+
+- If clocks and logbook entries are put in different drawers, parsing will be
+efficient and 100% accurate since the logbook drawer can be assumed to be just a
+plain list where each item will match a pattern in `org-log-note-headings` and
+can be classified into the correct SQL table from there. Likewise, the clock
+drawer can be assumed to only contain clocks and maybe singleton plain-lists
+where each plain list corresponds to a clock note.
+
+- If clocks and logbook entries are in the same drawer, any plain-list item after
+a clock cannot automatically be assumed to be a clock note. In this cases the
+item will be matched against `org-log-note-headings` and if it matches none of
+the patterns it will be assumed to be a clock note. For this most part, this is
+likely to still be accurate but is no longer guaranteed.
+
+- Accuracy may be poor if logbook entries and/or clocks are not put in drawers
+at all; this is because org-mode has no way to define the ending point of "the
+logbook and clock entries" in this case. If there is a newline after the clock
+and logbook entries, the same pitfalls of storing them in the same drawer are
+still applicable. However, if the logbook is followed immediately by another
+plain-list, there is no way to determine if these logbook items are part of the
+logbook or are clock notes. Additionally, performance will be worse than either
+of the above cases.
 
 # Database Layout
 
@@ -313,7 +362,7 @@ Each rows stores one link
 | link_text |  |  | x | TEXT / TEXT | text of this link |
 | link_type |  |  |  | TEXT / TEXT | type of this link (eg http, mu4e, file, etc) |
 
-<!-- 1.0.1 -->
+<!-- 1.0.2 -->
 
 # Contributing
 
@@ -395,6 +444,10 @@ make docs
 ```
 
 # Changelog
+
+## 1.0.2
+
+- added `org-sql-log-note-headings-overrides`
 
 ## 1.0.1
 

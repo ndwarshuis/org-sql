@@ -59,7 +59,8 @@ list then join the cdr of IN with newlines."
 
 (defun buffer-get-sml ()
   (->> (org-ml-parse-this-buffer)
-       (org-sql--to-fstate testing-filepath testing-md5 nil '("TODO" "DONE"))
+       (org-sql--to-fstate testing-filepath testing-md5 nil
+                           org-log-note-headings '("TODO" "DONE"))
        (org-sql--fstate-to-mql-insert)))
 
 (defmacro expect-sql (in tbl)
@@ -82,6 +83,362 @@ list then join the cdr of IN with newlines."
                           (let (,@let-forms)
                             (expect-sql-tbls ,names ,in ,tbl))))))))
     `(progn ,@specs)))
+
+(defmacro expect-sql-logbook-item (in log-note-headings entry)
+  (declare (indent 2))
+  `(progn
+     (insert (list-to-lines ,in))
+     (cl-flet
+         ((props-to-string
+           (props e)
+           (->> (cdr e)
+                (-partition 2)
+                (--map-when (memq (car it) props)
+                            (list (car it)
+                                  (-some-> (cadr it)
+                                    (org-ml-to-trimmed-string))))
+                (apply #'append)
+                (cons (car e)))))
+       (let* ((item (org-ml-parse-item-at 1))
+              (fstate (org-sql--to-fstate testing-filepath testing-md5 nil
+                                          ,log-note-headings '("TODO" "DONE") nil))
+              (entry (->> (org-sql--item-to-entry fstate 1 item)
+                          (props-to-string (list :ts
+                                                 :ts-active
+                                                 :short-ts
+                                                 :short-ts-active
+                                                 :old-ts
+                                                 :new-ts)))))
+         (should (equal entry ,entry))))))
+
+(describe "logbook entry spec"
+  ;; don't test clocks here since they are way simpler
+  (before-all
+    (org-mode))
+
+  (before-each
+    (erase-buffer))
+
+  (it "default -  none"
+    (expect-sql-logbook-item (list "- logbook item \\\\"
+                                   "  fancy note")
+        org-log-note-headings
+      `(none :file-path ,testing-filepath
+             :entry-offset 1
+             :headline-offset 1
+             :header-text "logbook item"
+             :note-text "fancy note"
+             :user nil
+             :user-full nil
+             :ts nil
+             :ts-active nil
+             :short-ts nil
+             :short-ts-active nil
+             :old-ts nil
+             :new-ts nil
+             :old-state nil
+             :new-state nil)))
+
+  (it "default -  state"
+    (let* ((ts "[2112-01-03 Sun]")
+           (h (format "State \"DONE\" from \"TODO\" %s" ts)))
+      (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
+          org-log-note-headings
+        `(state :file-path ,testing-filepath
+                :entry-offset 1
+                :headline-offset 1
+                :header-text ,h
+                :note-text "fancy note"
+                :user nil
+                :user-full nil
+                :ts ,ts
+                :ts-active nil
+                :short-ts nil
+                :short-ts-active nil
+                :old-ts nil
+                :new-ts nil
+                :old-state "TODO"
+                :new-state "DONE"))))
+
+  (it "default -  refile"
+    (let* ((ts "[2112-01-03 Sun]")
+           (h (format "Refiled on %s" ts)))
+      (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
+          org-log-note-headings
+        `(refile :file-path ,testing-filepath
+                 :entry-offset 1
+                 :headline-offset 1
+                 :header-text ,h
+                 :note-text "fancy note"
+                 :user nil
+                 :user-full nil
+                 :ts ,ts
+                 :ts-active nil
+                 :short-ts nil
+                 :short-ts-active nil
+                 :old-ts nil
+                 :new-ts nil
+                 :old-state nil
+                 :new-state nil))))
+
+  (it "default -  note"
+    (let* ((ts "[2112-01-03 Sun]")
+           (h (format "Note taken on %s" ts)))
+      (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
+          org-log-note-headings
+        `(note :file-path ,testing-filepath
+               :entry-offset 1
+               :headline-offset 1
+               :header-text ,h
+               :note-text "fancy note"
+               :user nil
+               :user-full nil
+               :ts ,ts
+               :ts-active nil
+               :short-ts nil
+               :short-ts-active nil
+               :old-ts nil
+               :new-ts nil
+               :old-state nil
+               :new-state nil))))
+
+  (it "default -  done"
+    (let* ((ts "[2112-01-03 Sun]")
+           (h (format "CLOSING NOTE %s" ts)))
+      (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
+          org-log-note-headings
+        `(done :file-path ,testing-filepath
+               :entry-offset 1
+               :headline-offset 1
+               :header-text ,h
+               :note-text "fancy note"
+               :user nil
+               :user-full nil
+               :ts ,ts
+               :ts-active nil
+               :short-ts nil
+               :short-ts-active nil
+               :old-ts nil
+               :new-ts nil
+               :old-state nil
+               :new-state nil))))
+
+  (it "default -  reschedule"
+    (let* ((ts "[2112-01-03 Sun]")
+           (ts0 "[2112-01-04 Mon]")
+           (h (format "Rescheduled from \"%s\" on %s" ts0 ts)))
+      (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
+          org-log-note-headings
+        `(reschedule :file-path ,testing-filepath
+                     :entry-offset 1
+                     :headline-offset 1
+                     :header-text ,h
+                     :note-text "fancy note"
+                     :user nil
+                     :user-full nil
+                     :ts ,ts
+                     :ts-active nil
+                     :short-ts nil
+                     :short-ts-active nil
+                     :old-ts ,ts0
+                     :new-ts nil
+                     :old-state nil
+                     :new-state nil))))
+
+  (it "default -  delschedule"
+    (let* ((ts "[2112-01-03 Sun]")
+           (ts0 "[2112-01-04 Mon]")
+           (h (format "Not scheduled, was \"%s\" on %s" ts0 ts)))
+      (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
+          org-log-note-headings
+        `(delschedule :file-path ,testing-filepath
+                      :entry-offset 1
+                      :headline-offset 1
+                      :header-text ,h
+                      :note-text "fancy note"
+                      :user nil
+                      :user-full nil
+                      :ts ,ts
+                      :ts-active nil
+                      :short-ts nil
+                      :short-ts-active nil
+                      :old-ts ,ts0
+                      :new-ts nil
+                      :old-state nil
+                      :new-state nil))))
+
+  (it "default - redeadline"
+    (let* ((ts "[2112-01-03 Sun]")
+           (ts0 "[2112-01-04 Mon]")
+           (h (format "New deadline from \"%s\" on %s" ts0 ts)))
+      (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
+          org-log-note-headings
+        `(redeadline :file-path ,testing-filepath
+                     :entry-offset 1
+                     :headline-offset 1
+                     :header-text ,h
+                     :note-text "fancy note"
+                     :user nil
+                     :user-full nil
+                     :ts ,ts
+                     :ts-active nil
+                     :short-ts nil
+                     :short-ts-active nil
+                     :old-ts ,ts0
+                     :new-ts nil
+                     :old-state nil
+                     :new-state nil))))
+
+  (it "default - deldeadline"
+    (let* ((ts "[2112-01-03 Sun]")
+           (ts0 "[2112-01-04 Mon]")
+           (h (format "Removed deadline, was \"%s\" on %s" ts0 ts)))
+      (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
+          org-log-note-headings
+        `(deldeadline :file-path ,testing-filepath
+                      :entry-offset 1
+                      :headline-offset 1
+                      :header-text ,h
+                      :note-text "fancy note"
+                      :user nil
+                      :user-full nil
+                      :ts ,ts
+                      :ts-active nil
+                      :short-ts nil
+                      :short-ts-active nil
+                      :old-ts ,ts0
+                      :new-ts nil
+                      :old-state nil
+                      :new-state nil))))
+
+  (it "custom - user"
+    (let* ((user "eddie666")
+           (h (format "User %s is the best user" user)))
+      (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
+          '((user . "User %u is the best user"))
+        `(user :file-path ,testing-filepath
+               :entry-offset 1
+               :headline-offset 1
+               :header-text ,h
+               :note-text "fancy note"
+               :user ,user
+               :user-full nil
+               :ts nil
+               :ts-active nil
+               :short-ts nil
+               :short-ts-active nil
+               :old-ts nil
+               :new-ts nil
+               :old-state nil
+               :new-state nil))))
+
+  (it "custom - user full"
+    ;; TODO this variable can have spaces and such, which will currently not
+    ;; be matched
+    (let* ((userfull "FullName")
+           (h (format "User %s is the best user" userfull)))
+      (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
+          '((userfull . "User %u is the best user"))
+        `(userfull :file-path ,testing-filepath
+                   :entry-offset 1
+                   :headline-offset 1
+                   :header-text ,h
+                   :note-text "fancy note"
+                   :user ,userfull
+                   :user-full nil
+                   :ts nil
+                   :ts-active nil
+                   :short-ts nil
+                   :short-ts-active nil
+                   :old-ts nil
+                   :new-ts nil
+                   :old-state nil
+                   :new-state nil))))
+
+  (it "custom - active timestamp"
+    (let* ((ts "<2112-01-01 Fri 00:00>")
+           (h (format "I'm active now: %s" ts)))
+      (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
+          '((activets . "I'm active now: %T"))
+        `(activets :file-path ,testing-filepath
+                   :entry-offset 1
+                   :headline-offset 1
+                   :header-text ,h
+                   :note-text "fancy note"
+                   :user nil
+                   :user-full nil
+                   :ts nil
+                   :ts-active ,ts
+                   :short-ts nil
+                   :short-ts-active nil
+                   :old-ts nil
+                   :new-ts nil
+                   :old-state nil
+                   :new-state nil))))
+
+  (it "custom - short timestamp"
+    (let* ((ts "[2112-01-01 Fri]")
+           (h (format "Life feels short now: %s" ts)))
+      (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
+          '((shortts . "Life feels short now: %d"))
+        `(shortts :file-path ,testing-filepath
+                  :entry-offset 1
+                  :headline-offset 1
+                  :header-text ,h
+                  :note-text "fancy note"
+                  :user nil
+                  :user-full nil
+                  :ts nil
+                  :ts-active nil
+                  :short-ts ,ts
+                  :short-ts-active nil
+                  :old-ts nil
+                  :new-ts nil
+                  :old-state nil
+                  :new-state nil))))
+
+  (it "custom - short active timestamp"
+    (let* ((ts "<2112-01-01 Fri>")
+           (h (format "Life feels short now: %s" ts)))
+      (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
+          '((shortts . "Life feels short now: %D"))
+        `(shortts :file-path ,testing-filepath
+                  :entry-offset 1
+                  :headline-offset 1
+                  :header-text ,h
+                  :note-text "fancy note"
+                  :user nil
+                  :user-full nil
+                  :ts nil
+                  :ts-active nil
+                  :short-ts nil
+                  :short-ts-active ,ts
+                  :old-ts nil
+                  :new-ts nil
+                  :old-state nil
+                  :new-state nil))))
+
+  (it "custom - old/new timestamps"
+    (let* ((ts0 "[2112-01-01 Fri]")
+           (ts1 "[2112-01-02 Sat]")
+           (h (format "Fake clock: \"%s\"--\"%s\"" ts0 ts1)))
+      (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
+          '((fakeclock . "Fake clock: %S--%s"))
+        `(fakeclock :file-path ,testing-filepath
+                    :entry-offset 1
+                    :headline-offset 1
+                    :header-text ,h
+                    :note-text "fancy note"
+                    :user nil
+                    :user-full nil
+                    :ts nil
+                    :ts-active nil
+                    :short-ts nil
+                    :short-ts-active nil
+                    :old-ts ,ts0
+                    :new-ts ,ts1
+                    :old-state nil
+                    :new-state nil)))))
 
 (describe "meta-query language insert spec"
   (before-all
