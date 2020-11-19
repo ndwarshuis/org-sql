@@ -459,17 +459,17 @@ to store them. This is in addition to any properties specifified by
     language (MQL, basically a giant list)"))
 
 ;; TODO what about the windows users?
-(defconst org-sql--sqlite-exe "/usr/bin/sqlite3"
-  "The path to the sqlite client command.")
+(defconst org-sql--sqlite-exe "sqlite3"
+  "The sqlite client command.")
 
-(defconst org-sql--psql-exe "/usr/bin/psql"
-  "The path to the postgres client command.")
+(defconst org-sql--psql-exe "psql"
+  "The postgres client command.")
 
-(defconst org-sql--postgres-createdb-exe "/usr/bin/createdb"
-  "The path to the postgres 'create database' command.")
+(defconst org-sql--postgres-createdb-exe "createdb"
+  "The postgres 'create database' command.")
 
-(defconst org-sql--postgres-dropdb-exe "/usr/bin/dropdb"
-  "The path to the postgres 'drop database' command.")
+(defconst org-sql--postgres-dropdb-exe "dropdb"
+  "The postgres 'drop database' command.")
 
 ;;;
 ;;; CUSTOMIZATION OPTIONS
