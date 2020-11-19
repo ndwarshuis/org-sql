@@ -1996,7 +1996,7 @@ The database connection will be handled transparently."
   "Execute SQL-CMD as a separate file input.
 The database connection will be handled transparently."
   (if (not sql-cmd) '(0 . "")
-    (-let* ((tmp-path (format "/tmp/org-sql-cmd-%s" (round (float-time))))
+    (-let* ((tmp-path (format "%sorg-sql-cmd-%s" (temporary-file-directory) (round (float-time))))
             ((mode . keyvals) org-sql-db-config))
       (f-write sql-cmd 'utf-8 tmp-path)
       (let ((res
