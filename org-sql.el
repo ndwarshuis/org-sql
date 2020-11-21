@@ -6,7 +6,7 @@
 ;; Keywords: org-mode, data
 ;; Homepage: https://github.com/ndwarshuis/org-sql
 ;; Package-Requires: ((emacs "26.1") (s "1.12") (dash "2.15") (org-ml "4.0.0"))
-;; Version: 1.0.2
+;; Version: 1.0.3
 
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -460,17 +460,17 @@ to store them. This is in addition to any properties specifified by
     language (MQL, basically a giant list)"))
 
 ;; TODO what about the windows users?
-(defconst org-sql--sqlite-exe "/usr/bin/sqlite3"
-  "The path to the sqlite client command.")
+(defconst org-sql--sqlite-exe "sqlite3"
+  "The sqlite client command.")
 
-(defconst org-sql--psql-exe "/usr/bin/psql"
-  "The path to the postgres client command.")
+(defconst org-sql--psql-exe "psql"
+  "The postgres client command.")
 
-(defconst org-sql--postgres-createdb-exe "/usr/bin/createdb"
-  "The path to the postgres 'create database' command.")
+(defconst org-sql--postgres-createdb-exe "createdb"
+  "The postgres 'create database' command.")
 
-(defconst org-sql--postgres-dropdb-exe "/usr/bin/dropdb"
-  "The path to the postgres 'drop database' command.")
+(defconst org-sql--postgres-dropdb-exe "dropdb"
+  "The postgres 'drop database' command.")
 
 ;;;
 ;;; CUSTOMIZATION OPTIONS
@@ -2104,7 +2104,7 @@ The database connection will be handled transparently."
   "Execute SQL-CMD as a separate file input.
 The database connection will be handled transparently."
   (if (not sql-cmd) '(0 . "")
-    (-let* ((tmp-path (format "/tmp/org-sql-cmd-%s" (round (float-time))))
+    (-let* ((tmp-path (format "%sorg-sql-cmd-%s" (temporary-file-directory) (round (float-time))))
             ((mode . keyvals) org-sql-db-config))
       (f-write sql-cmd 'utf-8 tmp-path)
       (let ((res

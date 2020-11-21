@@ -266,6 +266,11 @@ make docs
 
 # Changelog
 
+## 1.0.3
+
+- fixed execution paths and temp file path
+  (![jarifuri](https://github.com/jarifuri))
+
 ## 1.0.2
 
 - added `org-sql-log-note-headings-overrides`
