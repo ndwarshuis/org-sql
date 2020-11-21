@@ -362,7 +362,7 @@ Each rows stores one link
 | link_text |  |  | x | TEXT / TEXT | text of this link |
 | link_type |  |  |  | TEXT / TEXT | type of this link (eg http, mu4e, file, etc) |
 
-<!-- 1.0.2 -->
+<!-- 1.0.3 -->
 
 # Contributing
 
@@ -444,6 +444,12 @@ make docs
 ```
 
 # Changelog
+
+## 1.0.3
+
+- fixed execution paths and temp file path (thank you
+  ![jarifuri](https://github.com/jarifuri))
+  
 
 ## 1.0.2
 
