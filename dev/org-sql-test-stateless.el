@@ -58,12 +58,13 @@ list then join the cdr of IN with newlines."
        (expect res :to-equal ,tbl))))
 
 (defun buffer-get-sml ()
-  (->> (org-ml-parse-this-buffer)
-       (org-sql--to-fstate testing-filepath testing-md5 nil
-                           org-log-note-headings '("TODO" "DONE")
-                           org-log-into-drawer
-                           org-clock-into-drawer)
-       (org-sql--fstate-to-mql-insert)))
+  (let ((lb-config (list :log-into-drawer org-log-into-drawer
+                         :clock-into-drawer org-clock-into-drawer
+                         :clock-out-notes org-log-note-clock-out)))
+    (->> (org-ml-parse-this-buffer)
+         (org-sql--to-fstate testing-filepath testing-md5 nil
+                             org-log-note-headings '("TODO" "DONE") lb-config)
+         (org-sql--fstate-to-mql-insert))))
 
 (defmacro expect-sql (in tbl)
   (declare (indent 1))
@@ -105,10 +106,12 @@ list then join the cdr of IN with newlines."
               (headline (->> (org-ml-build-headline! :title-text "dummy")
                              ;; TODO shouldn't this be settable?
                              (org-ml--set-property-nocheck :begin 1)))
+              (lb-config (list :log-into-drawer org-log-into-drawer
+                               :clock-into-drawer org-clock-into-drawer
+                               :clock-out-notes org-log-note-clock-out))
               (fstate (org-sql--to-fstate testing-filepath testing-md5 nil
                                           ,log-note-headings '("TODO" "DONE")
-                                          org-log-into-drawer
-                                          org-clock-into-drawer
+                                          lb-config
                                           nil))
               (hstate (org-sql--to-hstate fstate headline))
               (entry (->> (org-sql--item-to-entry hstate item)
@@ -1060,7 +1063,7 @@ list then join the cdr of IN with newlines."
   ;; ;; TODO add inherited properties once they exist
 
   (it "single clock (closed)"
-    (let* ((org-log-into-drawer "LOGBOOK")
+    (let* ((org-clock-into-drawer "LOGBOOK")
            (ts0 "[2112-01-01 Fri 00:00]")
            (ts1 "[2112-01-02 Sat 01:00]")
            (clock (format "CLOCK: %s--%s => 1:00" ts0 ts1)))
@@ -1076,8 +1079,26 @@ list then join the cdr of IN with newlines."
                   :time_end ,(org-ts-to-unixtime ts1)
                   :clock_note nil)))))
 
+  (it "single clock (closed - loose tree-level)"
+    (let* ((org-clock-into-drawer "LOGBOOK")
+           (ts0 "[2112-01-01 Fri 00:00]")
+           (ts1 "[2112-01-02 Sat 01:00]")
+           (clock (format "CLOCK: %s--%s => 1:00" ts0 ts1)))
+      (expect-sql-tbls (clocks) (list "* parent"
+                                      ":PROPERTIES:"
+                                      ":CLOCK_INTO_DRAWER: nil"
+                                      ":END:"
+                                      clock)
+        ;; TODO what happens if we join tables and names collide?
+        `((clocks :file_path ,testing-filepath
+                  :headline_offset 1
+                  :clock_offset 53
+                  :time_start ,(org-ts-to-unixtime ts0)
+                  :time_end ,(org-ts-to-unixtime ts1)
+                  :clock_note nil)))))
+
   (it "single clock (open)"
-    (let* ((org-log-into-drawer "LOGBOOK")
+    (let* ((org-clock-into-drawer "LOGBOOK")
            (ts "[2112-01-01 Fri 00:00]")
            (clock (format "CLOCK: %s" ts)))
       (expect-sql-tbls (clocks) (list "* parent"
@@ -1091,34 +1112,36 @@ list then join the cdr of IN with newlines."
                   :time_end nil
                   :clock_note nil)))))
 
-    (let* ((ts "[2112-01-01 Fri 00:00]")
-           (clock (format "CLOCK: %s" ts)))
-      (expect-sql-tbls-multi (clocks) (list "* parent"
-                                            ":LOGBOOK:"
-                                            clock
-                                            "- random"
-                                            ":END:") 
-        "single clock (note - included)"
-        ((org-log-into-drawer "LOGBOOK"))
-        `((clocks :file_path ,testing-filepath
-                  :headline_offset 1
-                  :clock_offset 20
-                  :time_start ,(org-ts-to-unixtime ts)
-                  :time_end nil
-                  :clock_note "random"))
+  (let* ((ts "[2112-01-01 Fri 00:00]")
+         (clock (format "CLOCK: %s" ts)))
+    (expect-sql-tbls-multi (clocks) (list "* parent"
+                                          ":LOGBOOK:"
+                                          clock
+                                          "- random"
+                                          ":END:")
+      "single clock (note - included)"
+      ((org-clock-into-drawer "LOGBOOK")
+       (org-log-note-clock-out t))
+      `((clocks :file_path ,testing-filepath
+                :headline_offset 1
+                :clock_offset 20
+                :time_start ,(org-ts-to-unixtime ts)
+                :time_end nil
+                :clock_note "random"))
 
-        "single clock (note - excluded)"
-        ((org-log-into-drawer "LOGBOOK")
-         (org-sql-exclude-clock-notes t))
-        `((clocks :file_path ,testing-filepath
-                  :headline_offset 1
-                  :clock_offset 20
-                  :time_start ,(org-ts-to-unixtime ts)
-                  :time_end nil
-                  :clock_note nil))))
+      "single clock (note - excluded)"
+      ((org-clock-into-drawer "LOGBOOK")
+       (org-log-note-clock-out t)
+       (org-sql-exclude-clock-notes t))
+      `((clocks :file_path ,testing-filepath
+                :headline_offset 1
+                :clock_offset 20
+                :time_start ,(org-ts-to-unixtime ts)
+                :time_end nil
+                :clock_note nil))))
 
   (it "multiple clocks"
-    (let* ((org-log-into-drawer "LOGBOOK")
+    (let* ((org-clock-into-drawer "LOGBOOK")
            (ts0 "[2112-01-01 Fri 00:00]")
            (ts1 "[2112-01-01 Fri 01:00]")
            (clock0 (format "CLOCK: %s" ts0))
@@ -1424,6 +1447,7 @@ list then join the cdr of IN with newlines."
 
   (it "logbook item (clock + note + non-note)"
     (let* ((org-log-into-drawer "LOGBOOK")
+           (org-log-note-clock-out t)
            (ts "[2112-01-01 Fri 00:00]")
            (header (format "CLOSING NOTE %s" ts))
            (ts0 "[2112-01-01 Fri 00:00]")
@@ -1461,22 +1485,23 @@ list then join the cdr of IN with newlines."
                                                (format "- %s" header)
                                                clock
                                                ":END:")
-        `((logbook_entries :file_path ,testing-filepath
+        `((clocks :file_path ,testing-filepath
+                  :headline_offset 1
+                  :clock_offset 58
+                  :time_start ,(org-ts-to-unixtime ts0)
+                  :time_end ,(org-ts-to-unixtime ts1)
+                  :clock_note nil)
+          (logbook_entries :file_path ,testing-filepath
                            :headline_offset 1
                            :entry_offset 20
                            :entry_type "done"
                            :time_logged ,(org-ts-to-unixtime ts)
                            :header ,header
-                           :note nil)
-          (clocks :file_path ,testing-filepath
-                  :headline_offset 1
-                  :clock_offset 58
-                  :time_start ,(org-ts-to-unixtime ts0)
-                  :time_end ,(org-ts-to-unixtime ts1)
-                  :clock_note nil)))))
+                           :note nil)))))
 
   (it "logbook item (non-note + clock + clock note)"
     (let* ((org-log-into-drawer "LOGBOOK")
+           (org-log-note-clock-out t)
            (ts "[2112-01-01 Fri 00:00]")
            (header (format "CLOSING NOTE %s" ts))
            (ts0 "[2112-01-01 Fri 00:00]")
@@ -1488,19 +1513,19 @@ list then join the cdr of IN with newlines."
                                                clock
                                                "- this is a clock note"
                                                ":END:")
-        `((logbook_entries :file_path ,testing-filepath
+        `((clocks :file_path ,testing-filepath
+                  :headline_offset 1
+                  :clock_offset 58
+                  :time_start ,(org-ts-to-unixtime ts0)
+                  :time_end ,(org-ts-to-unixtime ts1)
+                  :clock_note "this is a clock note")
+          (logbook_entries :file_path ,testing-filepath
                            :headline_offset 1
                            :entry_offset 20
                            :entry_type "done"
                            :time_logged ,(org-ts-to-unixtime ts)
                            :header ,header
-                           :note nil)
-          (clocks :file_path ,testing-filepath
-                  :headline_offset 1
-                  :clock_offset 58
-                  :time_start ,(org-ts-to-unixtime ts0)
-                  :time_end ,(org-ts-to-unixtime ts1)
-                  :clock_note "this is a clock note"))))))
+                           :note nil))))))
 
 (defun format-with (mode type value)
   (funcall (org-sql--compile-mql-format-function mode type) value))
