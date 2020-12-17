@@ -1095,8 +1095,7 @@ list then join the cdr of IN with newlines."
                                               "- random"
                                               ":END:")
           "single (note - included)"
-          ((org-clock-into-drawer "LOGBOOK")
-           (org-log-note-clock-out t))
+          ((org-log-note-clock-out t))
           `((clocks :file_path ,testing-filepath
                     :headline_offset 1
                     :clock_offset 20
@@ -1105,8 +1104,7 @@ list then join the cdr of IN with newlines."
                     :clock_note "random"))
 
           "single (note - excluded)"
-          ((org-clock-into-drawer "LOGBOOK")
-           (org-log-note-clock-out t)
+          ((org-log-note-clock-out t)
            (org-sql-exclude-clock-notes t))
           `((clocks :file_path ,testing-filepath
                     :headline_offset 1
@@ -1370,130 +1368,229 @@ list then join the cdr of IN with newlines."
           ((org-sql-excluded-logbook-types '(done)))
           nil)))
 
-    (it "logbook item (clock + non-note)"
-      (let* ((ts "[2112-01-01 Fri 00:00]")
-             (header (format "CLOSING NOTE %s" ts))
-             (ts0 "[2112-01-01 Fri 00:00]")
-             (ts1 "[2112-01-02 Sat 01:00]")
-             (clock (format "CLOCK: %s--%s => 1:00" ts0 ts1)))
-        (expect-sql-tbls (clocks logbook_entries) (list "* parent"
-                                                        ":LOGBOOK:"
-                                                        clock
-                                                        ":END:"
-                                                        (format "- %s" header))
-          `((clocks :file_path ,testing-filepath
-                    :headline_offset 1
-                    :clock_offset 20
-                    :time_start ,(org-ts-to-unixtime ts0)
-                    :time_end ,(org-ts-to-unixtime ts1)
-                    :clock_note nil)
-            (logbook_entries :file_path ,testing-filepath
-                             :headline_offset 1
-                             :entry_offset 88
-                             :entry_type "done"
-                             :time_logged ,(org-ts-to-unixtime ts)
-                             :header ,header
-                             :note nil)))))
+    (describe "mixture"
+      (it "clock + non-note"
+        (let* ((ts "[2112-01-01 Fri 00:00]")
+               (header (format "CLOSING NOTE %s" ts))
+               (ts0 "[2112-01-01 Fri 00:00]")
+               (ts1 "[2112-01-02 Sat 01:00]")
+               (clock (format "CLOCK: %s--%s => 1:00" ts0 ts1)))
+          (expect-sql-tbls (clocks logbook_entries) (list "* parent"
+                                                          ":LOGBOOK:"
+                                                          clock
+                                                          ":END:"
+                                                          (format "- %s" header))
+            `((clocks :file_path ,testing-filepath
+                      :headline_offset 1
+                      :clock_offset 20
+                      :time_start ,(org-ts-to-unixtime ts0)
+                      :time_end ,(org-ts-to-unixtime ts1)
+                      :clock_note nil)
+              (logbook_entries :file_path ,testing-filepath
+                               :headline_offset 1
+                               :entry_offset 88
+                               :entry_type "done"
+                               :time_logged ,(org-ts-to-unixtime ts)
+                               :header ,header
+                               :note nil)))))
 
-    (it "logbook item (clock + note + non-note)"
-      (let* ((org-log-note-clock-out t)
-             (ts "[2112-01-01 Fri 00:00]")
-             (header (format "CLOSING NOTE %s" ts))
-             (ts0 "[2112-01-01 Fri 00:00]")
-             (ts1 "[2112-01-02 Sat 01:00]")
-             (clock (format "CLOCK: %s--%s => 1:00" ts0 ts1)))
-        (expect-sql-tbls (clocks logbook_entries) (list "* parent"
-                                                        ":LOGBOOK:"
-                                                        clock
-                                                        " - this is a clock note"
-                                                        ":END:"
-                                                        (format "- %s" header))
-          `((clocks :file_path ,testing-filepath
-                    :headline_offset 1
-                    :clock_offset 20
-                    :time_start ,(org-ts-to-unixtime ts0)
-                    :time_end ,(org-ts-to-unixtime ts1)
-                    :clock_note "this is a clock note")
-            (logbook_entries :file_path ,testing-filepath
-                             :headline_offset 1
-                             :entry_offset 112
-                             :entry_type "done"
-                             :time_logged ,(org-ts-to-unixtime ts)
-                             :header ,header
-                             :note nil)))))
+      (it "clock + note + non-note"
+        (let* ((org-log-note-clock-out t)
+               (ts "[2112-01-01 Fri 00:00]")
+               (header (format "CLOSING NOTE %s" ts))
+               (ts0 "[2112-01-01 Fri 00:00]")
+               (ts1 "[2112-01-02 Sat 01:00]")
+               (clock (format "CLOCK: %s--%s => 1:00" ts0 ts1)))
+          (expect-sql-tbls (clocks logbook_entries) (list "* parent"
+                                                          ":LOGBOOK:"
+                                                          clock
+                                                          " - this is a clock note"
+                                                          ":END:"
+                                                          (format "- %s" header))
+            `((clocks :file_path ,testing-filepath
+                      :headline_offset 1
+                      :clock_offset 20
+                      :time_start ,(org-ts-to-unixtime ts0)
+                      :time_end ,(org-ts-to-unixtime ts1)
+                      :clock_note "this is a clock note")
+              (logbook_entries :file_path ,testing-filepath
+                               :headline_offset 1
+                               :entry_offset 112
+                               :entry_type "done"
+                               :time_logged ,(org-ts-to-unixtime ts)
+                               :header ,header
+                               :note nil)))))
 
-    (it "logbook item (non-note + clock)"
-      (let* ((ts "[2112-01-01 Fri 00:00]")
-             (header (format "CLOSING NOTE %s" ts))
-             (ts0 "[2112-01-01 Fri 00:00]")
-             (ts1 "[2112-01-02 Sat 01:00]")
-             (clock (format "CLOCK: %s--%s => 1:00" ts0 ts1)))
-        (expect-sql-tbls (clocks logbook_entries) (list "* parent"
-                                                        (format "- %s" header)
-                                                        ":LOGBOOK:"
-                                                        clock
-                                                        ":END:")
-          `((clocks :file_path ,testing-filepath
-                    :headline_offset 1
-                    :clock_offset 58
-                    :time_start ,(org-ts-to-unixtime ts0)
-                    :time_end ,(org-ts-to-unixtime ts1)
-                    :clock_note nil)
-            (logbook_entries :file_path ,testing-filepath
-                             :headline_offset 1
-                             :entry_offset 10
-                             :entry_type "done"
-                             :time_logged ,(org-ts-to-unixtime ts)
-                             :header ,header
-                             :note nil)))))
+      (it "non-note + clock"
+        (let* ((ts "[2112-01-01 Fri 00:00]")
+               (header (format "CLOSING NOTE %s" ts))
+               (ts0 "[2112-01-01 Fri 00:00]")
+               (ts1 "[2112-01-02 Sat 01:00]")
+               (clock (format "CLOCK: %s--%s => 1:00" ts0 ts1)))
+          (expect-sql-tbls (clocks logbook_entries) (list "* parent"
+                                                          (format "- %s" header)
+                                                          ":LOGBOOK:"
+                                                          clock
+                                                          ":END:")
+            `((clocks :file_path ,testing-filepath
+                      :headline_offset 1
+                      :clock_offset 58
+                      :time_start ,(org-ts-to-unixtime ts0)
+                      :time_end ,(org-ts-to-unixtime ts1)
+                      :clock_note nil)
+              (logbook_entries :file_path ,testing-filepath
+                               :headline_offset 1
+                               :entry_offset 10
+                               :entry_type "done"
+                               :time_logged ,(org-ts-to-unixtime ts)
+                               :header ,header
+                               :note nil)))))
 
-    (it "logbook item (non-note + clock + clock note)"
-      (let* ((org-log-note-clock-out t)
-             (ts "[2112-01-01 Fri 00:00]")
-             (header (format "CLOSING NOTE %s" ts))
-             (ts0 "[2112-01-01 Fri 00:00]")
-             (ts1 "[2112-01-02 Sat 01:00]")
-             (clock (format "CLOCK: %s--%s => 1:00" ts0 ts1)))
-        (expect-sql-tbls (clocks logbook_entries) (list "* parent"
-                                                        (format "- %s" header)
-                                                        ":LOGBOOK:"
-                                                        clock
-                                                        "- this is a clock note"
-                                                        ":END:")
-          `((clocks :file_path ,testing-filepath
-                    :headline_offset 1
-                    :clock_offset 58
-                    :time_start ,(org-ts-to-unixtime ts0)
-                    :time_end ,(org-ts-to-unixtime ts1)
-                    :clock_note "this is a clock note")
-            (logbook_entries :file_path ,testing-filepath
-                             :headline_offset 1
-                             :entry_offset 10
-                             :entry_type "done"
-                             :time_logged ,(org-ts-to-unixtime ts)
-                             :header ,header
-                             :note nil)))))
+      (it "non-note + clock + clock note"
+        (let* ((org-log-note-clock-out t)
+               (ts "[2112-01-01 Fri 00:00]")
+               (header (format "CLOSING NOTE %s" ts))
+               (ts0 "[2112-01-01 Fri 00:00]")
+               (ts1 "[2112-01-02 Sat 01:00]")
+               (clock (format "CLOCK: %s--%s => 1:00" ts0 ts1)))
+          (expect-sql-tbls (clocks logbook_entries) (list "* parent"
+                                                          (format "- %s" header)
+                                                          ":LOGBOOK:"
+                                                          clock
+                                                          "- this is a clock note"
+                                                          ":END:")
+            `((clocks :file_path ,testing-filepath
+                      :headline_offset 1
+                      :clock_offset 58
+                      :time_start ,(org-ts-to-unixtime ts0)
+                      :time_end ,(org-ts-to-unixtime ts1)
+                      :clock_note "this is a clock note")
+              (logbook_entries :file_path ,testing-filepath
+                               :headline_offset 1
+                               :entry_offset 10
+                               :entry_type "done"
+                               :time_logged ,(org-ts-to-unixtime ts)
+                               :header ,header
+                               :note nil))))))
 
-    ;; non-default logbook configurations
+    (describe "non-default drawer configs"
+      (it "log drawer (global)"
+        (let* ((org-log-into-drawer "LOGGING")
+               (ts "[2112-01-01 Fri 00:00]")
+               (header (format "CLOSING NOTE %s" ts)))
+          (expect-sql-tbls (logbook_entries) (list "* parent"
+                                                   ":LOGGING:"
+                                                   (format "- %s" header)
+                                                   ":END:")
+            `((logbook_entries :file_path ,testing-filepath
+                               :headline_offset 1
+                               :entry_offset 20
+                               :entry_type "done"
+                               :time_logged ,(org-ts-to-unixtime ts)
+                               :header ,header
+                               :note nil)))))
 
-    (it "single clock (closed - loose tree-level)"
-      (let* ((ts0 "[2112-01-01 Fri 00:00]")
-             (ts1 "[2112-01-02 Sat 01:00]")
-             (clock (format "CLOCK: %s--%s => 1:00" ts0 ts1)))
-        (expect-sql-tbls (clocks) (list "* parent"
-                                        ":PROPERTIES:"
-                                        ":CLOCK_INTO_DRAWER: nil"
-                                        ":END:"
-                                        clock)
-          ;; TODO what happens if we join tables and names collide?
-          `((clocks :file_path ,testing-filepath
-                    :headline_offset 1
-                    :clock_offset 53
-                    :time_start ,(org-ts-to-unixtime ts0)
-                    :time_end ,(org-ts-to-unixtime ts1)
-                    :clock_note nil)))))))
+      (it "log drawer (file)"
+        (let* ((ts "[2112-01-01 Fri 00:00]")
+               (header (format "CLOSING NOTE %s" ts)))
+          (expect-sql-tbls (logbook_entries) (list "#+STARTUP: logdrawer"
+                                                   "* parent"
+                                                   ":LOGBOOK:"
+                                                   (format "- %s" header)
+                                                   ":END:")
+            `((logbook_entries :file_path ,testing-filepath
+                               :headline_offset 22
+                               :entry_offset 41
+                               :entry_type "done"
+                               :time_logged ,(org-ts-to-unixtime ts)
+                               :header ,header
+                               :note nil)))))
 
-  
+      (it "log drawer (property)"
+        (let* ((ts "[2112-01-01 Fri 00:00]")
+               (header (format "CLOSING NOTE %s" ts)))
+          (expect-sql-tbls (logbook_entries) (list "* parent"
+                                                   ":PROPERTIES:"
+                                                   ":LOG_INTO_DRAWER: LOGGING"
+                                                   ":END:"
+                                                   ":LOGGING:"
+                                                   (format "- %s" header)
+                                                   ":END:")
+            `((logbook_entries :file_path ,testing-filepath
+                               :headline_offset 1
+                               :entry_offset 65
+                               :entry_type "done"
+                               :time_logged ,(org-ts-to-unixtime ts)
+                               :header ,header
+                               :note nil)))))
+
+      (it "clock drawer (global)"
+        (let* ((org-clock-into-drawer "CLOCKING")
+               (ts0 "[2112-01-01 Fri 00:00]")
+               (ts1 "[2112-01-02 Sat 01:00]")
+               (clock (format "CLOCK: %s--%s => 1:00" ts0 ts1)))
+          (expect-sql-tbls (clocks) (list "* parent"
+                                          ":CLOCKING:"
+                                          clock
+                                          ":END:")
+            `((clocks :file_path ,testing-filepath
+                      :headline_offset 1
+                      :clock_offset 21
+                      :time_start ,(org-ts-to-unixtime ts0)
+                      :time_end ,(org-ts-to-unixtime ts1)
+                      :clock_note nil)))))
+
+      (it "clock drawer (property)"
+        (let* ((ts0 "[2112-01-01 Fri 00:00]")
+               (ts1 "[2112-01-02 Sat 01:00]")
+               (clock (format "CLOCK: %s--%s => 1:00" ts0 ts1)))
+          (expect-sql-tbls (clocks) (list "* parent"
+                                          ":PROPERTIES:"
+                                          ":CLOCK_INTO_DRAWER: CLOCKING"
+                                          ":END:"
+                                          ":CLOCKING:"
+                                          clock
+                                          ":END:")
+            `((clocks :file_path ,testing-filepath
+                      :headline_offset 1
+                      :clock_offset 69
+                      :time_start ,(org-ts-to-unixtime ts0)
+                      :time_end ,(org-ts-to-unixtime ts1)
+                      :clock_note nil)))))
+
+      (it "clock note (global)"
+        (let* ((org-log-note-clock-out t)
+               (ts0 "[2112-01-01 Fri 00:00]")
+               (ts1 "[2112-01-02 Sat 01:00]")
+               (clock (format "CLOCK: %s--%s => 1:00" ts0 ts1)))
+          (expect-sql-tbls (clocks) (list "* parent"
+                                          ":LOGBOOK:"
+                                          clock
+                                          "- clock out note"
+                                          ":END:")
+            `((clocks :file_path ,testing-filepath
+                      :headline_offset 1
+                      :clock_offset 20
+                      :time_start ,(org-ts-to-unixtime ts0)
+                      :time_end ,(org-ts-to-unixtime ts1)
+                      :clock_note "clock out note")))))
+
+      (it "clock note (file)"
+        (let* ((ts0 "[2112-01-01 Fri 00:00]")
+               (ts1 "[2112-01-02 Sat 01:00]")
+               (clock (format "CLOCK: %s--%s => 1:00" ts0 ts1)))
+          (expect-sql-tbls (clocks) (list "#+STARTUP: lognoteclock-out"
+                                          "* parent"
+                                          ":LOGBOOK:"
+                                          clock
+                                          "- clock out note"
+                                          ":END:")
+            `((clocks :file_path ,testing-filepath
+                      :headline_offset 29
+                      :clock_offset 48
+                      :time_start ,(org-ts-to-unixtime ts0)
+                      :time_end ,(org-ts-to-unixtime ts1)
+                      :clock_note "clock out note"))))))))
 
 (defun format-with (mode type value)
   (funcall (org-sql--compile-mql-format-function mode type) value))

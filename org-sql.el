@@ -790,40 +790,29 @@ the plist in order for the delete to be applied."
 
 ;; external state
 
-(defun org-sql--get-file-log-into-drawer (log-note-headings top-section)
-  (cl-flet*
-      ((is-startup
-        (node)
-        (and (org-ml-is-type 'keyword node)
-             (equal "STARTUP" (org-ml-get-property :key node))))
-       (set-log-into
-        (acc node)
-        (if (not (is-startup node)) acc
-          (pcase (org-ml-get-property :value node)
-             ("logdrawer" t)
-             ("nologdrawer" nil)
-             (_ acc)))))
-    (-reduce-from #'set-log-into log-note-headings top-section)))
+(defun org-sql--top-section-get-binary-startup (positive negative init top-section)
+  (->> top-section
+       (--filter (and (org-ml-is-type 'keyword it)
+                      (equal "STARTUP" (org-ml-get-property :key it))))
+       (--reduce-from (let ((v (org-ml-get-property :value it)))
+                        (cond
+                         ((equal v positive) t)
+                         ((equal v negative) nil)
+                         (t acc)))
+                      init)))
 
-(defun org-sql--get-file-clock-out-notes (clock-out-notes top-section)
-  (cl-flet*
-      ((is-startup
-        (node)
-        (and (org-ml-is-type 'keyword node)
-             (equal "STARTUP" (org-ml-get-property :key node))))
-       (set-log-into
-        (acc node)
-        (if (not (is-startup node)) acc
-          (pcase (org-ml-get-property :value node)
-             ("lognoteclock-out" t)
-             ("nolognoteclock-out" nil)
-             (_ acc)))))
-    (-reduce-from #'set-log-into log-note-headings top-section)))
+(defun org-sql--get-file-log-into-drawer (top-section log-note-headings)
+  (org-sql--top-section-get-binary-startup
+   "logdrawer" "nologdrawer" log-note-headings top-section))
 
-(defmacro org-sql--update-supercontents-config (key form config)
+(defun org-sql--get-file-clock-out-notes (top-section clock-out-notes)
+  (org-sql--top-section-get-binary-startup
+   "lognoteclock-out" "nolognoteclock-out" clock-out-notes top-section))
+
+(defmacro org-sql--update-supercontents-config (key f config)
   (declare (indent 1))
   `(->> (-partition 2 ,config)
-        (--map-when (eq it ,key) ,form)
+        (--map-when (eq (car it) ,key) (list (car it) (funcall ,f (cadr it))))
         (-flatten-n 1)))
 
 (defun org-sql--to-fstate (file-path hash attributes log-note-headings
@@ -854,9 +843,9 @@ The plist will include:
           :headlines (if top-section (cdr children) children)
           :lb-config (->> lb-config
                           (org-sql--update-supercontents-config :log-into-drawer
-                            (org-sql--get-file-log-into-drawer it top-section))
+                            (-partial #'org-sql--get-file-log-into-drawer top-section))
                           (org-sql--update-supercontents-config :clock-out-notes
-                            (org-sql--get-file-clock-out-notes it top-section)))
+                            (-partial #'org-sql--get-file-clock-out-notes top-section)))
           :log-note-matcher (org-sql--build-log-note-heading-matchers
                              log-note-headings todo-keywords))))
 
