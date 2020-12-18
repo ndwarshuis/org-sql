@@ -790,7 +790,29 @@ the plist in order for the delete to be applied."
 
 ;; external state
 
+;; TODO this is hilariously inefficient
+(defmacro org-sql--map-plist (key form plist)
+  "Return PLIST modified with FORM applied to KEY's value."
+  (declare (indent 1))
+  `(->> (-partition 2 ,plist)
+        (--map-when (eq (car it) ,key)
+                    (list (car it) (let ((it (cadr it))) ,form)))
+        (-flatten-n 1)))
+
+(defun org-sql--replace-in-plist (key rep plist)
+  "Return PLIST with value of KEY replaced by REP."
+  (->> (-partition 2 plist)
+       (--map-when (eq (car it) key) (list (car it) rep))
+       (-flatten-n 1)))
+
 (defun org-sql--top-section-get-binary-startup (positive negative init top-section)
+  "Return startup configuration from TOP-SECTION.
+Only keyword nodes with a key of \"STARTUP\" will be considered.
+POSITIVE and NEGATIVE are values that represent the states of the
+keyword; if it's value is POSITIVE t will be returned, and if it
+is NEGATIVE nil will be returned. If no startup keywords are
+found, return INIT. If multiple keywords are present, use the
+last one."
   (->> top-section
        (--filter (and (org-ml-is-type 'keyword it)
                       (equal "STARTUP" (org-ml-get-property :key it))))
@@ -801,19 +823,17 @@ the plist in order for the delete to be applied."
                          (t acc)))
                       init)))
 
-(defun org-sql--get-file-log-into-drawer (top-section log-note-headings)
+(defun org-sql--top-section-get-log-into-drawer (top-section log-into-drawer)
+  "Return the log-note-headines startup configuration for TOP-SECTION.
+If not present, return the current value of LOG-INTO-DRAWER."
   (org-sql--top-section-get-binary-startup
-   "logdrawer" "nologdrawer" log-note-headings top-section))
+   "logdrawer" "nologdrawer" log-into-drawer top-section))
 
-(defun org-sql--get-file-clock-out-notes (top-section clock-out-notes)
+(defun org-sql--top-section-get-clock-out-notes (top-section clock-out-notes)
+  "Return the clock-out-notes startup configuration for TOP-SECTION.
+If not present, return the current value of CLOCK-OUT-NOTES."
   (org-sql--top-section-get-binary-startup
    "lognoteclock-out" "nolognoteclock-out" clock-out-notes top-section))
-
-(defmacro org-sql--update-supercontents-config (key f config)
-  (declare (indent 1))
-  `(->> (-partition 2 ,config)
-        (--map-when (eq (car it) ,key) (list (car it) (funcall ,f (cadr it))))
-        (-flatten-n 1)))
 
 (defun org-sql--to-fstate (file-path hash attributes log-note-headings
                                      todo-keywords lb-config tree)
@@ -831,9 +851,8 @@ The plist will include:
 - `:lb-config' the same list as that supplied to
   `org-ml-headline-get-supercontents' (based on LB-CONFIG)
 - `:log-note-matcher': a list of log-note-matchers for this org
-  file as returned by
-  `org-sql--build-log-note-heading-matchers' (which depends on
-  TODO-KEYWORDS and LOG-NOTE-HEADINGS)"
+  file as returned by `org-sql--build-log-note-heading-matchers'
+  (which depends on TODO-KEYWORDS and LOG-NOTE-HEADINGS)"
   (let* ((children (org-ml-get-children tree))
          (top-section (-some-> (assq 'section children) (org-ml-get-children))))
     (list :file-path file-path
@@ -842,14 +861,16 @@ The plist will include:
           :top-section top-section
           :headlines (if top-section (cdr children) children)
           :lb-config (->> lb-config
-                          (org-sql--update-supercontents-config :log-into-drawer
-                            (-partial #'org-sql--get-file-log-into-drawer top-section))
-                          (org-sql--update-supercontents-config :clock-out-notes
-                            (-partial #'org-sql--get-file-clock-out-notes top-section)))
+                          (org-sql--map-plist :log-into-drawer
+                            (org-sql--top-section-get-log-into-drawer top-section it))
+                          (org-sql--map-plist :clock-out-notes
+                            (org-sql--top-section-get-clock-out-notes top-section it)))
           :log-note-matcher (org-sql--build-log-note-heading-matchers
                              log-note-headings todo-keywords))))
 
 (defun org-sql--headline-get-log-into-drawer (log-into-drawer headline)
+  "Return the log-into-drawer configuration for HEADLINE.
+If not present, return the current value of LOG-INTO-DRAWER."
   (-if-let (v (org-ml-headline-get-node-property "LOG_INTO_DRAWER" headline))
     (cond
      ((equal v "t") t)
@@ -858,6 +879,8 @@ The plist will include:
     log-into-drawer))
 
 (defun org-sql--headline-get-clock-into-drawer (clock-into-drawer headline)
+  "Return the clock-into-drawer configuration for HEADLINE.
+If not present, return the current value of CLOCK-INTO-DRAWER."
   (-if-let (v (org-ml-headline-get-node-property "CLOCK_INTO_DRAWER" headline))
     (cond
      ((equal v "t") t)
@@ -867,14 +890,23 @@ The plist will include:
     clock-into-drawer))
 
 (defun org-sql--headline-update-supercontents-config (config headline)
-  (-let (((&plist :log-into-drawer l :clock-into-drawer c :clock-out-notes n)
-          config))
-    (list :log-into-drawer (org-sql--headline-get-log-into-drawer l headline)
-          :clock-into-drawer (org-sql--headline-get-clock-into-drawer c headline)
-          :clock-out-notes n)))
+  "Return supercontents CONFIG updated according to HEADLINE."
+  (->> config
+       (org-sql--map-plist :log-into-drawer
+         (org-sql--headline-get-log-into-drawer it headline))
+       (org-sql--map-plist :clock-into-drawer
+         (org-sql--headline-get-clock-into-drawer it headline))))
 
-;; TODO these are almost exactly the same...
 (defun org-sql--to-hstate (fstate headline)
+  "Return new hstate set from FSTATE and HEADLINE.
+
+An HSTATE represents the current headline being processed and
+will include the follwing keys/values:
+- `:file-path' the path to the current file being processed
+- `:lb-config' the supercontents config plist
+- `:log-note-matcher': a list of log-note-matchers for this org
+  file as returned by `org-sql--build-log-note-heading-matchers'
+- `:headline' the current headline node."
   (-let (((&plist :file-path f :lb-config c :log-note-matcher m) fstate))
     (list :file-path f
           :lb-config (org-sql--headline-update-supercontents-config c headline)
@@ -882,11 +914,11 @@ The plist will include:
           :headline headline)))
 
 (defun org-sql--update-hstate (hstate headline)
-  (-let (((&plist :file-path f :lb-config c :log-note-matcher m) hstate))
-    (list :file-path f
-          :lb-config (org-sql--headline-update-supercontents-config c headline)
-          :log-note-matcher m
-          :headline headline)))
+  "Return a new HSTATE updated with information from HEADLINE.
+Only the :lb-config and :headline keys will be changed."
+  (->> (org-sql--replace-in-plist :headline headline hstate)
+       (org-sql--map-plist :lb-config
+         (org-sql--headline-update-supercontents-config it headline))))
 
 (defun org-sql--to-fmeta (disk-path db-path hash)
   "Return a plist representing org file status.
@@ -1365,8 +1397,7 @@ whose keys are a subset of `org-sql--entry-keys'."
 (defun org-sql--item-to-entry (hstate item)
   "Return entry list from ITEM.
 See `org-sql--to-entry' for the meaning of the returned list.
-FSTATE is a list given by `org-sql--to-fstate'. HEADLINE-OFFSET
-is the offset of the headline containing this entry."
+HSTATE is a list given by `org-sql--to-hstate'."
   (-let* (((&plist :file-path :headline) hstate)
           (headline-offset (org-ml-get-property :begin headline))
           ((header-node . rest) (org-sql--split-item item))
@@ -1418,6 +1449,12 @@ is the offset of the headline containing this entry."
           :new-state (unless new-ts (get-substring new-state)))))))
 
 (defun org-sql--clocks-append-notes (hstate clocks)
+  "Return list of cells like (CLOCK . NOTE-TEXT).
+CLOCKS is a list of clocks which may contain items (the clock
+notes). If a clock has a note after it and HSTATE has the
+appropriate configuration, said clock will be returned as (CLOCK
+. NOTE-TEXT) where the item will be converted to a string and set
+to NOTE-TEXT; otherwise just as (CLOCK)."
   (-let (((&plist :lb-config (&plist :clock-out-notes)) hstate))
     (if (not clock-out-notes) (-map #'list clocks)
       (->> clocks
@@ -1465,7 +1502,8 @@ is the offset of the headline containing this entry."
            :state_new new-state))))
 
 (defun org-sql--add-mql-insert-planning-change (acc hstate entry)
-  "Add MQL-insert for planning change ENTRY to ACC."
+  "Add MQL-insert for planning change ENTRY to ACC.
+HSTATE is a plist as returned by `org-sql--to-hstate'."
   (-let (((&plist :entry-offset :file-path :headline-offset :old-ts) (cdr entry)))
     (--> (org-sql--add-mql-insert-headline-logbook-item acc entry)
          (org-sql--add-mql-insert-timestamp it hstate old-ts)
@@ -1475,9 +1513,12 @@ is the offset of the headline containing this entry."
            :timestamp_offset (org-ml-get-property :begin old-ts)))))
 
 (defun org-sql--add-mql-insert-headline-logbook-items (acc hstate logbook)
-  (-let* (((&plist :headline :file-path) hstate)
-          (entries (->> (org-ml-logbook-get-items logbook)
-                        (--map (org-sql--item-to-entry hstate it)))))
+  "Add MQL-inserts for LOGBOOK to ACC.
+LOGBOOK is the logbook value of the supercontents list returned
+by `org-ml-headline-get-supercontents'. HSTATE is a plist as
+returned by `org-sql--to-hstate'."
+  ;; TODO what about unknown stuff?
+  (-let (((&plist :headline :file-path) hstate))
     (cl-flet
         ((add-entry
           (acc entry)
@@ -1492,9 +1533,14 @@ is the offset of the headline containing this entry."
               (org-sql--add-mql-insert-state-change acc entry))
              (t
               (org-sql--add-mql-insert-headline-logbook-item acc entry))))))
-      (-reduce-from #'add-entry acc entries))))
+      (->> (org-ml-logbook-get-items logbook)
+           (--map (org-sql--item-to-entry hstate it))
+           (-reduce-from #'add-entry acc)))))
 
 (defun org-sql--add-mql-insert-clock (acc hstate clock note-text)
+  "Add MQL-insert for CLOCK to ACC.
+NOTE-TEXT is either a string or nil representing the clock-note.
+HSTATE is a plist as returned by `org-sql--to-hstate'."
   (-let (((&plist :headline :file-path) hstate)
          (value (org-ml-get-property :value clock)))
     (org-sql--add-mql-insert acc clocks
@@ -1510,6 +1556,10 @@ is the offset of the headline containing this entry."
       :clock_note (unless org-sql-exclude-clock-notes note-text))))
 
 (defun org-sql--add-mql-insert-headline-logbook-clocks (acc hstate logbook)
+  "Add MQL-inserts for LOGBOOK to ACC.
+LOGBOOK is the logbook value of the supercontents list returned
+by `org-ml-headline-get-supercontents'. HSTATE is a plist as
+returned by `org-sql--to-hstate'."
   (->> (org-ml-logbook-get-clocks logbook)
        (org-sql--clocks-append-notes hstate)
        (--reduce-from
@@ -1517,8 +1567,8 @@ is the offset of the headline containing this entry."
         acc)))
 
 (defun org-sql--add-mql-insert-headline-properties (acc hstate)
-  "Add MQL-insert for each property in HEADLINE to ACC.
-FILE-PATH is the path to the file containing this headline."
+  "Add MQL-insert for each property in the current headline to ACC.
+HSTATE is a plist as returned by `org-sql--to-hstate'."
   (if (eq 'all org-sql-excluded-properties) acc
     ;; TODO only do this once
     (-let* ((ignore-list (append org-sql--ignored-properties-default
@@ -1546,8 +1596,8 @@ FILE-PATH is the path to the file containing this headline."
              (-reduce-from #'add-property acc))))))
 
 (defun org-sql--add-mql-insert-headline-tags (acc hstate)
-  "Add MQL-insert for each tag in HEADLINE to ACC.
-FILE-PATH is the path to the file containing this headline."
+  "Add MQL-insert for each tag in the current headline to ACC.
+HSTATE is a plist as returned by `org-sql--to-hstate'."
   (if (eq 'all org-sql-excluded-tags) acc
     (-let* (((&plist :headline :file-path) hstate)
             (offset (org-ml-get-property :begin headline)))
@@ -1570,8 +1620,10 @@ FILE-PATH is the path to the file containing this headline."
                (--reduce-from (add-tag acc it t) it i-tags)))))))
 
 (defun org-sql--add-mql-insert-headline-links (acc hstate contents)
-  "Add MQL-insert for each link in HEADLINE to ACC.
-FILE-PATH is the path to the file containing this headline."
+  "Add MQL-insert for each link in the current headline to ACC.
+CONTENTS is a list corresponding to that returned by
+`org-ml-headline-get-supercontents'. HSTATE is a plist as
+returned by `org-sql--to-hstate'."
   (if (eq 'all org-sql-excluded-link-types) acc
     (-let* (((&plist :headline :file-path) hstate)
             (offset (org-ml-get-property :begin headline))
@@ -1594,9 +1646,7 @@ FILE-PATH is the path to the file containing this headline."
 
 (defun org-sql--add-mql-insert-timestamp (acc hstate timestamp)
   "Add MQL-insert for TIMESTAMP to ACC.
-FILE-PATH is the path to the file containing this headline.
-HEADLINE-OFFSET is the offset to the headline containing this
-timestamp."
+HSTATE is a plist as returned by `org-sql--to-hstate'."
   (cl-flet
       ((get-resolution
         (time)
@@ -1623,8 +1673,10 @@ timestamp."
         :raw_value (org-ml-get-property :raw-value timestamp)))))
 
 (defun org-sql--add-mql-insert-headline-timestamps (acc hstate contents)
-  "Add MQL-insert for each timestamp in HEADLINE to ACC.
-FILE-PATH is the path to the file containing this headline."
+  "Add MQL-insert for each timestamp in the current headline to ACC.
+CONTENTS is a list corresponding to that returned by
+`org-ml-headline-get-supercontents'. HSTATE is a plist as
+returned by `org-sql--to-hstate'."
   (if (eq org-sql-excluded-contents-timestamp-types 'all) acc
     (-if-let (pattern (-some--> org-sql--content-timestamp-types
                         (-difference it org-sql-excluded-contents-timestamp-types)
@@ -1638,8 +1690,8 @@ FILE-PATH is the path to the file containing this headline."
       acc)))
 
 (defun org-sql--add-mql-insert-headline-planning (acc hstate)
-  "Add MQL-insert for each planning timestamp in HEADLINE to ACC.
-FILE-PATH is the path to the file containing this headline."
+  "Add MQL-insert for each planning timestamp in the current headline to ACC.
+HSTATE is a plist as returned by `org-sql--to-hstate'."
   (-let (((&plist :headline :file-path) hstate))
     (-if-let (planning (org-ml-headline-get-planning headline))
         (let ((offset (org-ml-get-property :begin headline)))
@@ -1662,8 +1714,8 @@ FILE-PATH is the path to the file containing this headline."
       acc)))
 
 (defun org-sql--add-mql-insert-headline-closures (acc hstate)
-  "Add MQL-insert for parent closures from HEADLINE to ACC.
-FILE-PATH is the path to the file containing this headline."
+  "Add MQL-insert for parent closures from the current headline to ACC.
+HSTATE is a plist as returned by `org-sql--to-hstate'."
   (-let* (((&plist :headline :file-path) hstate)
           (offset (org-ml-get-property :begin headline)))
     (cl-flet
@@ -1681,8 +1733,8 @@ FILE-PATH is the path to the file containing this headline."
            (--reduce-from (apply #'add-closure acc it) acc)))))
 
 (defun org-sql--add-mql-insert-headline (acc hstate)
-  "Add MQL-insert HEADLINE metadata to ACC.
-FILE-PATH is the path to the file containing this headline."
+  "Add MQL-insert the current headline's metadata to ACC.
+HSTATE is a plist as returned by `org-sql--to-hstate'."
   (cl-flet
       ((effort-to-int
         (s)
