@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.0
+
+- use latest logbook/contents code from `org-ml`
+
 ## 1.0.3
 
 - fixed execution paths and temp file path
