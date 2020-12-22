@@ -511,18 +511,18 @@ For 'postgres', the following options are in OPTION-PLIST:
   ;; TODO add type
   :group 'org-sql)
 
-(defcustom org-sql-log-note-headings-overrides nil
-  "Alist of `org-log-note-headings' for specific files.
-The car of each cell is the file path, and the cdr is another
-alist like `org-log-note-headings' that will be used when
-processing that file. This is useful if some files were created
-with different patterns for their logbooks as Org-mode itself
-does not provide any options to control this besides the global
-`org-log-note-headings'."
-  :type '(alist :key-type string
-                :value-type (alist :key-type symbol
-                                   :value-type string))
-  :group 'org-sql)
+;; (defcustom org-sql-log-note-headings-overrides nil
+;;   "Alist of `org-log-note-headings' for specific files.
+;; The car of each cell is the file path, and the cdr is another
+;; alist like `org-log-note-headings' that will be used when
+;; processing that file. This is useful if some files were created
+;; with different patterns for their logbooks as Org-mode itself
+;; does not provide any options to control this besides the global
+;; `org-log-note-headings'."
+;;   :type '(alist :key-type string
+;;                 :value-type (alist :key-type symbol
+;;                                    :value-type string))
+;;   :group 'org-sql)
 
 (defcustom org-sql-files nil
   "A list of org files or directories to put into sql database.
@@ -1940,18 +1940,18 @@ Return a cons cell like (RETURNCODE . OUTPUT)."
   "Return the fstate for FMETA.
 FSTATE is a list as given by `org-sql--to-fstate'."
   (-let* (((&plist :disk-path :hash) fmeta)
-          (attributes (file-attributes disk-path))
-          (log-note-headings
-           (or (alist-get disk-path org-sql-log-note-headings-overrides
-                          nil nil #'equal)
-               org-log-note-headings)))
+          (attributes (file-attributes disk-path)))
+          ;; (log-note-headings
+          ;;  (or (alist-get disk-path org-sql-log-note-headings-overrides
+          ;;                 nil nil #'equal)
+          ;;      org-log-note-headings)))
     (with-current-buffer (find-file-noselect disk-path t)
       (let ((tree (org-element-parse-buffer))
             (todo-keywords (-map #'substring-no-properties org-todo-keywords-1))
             (lb-config (list :log-into-drawer org-log-into-drawer
                              :clock-into-drawer org-clock-into-drawer
                              :clock-out-notes org-log-note-clock-out)))
-        (org-sql--to-fstate disk-path hash attributes log-note-headings
+        (org-sql--to-fstate disk-path hash attributes org-log-note-headings
                             todo-keywords lb-config tree)))))
 
 ;;; reading fmeta from external state
