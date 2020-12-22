@@ -309,7 +309,7 @@ Each rows stores one link
 | link_text |  |  | x | TEXT / TEXT | text of this link |
 | link_type |  |  |  | TEXT / TEXT | type of this link (eg http, mu4e, file, etc) |
 
-<!-- 1.0.3 -->
+<!-- 1.1.0 -->
 
 # Contributing
 
