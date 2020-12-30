@@ -2124,7 +2124,9 @@ Note that this currently only tests the existence of the schema's tables."
                     (lambda (s)
                       (->> (s-trim s)
                            (s-lines)
-                           (--map (nth 1 (s-split "|" it)))))))))
+                           (--map (s-split "|" it))
+                           (--filter (equal "public" (car it)))
+                           (--map (cadr it))))))))
           ((rc . out) (org-sql--send-sql sql-cmd)))
     (if (/= 0 rc) (error out)
       (org-sql--sets-equal table-names (funcall parse-fun out) :test #'equal))))
@@ -2137,6 +2139,8 @@ Note that this currently only tests the existence of the schema's tables."
        ;; this is a silly command that should work on all platforms (eg doesn't
        ;; require `touch' to make an empty file)
        (org-sql--exec-sqlite-command keyvals ".schema"))
+      ;; TODO to mirror the fact that "resetting" the db should only remove
+      ;; org-sql's schema, just create a new schema and tables instead
       (postgres
        (-let (((&plist :database) keyvals))
          (org-sql--exec-postgres-command-sub 'createdb keyvals database))))))
@@ -2153,6 +2157,7 @@ Note that this currently only tests the existence of the schema's tables."
       (sqlite
        (-let (((&plist :path) keyvals))
          (delete-file path)))
+      ;; TODO this might be a bit extreme, try to drop only the schema instead
       (postgres
        (-let (((&plist :database) keyvals))
          (org-sql--exec-postgres-command-sub 'dropdb keyvals database))))))
