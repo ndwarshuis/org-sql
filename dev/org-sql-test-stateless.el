@@ -1714,7 +1714,7 @@ list then join the cdr of IN with newlines."
        :to-equal
        (concat
         "CREATE TABLE IF NOT EXISTS table-foo (bool INTEGER,enum TEXT,int INTEGER,text TEXT,PRIMARY KEY (int));"
-        "CREATE TABLE IF NOT EXISTS table-bar (intone INTEGER,inttwo INTEGER,PRIMARY KEY (intone),FOREIGN KEY (inttwo) REFERENCES table-foo (int) ON DELETE CASCADE ON UPDATE CASCADE);"))))
+        "CREATE TABLE IF NOT EXISTS table-bar (intone INTEGER,inttwo INTEGER,PRIMARY KEY (intone),FOREIGN KEY (inttwo) REFERENCES table-foo (int) ON DELETE CASCADE ON UPDATE CASCADE DEFERRABLE INITIALLY DEFERRED);"))))
 
   (it "create table (postgres)"
     (let ((config '(postgres)))
@@ -1724,7 +1724,7 @@ list then join the cdr of IN with newlines."
        (concat
         "CREATE TYPE enum_table-foo_enum AS ENUM ('bim','bam','boo');"
         "CREATE TABLE IF NOT EXISTS table-foo (bool BOOLEAN,enum enum_table-foo_enum,int INTEGER,text TEXT,PRIMARY KEY (int));"
-        "CREATE TABLE IF NOT EXISTS table-bar (intone INTEGER,inttwo INTEGER,PRIMARY KEY (intone),FOREIGN KEY (inttwo) REFERENCES table-foo (int) ON DELETE CASCADE ON UPDATE CASCADE);"))))
+        "CREATE TABLE IF NOT EXISTS table-bar (intone INTEGER,inttwo INTEGER,PRIMARY KEY (intone),FOREIGN KEY (inttwo) REFERENCES table-foo (int) ON DELETE CASCADE ON UPDATE CASCADE DEFERRABLE INITIALLY DEFERRED);"))))
 
   (it "transaction (sqlite)"
     (let ((mode 'sqlite)

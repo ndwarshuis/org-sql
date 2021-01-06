@@ -1077,8 +1077,13 @@ of the table."
                  (format "%s %s" column-str))))))
     (-map #'format-column mql-columns)))
 
-(defun org-sql--format-mql-schema-table-constraints (mql-tbl-constraints)
-  "Return SQL string for MQL-TBL-CONSTRAINTS."
+;; TODO defer is hardcoded to t here since postgresql and sqlite both support
+;; deferrable constraints. None of the db's that I plan to add support this, so
+;; this argument will be used then
+(defun org-sql--format-mql-schema-table-constraints (mql-tbl-constraints defer)
+  "Return SQL string for MQL-TBL-CONSTRAINTS.
+If DEFER is t, add 'INITIALLY DEFERRED' to the end of each
+foreign key constraint."
   (cl-labels
       ((format-primary
         (keyvals)
@@ -1102,8 +1107,9 @@ of the table."
                 (on-update* (-some->> on_update
                               (symbol-name)
                               (upcase)
-                              (format "ON UPDATE %s"))))
-          (->> (list foreign-str on-delete* on-update*)
+                              (format "ON UPDATE %s")))
+                (deferrable (when defer "DEFERRABLE INITIALLY DEFERRED")))
+          (->> (list foreign-str on-delete* on-update* deferrable)
                (-non-nil)
                (s-join " "))))
        (format-constraint
@@ -1117,7 +1123,7 @@ of the table."
   "Return CREATE TABLE (...) SQL string for MQL-TABLE.
 CONFIG is the `org-sql-db-config' list."
   (-let* (((tbl-name . (&alist 'columns 'constraints)) mql-table))
-    (->> (org-sql--format-mql-schema-table-constraints constraints)
+    (->> (org-sql--format-mql-schema-table-constraints constraints t)
          (append (org-sql--format-mql-schema-columns config tbl-name columns))
          (s-join ",")
          (format "CREATE TABLE IF NOT EXISTS %s (%s);" tbl-name))))
