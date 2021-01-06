@@ -1869,7 +1869,7 @@ on disk and DB-FMETA is fmeta for files in the database. This
 function will merge the two inputs such that those with common
 hashes will be considered equal and the final list will have only
 unique hashes."
-  (cl-labels
+  (cl-flet*
       ((hash<
         (a b)
         (-let (((&plist :hash a-hash) a)
@@ -1881,17 +1881,30 @@ unique hashes."
                ((&plist :db-path :hash) b))
           (org-sql--to-fmeta disk-path db-path hash)))
        (merge
-        (acc as bs)
-        (pcase (cons as bs)
-         (`(nil . nil) acc)
-         (`(,as* . nil) (append (reverse as*) acc))
-         (`(nil . ,bs*) (append (reverse bs*) acc))
-         (`((,a . ,as*) . (,b . ,bs*))
-          (cond
-           ((hash< a b) (merge (cons a acc) as* bs))
-           ((hash< b a) (merge (cons b acc) as bs*))
-           (t (merge (cons (combine a b) acc) as* bs*)))))))
-    (merge nil (sort disk-fmeta #'hash<) (sort db-fmeta #'hash<))))
+        (as bs)
+        (let (acc)
+          (while (or as bs)
+            (pcase (cons as bs)
+              (`(,as* . nil)
+               (setq acc (append (nreverse as*) acc)
+                     as nil))
+              (`(nil . ,bs*)
+               (setq acc (append (nreverse bs*) acc)
+                     bs nil))
+              (`((,a . ,as*) . (,b . ,bs*))
+               (cond
+                ((hash< a b)
+                 (setq acc (cons a acc)
+                       as as*))
+                ((hash< b a)
+                 (setq acc (cons b acc)
+                       bs bs*))
+                (t
+                 (setq acc (cons (combine a b) acc)
+                       as as*
+                       bs bs*))))))
+          acc)))
+    (merge (sort disk-fmeta #'hash<) (sort db-fmeta #'hash<))))
 
 (defun org-sql--classify-fmeta (disk-fmeta db-fmeta)
   "Return a list of classified file actions.
