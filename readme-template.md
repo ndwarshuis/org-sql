@@ -161,10 +161,11 @@ Except for SQLite, the each database for testing is encoded and set up using
 `docker-compose` (see the included `docker-compose.yml` file). These are
 necessary to run the stateful tests above.
 
-To set up the environment, start the docker-daemon (may require sudo):
+To set up the environment, start the docker-daemon (may require sudo). Note the
+`-V` flag, which is to ensure the database is fresh each time:
 
 ``` sh
-docker-compose up -d
+docker-compose up -d -V
 ```
 
 To shut down the environment:

@@ -195,10 +195,10 @@
   '(sqlite :path "/tmp/org-sql-test.db"))
 
 (describe-sql-io-spec "SQL IO spec (Postgres)"
-  '(postgres :database "org_sql_testing"
+  '(postgres :database "org_sql"
              :port "60001"
              :hostname "localhost"
              :username "org_sql"
-             :password "org_sql_postgres"))
+             :password "org_sql"))
 
 ;;; org-sql-test-stateful ends here

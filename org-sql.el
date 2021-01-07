@@ -466,11 +466,11 @@ to store them. This is in addition to any properties specifified by
 (defconst org-sql--psql-exe "psql"
   "The postgres client command.")
 
-(defconst org-sql--postgres-createdb-exe "createdb"
-  "The postgres 'create database' command.")
+;; (defconst org-sql--postgres-createdb-exe "createdb"
+;;   "The postgres 'create database' command.")
 
-(defconst org-sql--postgres-dropdb-exe "dropdb"
-  "The postgres 'drop database' command.")
+;; (defconst org-sql--postgres-dropdb-exe "dropdb"
+;;   "The postgres 'drop database' command.")
 
 ;;;
 ;;; CUSTOMIZATION OPTIONS
@@ -2121,12 +2121,18 @@ The database connection will be handled transparently."
        (-let (((&plist :path) keyvals))
          (file-exists-p path)))
       (postgres
-       (-let (((&plist :database) keyvals)
-              ((rc . out) (org-sql--exec-postgres-command-sub 'psql keyvals "-qtl")))
+       (-let* (((&plist :database) keyvals)
+               ((&plist :schema :database) keyvals)
+               ((rc . out) (org-sql--exec-postgres-command keyvals "-c" "\\dn")))
          (if (/= 0 rc) (error out)
-           (->> (s-split "\n" out)
-                (--map (s-trim (car (s-split "|" it))))
-                (--find (equal it database)))))))))
+           (--> (s-split "\n" out)
+                (--map (s-split "|" it) it)
+                ;; TODO this (or schema "public") thing is silly and should be
+                ;; refactored into something civilized (see other instances below)
+                (--find (and (equal (car it) (or schema "public"))
+                             (equal (cadr it) database))
+                        it)
+                (and it t))))))))
 
 (defun org-sql--db-has-valid-schema ()
   "Return t if the configured database has a valid schema.
@@ -2158,11 +2164,11 @@ Note that this currently only tests the existence of the schema's tables."
        ;; this is a silly command that should work on all platforms (eg doesn't
        ;; require `touch' to make an empty file)
        (org-sql--exec-sqlite-command keyvals ".schema"))
-      ;; TODO to mirror the fact that "resetting" the db should only remove
-      ;; org-sql's schema, just create a new schema and tables instead
       (postgres
-       (-let (((&plist :database) keyvals))
-         (org-sql--exec-postgres-command-sub 'createdb keyvals database))))))
+       (-let* (((&plist :database) keyvals)
+               ((&plist :schema) keyvals)
+               (cmd (format "CREATE SCHEMA IF NOT EXISTS %s;" (or schema "public"))))
+         (org-sql--exec-postgres-command keyvals "-c" cmd))))))
 
 (defun org-sql--db-create-tables ()
   "Create the schema for the configured database."
@@ -2176,10 +2182,11 @@ Note that this currently only tests the existence of the schema's tables."
       (sqlite
        (-let (((&plist :path) keyvals))
          (delete-file path)))
-      ;; TODO this might be a bit extreme, try to drop only the schema instead
       (postgres
-       (-let (((&plist :database) keyvals))
-         (org-sql--exec-postgres-command-sub 'dropdb keyvals database))))))
+       (-let* (((&plist :database) keyvals)
+               ((&plist :schema) keyvals)
+               (cmd (format "DROP SCHEMA IF EXISTS %s CASCADE;" (or schema "public"))))
+         (org-sql--exec-postgres-command keyvals "-c" cmd))))))
 
 ;;;
 ;;; PUBLIC API

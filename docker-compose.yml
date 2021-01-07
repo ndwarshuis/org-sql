@@ -1,12 +1,22 @@
 version: '3.7'
 
 services:
-  db:
+  psql:
     image: postgres:12.4-alpine
     container_name: org-sql-postgres
     restart: always
     environment:    
-      - POSTGRES_PASSWORD=org_sql_postgres
+      - POSTGRES_PASSWORD=org_sql
       - POSTGRES_USER=org_sql
     ports:
       - 60001:5432
+  # mariadb:
+  #   image: mariadb:10.5.8
+  #   container_name: org-sql-mariadb
+  #   restart: always
+  #   environment:    
+  #     - MYSQL_ROOT_PASSWORD=toor
+  #     - MYSQL_USER=org_sql
+  #     - MYSQL_PASSWORD=org_sql_mariadb
+  #   ports:
+  #     - 60002:3306
