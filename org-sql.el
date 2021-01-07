@@ -1994,6 +1994,7 @@ Each fmeta will have it's :db-path set to nil. Only files in
       (->> (-mapcat #'expand-if-dir org-sql-files)
            (-map #'expand-file-name)
            (-filter #'file-exists-p)
+           (-uniq)
            (--map (org-sql--to-fmeta it nil (get-md5 it)))))))
 
 (defun org-sql--db-get-fmeta ()
