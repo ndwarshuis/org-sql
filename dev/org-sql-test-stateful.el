@@ -39,36 +39,37 @@
     (if (= 0 rc) (expect t)
       (error out))))
 
-(defun org-sql--count-rows (tbl-name)
+(defun org-sql--count-rows (config tbl-name)
   ;; hacky AF...
-  (let ((select (format "SELECT Count(*) FROM %s" tbl-name)))
+  (let* ((tbl-name* (org-sql--format-mql-table-name config tbl-name))
+         (select (format "SELECT Count(*) FROM %s" tbl-name*)))
     (org-sql--send-sql select)))
 
-(defun expect-db-has-tables (&rest table-specs)
+(defun expect-db-has-tables (config &rest table-specs)
   (cl-flet
       ((check-table-length
         (tbl-name)
-        (let ((out (->> (org-sql--count-rows tbl-name)
+        (let ((out (->> (org-sql--count-rows config tbl-name)
                         (cdr)
                         (s-trim))))
           ;; (print out)
           (if (equal out "") 0 (string-to-number out)))))
     (--each table-specs (expect (check-table-length (car it)) :to-be (cdr it)))))
 
-(defun org-sql--dump-table (tbl-name)
+(defun org-sql--dump-table (config tbl-name)
   ;; TODO this assumes the table in question has no text with newlines
   (-let* (((mode . keyvals) org-sql-db-config)
           ;; TODO make an mql builder function for this
-          (select (org-sql--format-mql-select nil `(,tbl-name))))
+          (select (org-sql--format-mql-select config nil `(,tbl-name))))
     (org-sql--send-sql select)))
 
 
-(defun expect-db-has-table-contents (tbl-name &rest rows)
+(defun expect-db-has-table-contents (config tbl-name &rest rows)
   (cl-flet
       ((test-row-match
         (row-plist row-out)
         (let* ((required-columns (-slice row-plist 0 nil 2))
-               (columns (->> (alist-get tbl-name org-sql--mql-schema)
+               (columns (->> (alist-get tbl-name org-sql--mql-tables)
                              (alist-get 'columns)
                              (-map #'car)))
                (row-out-plist
@@ -78,7 +79,7 @@
                      (--filter (memq (car it) required-columns))
                      (-flatten-n 1))))
           (expect row-plist :to-equal row-out-plist))))
-    (-let* ((out (->> (org-sql--dump-table tbl-name)
+    (-let* ((out (->> (org-sql--dump-table config tbl-name)
                       (cdr)
                       (s-trim)
                       (s-lines)
@@ -115,7 +116,8 @@
        (let ((org-sql-files (list (f-join test-files "foo1.org"))))
          (expect-exit-success (org-sql-init-db))
          (expect-exit-success (org-sql-update-db))
-         (expect-db-has-tables '(files . 1)
+         (expect-db-has-tables ,config
+                               '(files . 1)
                                '(headlines . 1)
                                '(headline_closures . 1))))
 
@@ -124,7 +126,8 @@
              (org-log-into-drawer "LOGBOOK"))
          (expect-exit-success (org-sql-init-db))
          (expect-exit-success (org-sql-update-db))
-         (expect-db-has-tables '(files . 1)
+         (expect-db-has-tables ,config
+                               '(files . 1)
                                '(file_tags . 3)
                                '(file_properties . 1)
                                '(headlines . 5)
@@ -147,7 +150,7 @@
        (let* ((path (f-join test-files "foo2.org"))
               (org-sql-files (list path)))
          (expect-exit-success (org-sql-update-db))
-         (expect-db-has-table-contents 'files `(:file_path ,path))))
+         (expect-db-has-table-contents ,config 'files `(:file_path ,path))))
 
      (it "database update (deleted file)"
        (let ((org-sql-files (list (f-join test-files "foo1.org"))))
@@ -155,7 +158,7 @@
          (expect-exit-success (org-sql-update-db)))
        (let* ((org-sql-files nil))
          (expect-exit-success (org-sql-update-db))
-         (expect-db-has-tables '(files . 0))))
+         (expect-db-has-tables ,config '(files . 0))))
 
      (it "database update (altered file)"
        (let* ((contents1 "* foo1")
@@ -166,12 +169,12 @@
          (f-write-text contents1 'utf-8 path)
          (expect-exit-success (org-sql-init-db))
          (expect-exit-success (org-sql-update-db))
-         (expect-db-has-table-contents 'files '(:md5 "ece424e0090cff9b6f1ac50722c336c0"))
+         (expect-db-has-table-contents ,config 'files '(:md5 "ece424e0090cff9b6f1ac50722c336c0"))
          ;; close buffer, alter the file, and update again
          (kill-buffer (find-file-noselect path t))
          (f-write-text contents2 'utf-8 path)
          (expect-exit-success (org-sql-update-db))
-         (expect-db-has-table-contents 'files '(:md5 "399bc042f23ea976a04b9102c18e9cb5"))
+         (expect-db-has-table-contents ,config 'files '(:md5 "399bc042f23ea976a04b9102c18e9cb5"))
          ;; clean up (yes killing the buffer is necessary)
          (kill-buffer (find-file-noselect path t))
          (f-delete path t)))
@@ -181,7 +184,7 @@
          (expect-exit-success (org-sql-init-db))
          (expect-exit-success (org-sql-update-db))
          (expect-exit-success (org-sql-clear-db))
-         (expect-db-has-tables '(files . 0))))
+         (expect-db-has-tables ,config '(files . 0))))
 
      (it "database reset"
        (expect-exit-success (org-sql--db-create))
@@ -197,6 +200,14 @@
 (describe-sql-io-spec "SQL IO spec (Postgres)"
   '(postgres :database "org_sql"
              :port "60001"
+             :hostname "localhost"
+             :username "org_sql"
+             :password "org_sql"))
+
+(describe-sql-io-spec "SQL IO spec (Postgres - alt-schema)"
+  '(postgres :database "org_sql"
+             :port "60001"
+             :schema "nonpublic"
              :hostname "localhost"
              :username "org_sql"
              :password "org_sql"))

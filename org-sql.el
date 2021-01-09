@@ -100,7 +100,7 @@ to store them. This is in addition to any properties specifified by
   "Types of timestamps to include in the database.")
 
 (eval-and-compile
-  (defconst org-sql--mql-schema
+  (defconst org-sql--mql-tables
     '((files
        (desc . "Each row stores metadata for one tracked org file")
        (columns
@@ -665,7 +665,7 @@ TYPE must be one of 'sqlite' or 'postgres'."
 ;; ensure integrity of the metaschema
 
 (eval-when-compile
-  (defun org-sql--mql-schema-has-valid-keys (tbl-schema)
+  (defun org-sql--mql-tables-has-valid-keys (tbl-schema)
     "Verify that TBL-SCHEMA has valid keys in its table constraints."
     (-let* (((tbl-name . (&alist 'constraints 'columns)) tbl-schema)
             (column-names (-map #'car columns)))
@@ -684,13 +684,13 @@ TYPE must be one of 'sqlite' or 'postgres'."
              (-map #'get-keys it)
              (--each it (test-keys (car it) (cdr it)))))))
 
-  (defun org-sql--mql-schema-has-valid-parent-keys (tbl-schema)
+  (defun org-sql--mql-tables-has-valid-parent-keys (tbl-schema)
     "Verify that TBL-SCHEMA has valid keys in its table foreign constraints."
     (cl-flet
         ((is-valid
           (foreign-meta tbl-name)
           (-let* (((&plist :parent-keys :ref) foreign-meta)
-                  (parent-meta (alist-get ref org-sql--mql-schema))
+                  (parent-meta (alist-get ref org-sql--mql-tables))
                   (parent-columns (-map #'car (alist-get 'columns parent-meta)))
                   (parent-primary (--> (alist-get 'constraints parent-meta)
                                        (alist-get 'primary it)
@@ -712,15 +712,15 @@ TYPE must be one of 'sqlite' or 'postgres'."
                             (-map #'cdr))))
         (--each foreign (is-valid it tbl-name)))))
 
-  (-each org-sql--mql-schema #'org-sql--mql-schema-has-valid-keys)
-  (-each org-sql--mql-schema #'org-sql--mql-schema-has-valid-parent-keys))
+  (-each org-sql--mql-tables #'org-sql--mql-tables-has-valid-keys)
+  (-each org-sql--mql-tables #'org-sql--mql-tables-has-valid-parent-keys))
 
 ;; ensure MQL constructors are given the right input
 
 (defun org-sql--mql-check-get-schema-keys (tbl-name)
   "Return a list of columns for TBL-NAME.
-The columns are retrieved from `org-sql--mql-schema'."
-  (let ((valid-keys (->> org-sql--mql-schema
+The columns are retrieved from `org-sql--mql-tables'."
+  (let ((valid-keys (->> org-sql--mql-tables
                          (alist-get tbl-name)
                          (alist-get 'columns)
                          (-map #'car))))
@@ -973,8 +973,8 @@ The returned function will depend on the MODE and TYPE."
                    (quote-string (escape-string "char(10)" s)))))))))
       (lambda (s) (if s (funcall formatter s) "NULL")))))
 
-(defun org-sql--compile-mql-schema-formatter-alist (mode mql-schema)
-  "Return an alist of formatting functions for MQL-SCHEMA.
+(defun org-sql--compile-mql-schema-formatter-alist (mode mql-tables)
+  "Return an alist of formatting functions for MQL-TABLES.
 MODE is the SQL mode. The alist will mirror MSL schema except that the
 car for each column will be a formatting function."
   (cl-flet
@@ -982,7 +982,7 @@ car for each column will be a formatting function."
         (mql-column)
         (-let* (((name . (&plist :type)) mql-column))
           (cons name (org-sql--compile-mql-format-function mode type)))))
-    (-let* (((tbl-name . (&alist 'columns)) mql-schema))
+    (-let* (((tbl-name . (&alist 'columns)) mql-tables))
       (cons tbl-name (-map #'get-type-function columns)))))
 
 ;; helper functions
@@ -1005,26 +1005,45 @@ separated by SEP."
   (if (not (keywordp column-name)) (error "Not a keyword: %s" column-name)
     (s-chop-prefix ":" (symbol-name column-name))))
 
+(defun org-sql--format-mql-table-name (config tbl-name)
+  "Return TBL-NAME as a formatted string according to CONFIG."
+  (org-sql--case-mode (car config)
+    (sqlite
+     (symbol-name tbl-name))
+    (postgres
+     (-let (((&plist :schema) (cdr config)))
+       (if (not schema) (symbol-name tbl-name)
+         (format "%s.%s" schema tbl-name))))))
+
+(defun org-sql--format-mql-enum-name (config enum-name)
+  "Return ENUM-NAME as a formatted string according to CONFIG."
+  ;; ASSUME only modes that support ENUM will call this
+  (-let (((&plist :schema) (cdr config)))
+    (if (not schema) enum-name (format "%s.%s" schema enum-name))))
+
 ;; create table
 
-(defun org-sql--format-mql-schema-enum-types (mql-schema)
+(defun org-sql--format-mql-schema-enum-types (config mql-tables)
   "Return a series of CREATE TYPE statements for MQL-SCHEMA.
 The SQL statements will create all enum types found in
-MQL-SCHEMA."
-  (cl-labels
-      ((format-column
-        (table-name mql-column)
-        (-let* (((column-name . (&plist :type :allowed)) mql-column)
-                (column-name* (org-sql--format-mql-column-name column-name)))
-          (when (and (eq type 'enum) allowed)
-            (->> (--map (format "'%s'" it) allowed)
-                 (s-join ",")
-                 (format "CREATE TYPE enum_%s_%s AS ENUM (%s);" table-name column-name*)))))
-       (format-table
-        (mql-table)
-        (-let (((table-name . (&alist 'columns)) mql-table))
-          (-non-nil (--map (format-column table-name it) columns)))))
-    (-mapcat #'format-table mql-schema)))
+MQL-TABLES. CONFIG is the `org-sql-db-config'."
+  ;; ASSUME only modes that support ENUM will call this
+  (-let* ((enum-name (org-sql--format-mql-enum-name config "enum_%s_%s"))
+          (fmt (format "CREATE TYPE %s AS ENUM (%%s);" enum-name)))
+    (cl-labels
+        ((format-column
+          (tbl-name mql-column)
+          (-let* (((column-name . (&plist :type :allowed)) mql-column)
+                  (column-name* (org-sql--format-mql-column-name column-name)))
+            (when (and (eq type 'enum) allowed)
+              (->> (--map (format "'%s'" it) allowed)
+                   (s-join ",")
+                   (format fmt tbl-name column-name*)))))
+         (format-table
+          (mql-table)
+          (-let (((table-name . (&alist 'columns)) mql-table))
+            (-non-nil (--map (format-column table-name it) columns)))))
+      (-mapcat #'format-table mql-tables))))
 
 (defun org-sql--format-mql-schema-column-constraints (mql-column-constraints)
   "Return formatted column constraints for MQL-COLUMN-CONSTRAINTS."
@@ -1037,9 +1056,7 @@ MQL-SCHEMA."
           ;; TODO add CHECK?
           ;; TODO add PRIMARY KEY?
           (e (error "Unknown constraint %s" e)))))
-    (->> mql-column-constraints
-         (-map #'format-constraint)
-         (s-join " "))))
+    (s-join " " (-map #'format-constraint mql-column-constraints))))
 
 (defun org-sql--format-mql-schema-type (config tbl-name mql-column)
   "Return SQL string for the type of MQL-COLUMN.
@@ -1056,7 +1073,8 @@ of the table."
          (boolean "INTEGER")))
       (postgres
        (org-sql--case-type type
-         (enum (format "enum_%s_%s" tbl-name column-name*))
+         (enum (->> (format "enum_%s_%s" tbl-name column-name*)
+                    (org-sql--format-mql-enum-name config)))
          (text "TEXT")
          (integer "INTEGER")
          (boolean "BOOLEAN"))))))
@@ -1080,10 +1098,10 @@ of the table."
 ;; TODO defer is hardcoded to t here since postgresql and sqlite both support
 ;; deferrable constraints. None of the db's that I plan to add support this, so
 ;; this argument will be used then
-(defun org-sql--format-mql-schema-table-constraints (mql-tbl-constraints defer)
+(defun org-sql--format-mql-schema-table-constraints (config mql-tbl-constraints defer)
   "Return SQL string for MQL-TBL-CONSTRAINTS.
 If DEFER is t, add 'INITIALLY DEFERRED' to the end of each
-foreign key constraint."
+foreign key constraint. CONFIG is the `org-sql-db-config' list."
   (cl-labels
       ((format-primary
         (keyvals)
@@ -1094,12 +1112,13 @@ foreign key constraint."
        (format-foreign
         (keyvals)
         (-let* (((&plist :ref :keys :parent-keys :on_delete :on_update) keyvals)
+                (ref* (org-sql--format-mql-table-name config ref))
                 (keys* (->> keys (-map #'org-sql--format-mql-column-name) (s-join ",")))
                 (parent-keys* (->> parent-keys
                                    (-map #'org-sql--format-mql-column-name)
                                    (s-join ",")))
                 (foreign-str (format "FOREIGN KEY (%s) REFERENCES %s (%s)"
-                                     keys* ref parent-keys*))
+                                     keys* ref* parent-keys*))
                 (on-delete* (-some->> on_delete
                               (symbol-name)
                               (upcase)
@@ -1122,21 +1141,22 @@ foreign key constraint."
 (defun org-sql--format-mql-schema-table (config mql-table)
   "Return CREATE TABLE (...) SQL string for MQL-TABLE.
 CONFIG is the `org-sql-db-config' list."
-  (-let* (((tbl-name . (&alist 'columns 'constraints)) mql-table))
-    (->> (org-sql--format-mql-schema-table-constraints constraints t)
+  (-let* (((tbl-name . (&alist 'columns 'constraints)) mql-table)
+          (tbl-name* (org-sql--format-mql-table-name config tbl-name)))
+    (->> (org-sql--format-mql-schema-table-constraints config constraints t)
          (append (org-sql--format-mql-schema-columns config tbl-name columns))
          (s-join ",")
-         (format "CREATE TABLE IF NOT EXISTS %s (%s);" tbl-name))))
+         (format "CREATE TABLE IF NOT EXISTS %s (%s);" tbl-name*))))
 
-(defun org-sql--format-mql-schema (config mql-schema)
-  "Return schema SQL string for MQL-SCHEMA.
+(defun org-sql--format-mql-schema (config mql-tables)
+  "Return schema SQL string for MQL-TABLES.
 CONFIG is the `org-sql-db-config' list."
-  (let ((create-tables (->> mql-schema
+  (let ((create-tables (->> mql-tables
                             (--map (org-sql--format-mql-schema-table config it))
                             (s-join ""))))
     (org-sql--case-mode (car config)
       (postgres
-       (let ((create-types (->> (org-sql--format-mql-schema-enum-types mql-schema)
+       (let ((create-types (->> (org-sql--format-mql-schema-enum-types config mql-tables)
                                 (s-join ""))))
          (concat create-types create-tables)))
       (sqlite
@@ -1144,11 +1164,13 @@ CONFIG is the `org-sql-db-config' list."
 
 ;; insert
 
-(defun org-sql--format-mql-insert (formatter-alist mql-insert)
+(defun org-sql--format-mql-insert (config formatter-alist mql-insert)
   "Return SQL string for MQL-INSERT.
 FORMATTER-ALIST is an alist of functions given by
-`org-sql--compile-mql-format-function'."
+`org-sql--compile-mql-format-function'. CONFIG is the
+`org-sql-db-config' list."
   (-let* (((tbl-name . keyvals) mql-insert)
+          (tbl-name* (org-sql--format-mql-table-name config tbl-name))
           (formatter-list (alist-get tbl-name formatter-alist))
           (columns (->> (-slice keyvals 0 nil 2)
                         (-map #'org-sql--format-mql-column-name)
@@ -1156,46 +1178,52 @@ FORMATTER-ALIST is an alist of functions given by
           (values (->> (-partition 2 keyvals)
                        (--map (funcall (alist-get (car it) formatter-list) (cadr it)))
                        (s-join ","))))
-    (format "INSERT INTO %s (%s) VALUES (%s);" tbl-name columns values)))
+    (format "INSERT INTO %s (%s) VALUES (%s);" tbl-name* columns values)))
 
 ;; update
 
-(defun org-sql--format-mql-update (formatter-alist mql-update)
+(defun org-sql--format-mql-update (config formatter-alist mql-update)
   "Return SQL string for MQL-UPDATE.
 FORMATTER-ALIST is an alist of functions given by
-`org-sql--compile-mql-format-function'."
+`org-sql--compile-mql-format-function'. CONFIG is the
+`org-sql-db-config' list."
   (-let* (((tbl-name . (&alist 'set 'where)) mql-update)
+          (tbl-name* (org-sql--format-mql-table-name config tbl-name))
           (formatter-list (alist-get tbl-name formatter-alist))
           (set* (org-sql--format-mql-plist formatter-list "," set))
           (where* (org-sql--format-mql-plist formatter-list " and " where)))
-    (format "UPDATE %s SET %s WHERE %s;" tbl-name set* where*)))
+    (format "UPDATE %s SET %s WHERE %s;" tbl-name* set* where*)))
 
 ;; delete
 
-(defun org-sql--format-mql-delete (formatter-alist mql-delete)
+(defun org-sql--format-mql-delete (config formatter-alist mql-delete)
   "Return SQL string for MQL-DELETE.
 FORMATTER-ALIST is an alist of functions given by
-`org-sql--compile-mql-format-function'."
+`org-sql--compile-mql-format-function'. CONFIG is the
+`org-sql-db-config' list."
   (-let* (((tbl-name . (&alist 'where)) mql-delete)
+          (tbl-name* (org-sql--format-mql-table-name config tbl-name))
           (formatter-list (alist-get tbl-name formatter-alist)))
-    (if (not where) (format "DELETE FROM %s;" tbl-name)
+    (if (not where) (format "DELETE FROM %s;" tbl-name*)
       (->> (org-sql--format-mql-plist formatter-list " and " where)
-           (format "DELETE FROM %s WHERE %s;" tbl-name)))))
+           (format "DELETE FROM %s WHERE %s;" tbl-name*)))))
 
 ;; select
 
-(defun org-sql--format-mql-select (formatter-alist mql-select)
+(defun org-sql--format-mql-select (config formatter-alist mql-select)
   "Return SQL string for MQL-SELECT.
 FORMATTER-ALIST is an alist of functions given by
-`org-sql--compile-mql-format-function'."
+`org-sql--compile-mql-format-function'. CONFIG is the
+`org-sql-db-config' list."
   (-let* (((tbl-name . (&alist 'columns 'where)) mql-select)
+          (tbl-name* (org-sql--format-mql-table-name config tbl-name))
           (formatter-list (alist-get tbl-name formatter-alist))
           (columns* (or (-some->> (-map #'org-sql--format-mql-column-name columns)
                           (s-join ","))
                         "*")))
-    (if (not where) (format "SELECT %s FROM %s;" columns* tbl-name)
+    (if (not where) (format "SELECT %s FROM %s;" columns* tbl-name*)
       (->> (org-sql--format-mql-plist formatter-list " AND " where)
-           (format "SELECT %s FROM %s WHERE %s;" columns* tbl-name)))))
+           (format "SELECT %s FROM %s WHERE %s;" columns* tbl-name*)))))
 
 ;;; SQL string -> SQL string formatting functions
 
@@ -2002,7 +2030,7 @@ Each fmeta will have it's :db-path set to nil. Only files in
 Each fmeta will have it's :disk-path set to nil."
   (-let* ((columns '(:file_path :md5))
           ;; TODO add compile check for this
-          (sql-select (org-sql--format-mql-select nil `(files (columns ,@columns))))
+          (sql-select (org-sql--format-mql-select org-sql-db-config nil `(files (columns ,@columns))))
           ((rc . out) (org-sql--send-sql sql-select)))
     (if (/= 0 rc) (error out)
       (->> (s-trim out)
@@ -2018,7 +2046,7 @@ state as the orgfiles on disk."
           (db-fmeta (org-sql--db-get-fmeta))
           (mode (car org-sql-db-config))
           (formatter-alist
-           (->> org-sql--mql-schema
+           (->> org-sql--mql-tables
                 (--map (org-sql--compile-mql-schema-formatter-alist mode it))))
           ((&alist 'updates 'inserts 'deletes)
            (org-sql--classify-fmeta disk-fmeta db-fmeta)))
@@ -2027,15 +2055,15 @@ state as the orgfiles on disk."
           (fmeta)
           (->> (org-sql--fmeta-get-fstate fmeta)
                (org-sql--fstate-to-mql-insert)
-               (--map (org-sql--format-mql-insert formatter-alist it))))
+               (--map (org-sql--format-mql-insert org-sql-db-config formatter-alist it))))
          (updates-to-sql
           (fmeta)
           (->> (org-sql--fmeta-to-mql-update fmeta)
-               (org-sql--format-mql-update formatter-alist)))
+               (org-sql--format-mql-update org-sql-db-config formatter-alist)))
          (deletes-to-sql
           (fmeta)
           (->> (org-sql--fmeta-to-mql-delete fmeta)
-               (org-sql--format-mql-delete formatter-alist))))
+               (org-sql--format-mql-delete org-sql-db-config formatter-alist))))
       (->> (append (-map #'deletes-to-sql deletes)
                    (-map #'updates-to-sql updates)
                    (-mapcat #'inserts-to-sql inserts))
@@ -2138,7 +2166,7 @@ The database connection will be handled transparently."
 (defun org-sql--db-has-valid-schema ()
   "Return t if the configured database has a valid schema.
 Note that this currently only tests the existence of the schema's tables."
-  (-let* ((table-names (--map (symbol-name (car it)) org-sql--mql-schema))
+  (-let* ((table-names (--map (symbol-name (car it)) org-sql--mql-tables))
           ((sql-cmd parse-fun)
            (org-sql--case-mode (car org-sql-db-config)
              (sqlite
@@ -2146,16 +2174,20 @@ Note that this currently only tests the existence of the schema's tables."
                     (lambda (s)
                       (--mapcat (s-split " " it t) (s-lines s)))))
              (postgres
-              (list "\\dt"
-                    (lambda (s)
-                      (->> (s-trim s)
-                           (s-lines)
-                           (--map (s-split "|" it))
-                           (--filter (equal "public" (car it)))
-                           (--map (cadr it))))))))
+              (-let* (((&plist :schema) (cdr org-sql-db-config))
+                      (schema* (or schema "public"))
+                      (cmd (format "\\dt %s.*" schema*)))
+                (list cmd
+                      (lambda (s)
+                        (->> (s-trim s)
+                             (s-lines)
+                             (--map (s-split "|" it))
+                             (--filter (equal schema* (car it)))
+                             (--map (cadr it)))))))))
           ((rc . out) (org-sql--send-sql sql-cmd)))
     (if (/= 0 rc) (error out)
-      (org-sql--sets-equal table-names (funcall parse-fun out) :test #'equal))))
+      ;; (progn (print out)
+             (org-sql--sets-equal table-names (funcall parse-fun out) :test #'equal))))
 
 (defun org-sql--db-create ()
   "Create the configured database."
@@ -2173,7 +2205,7 @@ Note that this currently only tests the existence of the schema's tables."
 
 (defun org-sql--db-create-tables ()
   "Create the schema for the configured database."
-  (let ((sql-cmd (org-sql--format-mql-schema org-sql-db-config org-sql--mql-schema)))
+  (let ((sql-cmd (org-sql--format-mql-schema org-sql-db-config org-sql--mql-tables)))
     (org-sql--send-sql sql-cmd)))
 
 (defun org-sql--delete-db ()
@@ -2212,7 +2244,7 @@ pushed and updated to the database."
   "Clear the Org-SQL database without deleting it."
   ;; only delete from files as we assume actions here cascade down
   (->> (org-sql--mql-delete files nil)
-       (org-sql--format-mql-delete nil)
+       (org-sql--format-mql-delete org-sql-db-config nil)
        (org-sql--send-sql)))
 
 (defun org-sql-reset-db ()

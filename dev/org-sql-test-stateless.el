@@ -1668,43 +1668,78 @@ list then join the cdr of IN with newlines."
 
   ;; TODO use function to make this list, but the one now has hardcoded
   ;; schema checking
-  (it "insert"
+  (it "insert (no namespace)"
     (let ((mql-insert '(table-foo :bool 0
                                   :enum bim
                                   :int 666
-                                  :text "hello")))
-      (expect (org-sql--format-mql-insert formatter-alist mql-insert)
+                                  :text "hello"))
+          (config '(sqlite)))
+      (expect (org-sql--format-mql-insert config formatter-alist mql-insert)
               :to-equal "INSERT INTO table-foo (bool,enum,int,text) VALUES (0,'bim',666,'hello');")))
 
-  (it "update"
+  (it "insert (postgres namespace)"
+    (let ((mql-insert '(table-foo :bool 0
+                                  :enum bim
+                                  :int 666
+                                  :text "hello"))
+          (config '(postgres :schema "notpublic")))
+      (expect (org-sql--format-mql-insert config formatter-alist mql-insert)
+              :to-equal "INSERT INTO notpublic.table-foo (bool,enum,int,text) VALUES (0,'bim',666,'hello');")))
+
+  (it "update (no namespace)"
     (let ((mql-insert '(table-foo (set :bool 0)
-                                  (where :enum bim))))
-      (expect (org-sql--format-mql-update formatter-alist mql-insert)
+                                  (where :enum bim)))
+          (config '(sqlite)))
+      (expect (org-sql--format-mql-update config formatter-alist mql-insert)
               :to-equal "UPDATE table-foo SET bool=0 WHERE enum='bim';")))
 
-  (it "delete"
-    (let ((mql-delete '(table-foo)))
-      (expect (org-sql--format-mql-delete formatter-alist mql-delete)
+  (it "update (postgres namespace)"
+    (let ((mql-insert '(table-foo (set :bool 0)
+                                  (where :enum bim)))
+          (config '(postgres :schema "notpublic")))
+      (expect (org-sql--format-mql-update config formatter-alist mql-insert)
+              :to-equal "UPDATE notpublic.table-foo SET bool=0 WHERE enum='bim';")))
+
+  (it "delete (no namespace)"
+    (let ((mql-delete '(table-foo))
+          (config '(sqlite)))
+      (expect (org-sql--format-mql-delete config formatter-alist mql-delete)
               :to-equal "DELETE FROM table-foo;")))
 
-  (it "delete (where)"
-    (let ((mql-delete '(table-foo (where :enum bim))))
-      (expect (org-sql--format-mql-delete formatter-alist mql-delete)
+  (it "delete (no namespace; where)"
+    (let ((mql-delete '(table-foo (where :enum bim)))
+          (config '(sqlite)))
+      (expect (org-sql--format-mql-delete config formatter-alist mql-delete)
               :to-equal "DELETE FROM table-foo WHERE enum='bim';")))
 
+  (it "delete (postgres namespace)"
+    (let ((mql-delete '(table-foo))
+          (config '(postgres :schema "notpublic")))
+      (expect (org-sql--format-mql-delete config formatter-alist mql-delete)
+              :to-equal "DELETE FROM notpublic.table-foo;")))
+
+  (it "delete (no namespace; where)"
+    (let ((mql-delete '(table-foo (where :enum bim)))
+          (config '(postgres :schema "notpublic")))
+      (expect (org-sql--format-mql-delete config formatter-alist mql-delete)
+              :to-equal "DELETE FROM notpublic.table-foo WHERE enum='bim';")))
+
   (it "select"
-    (let ((mql-select '(table-foo (columns :bool))))
-      (expect (org-sql--format-mql-select formatter-alist mql-select)
+    (let ((mql-select '(table-foo (columns :bool)))
+          (config '(sqlite)))
+      (expect (org-sql--format-mql-select config formatter-alist mql-select)
               :to-equal "SELECT bool FROM table-foo;")))
 
   (it "select (all columns)"
-    (let ((mql-select '(table-foo)))
-      (expect (org-sql--format-mql-select formatter-alist mql-select)
+    (let ((mql-select '(table-foo))
+          (config '(sqlite)))
+      (expect (org-sql--format-mql-select config formatter-alist mql-select)
               :to-equal "SELECT * FROM table-foo;")))
 
   (it "select (where)"
-    (let ((mql-select '(table-foo (columns :bool) (where :enum bim))))
-      (expect (org-sql--format-mql-select formatter-alist mql-select)
+    (let ((mql-select '(table-foo (columns :bool) (where :enum bim)))
+          (config '(sqlite)))
+      (expect (org-sql--format-mql-select config formatter-alist mql-select)
               :to-equal "SELECT bool FROM table-foo WHERE enum='bim';")))
 
   (it "create table (SQLite)"
