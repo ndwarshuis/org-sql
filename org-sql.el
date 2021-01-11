@@ -99,13 +99,25 @@ to store them. This is in addition to any properties specifified by
   '(active active-range inactive inactive-range)
   "Types of timestamps to include in the database.")
 
+;; file_path and tags columns need to have fixed length for certain DBMSs when
+;; used as primary keys. file_path is set to 255 since this is the max length
+;; of the filepath string for pretty much all filesystems (including the fancy
+;; sci-fi ones like ZFS). tags is set to 32 because...well, who would make a tag
+;; in org-mode greater than 32 chars (or even 16)?
+(defconst org-sql--file-path-varchar-length 255
+  "Length of the file_path column varchar type.")
+
+(defconst org-sql--tag-varchar-length 32
+  "Length of the file_path column varchar type.")
+
 (eval-and-compile
   (defconst org-sql--mql-tables
-    '((files
+    `((files
        (desc . "Each row stores metadata for one tracked org file")
        (columns
         (:file_path :desc "path to the org file"
-                    :type text)
+                    :type varchar
+                    :length ,org-sql--file-path-varchar-length)
         (:md5 :desc "md5 checksum of the org file"
               :type text
               :constraints (notnull))
@@ -120,7 +132,8 @@ to store them. This is in addition to any properties specifified by
        (desc . "Each row stores one headline in a given org file and its metadata")
        (columns
         (:file_path :desc "path to file containing the headline"
-                    :type text)
+                    :type varchar
+                    :length ,org-sql--file-path-varchar-length)
         (:headline_offset :desc "file offset of the headline's first character"
                           :type integer)
         (:headline_text :desc "raw text of the headline"
@@ -152,7 +165,8 @@ to store them. This is in addition to any properties specifified by
        (desc . "Each row stores the ancestor and depth of a headline relationship (eg closure table)")
        (columns
         (:file_path :desc "path to the file containing this headline"
-                    :type text)
+                    :type varchar
+                    :length ,org-sql--file-path-varchar-length)
         (:headline_offset :desc "offset of this headline"
                           :type integer)
         (:parent_offset :desc "offset of this headline's parent"
@@ -176,7 +190,8 @@ to store them. This is in addition to any properties specifified by
        (desc . "Each row stores one timestamp")
        (columns
         (:file_path :desc "path to the file containing this timestamp"
-                    :type text)
+                    :type varchar
+                    :length ,org-sql--file-path-varchar-length)
         (:headline_offset :desc "offset of the headline containing this timestamp"
                           :type integer
                           :constraints (notnull))
@@ -226,7 +241,8 @@ to store them. This is in addition to any properties specifified by
        (desc . "Each row stores the metadata for headline planning timestamps.")
        (columns
         (:file_path :desc "path to the file containing the entry"
-                    :type text)
+                    :type varchar
+                    :length ,org-sql--file-path-varchar-length)
         (:headline_offset :desc "file offset of the headline with this tag"
                           :type integer)
         (:planning_type :desc "the type of this planning entry"
@@ -247,9 +263,11 @@ to store them. This is in addition to any properties specifified by
        (desc . "Each row stores one tag at the file level")
        (columns
         (:file_path :desc "path to the file containing the tag"
-                    :type text)
+                    :type varchar
+                    :length ,org-sql--file-path-varchar-length)
         (:tag :desc "the text value of this tag"
-              :type text))
+              :type varchar
+              :length ,org-sql--tag-varchar-length))
        (constraints
         (primary :keys (:file_path :tag))
         (foreign :ref files
@@ -262,11 +280,13 @@ to store them. This is in addition to any properties specifified by
        (desc . "Each row stores one tag")
        (columns
         (:file_path :desc "path to the file containing the tag"
-                    :type text)
+                    :type varchar
+                    :length ,org-sql--file-path-varchar-length)
         (:headline_offset :desc "file offset of the headline with this tag"
                           :type integer)
         (:tag :desc "the text value of this tag"
-              :type text)
+              :type varchar
+              :length ,org-sql--tag-varchar-length)
         (:is_inherited :desc "true if this tag is from the ITAGS property"
                        :type boolean
                        :constraints (notnull)))
@@ -282,7 +302,8 @@ to store them. This is in addition to any properties specifified by
        (desc . "Each row stores one property")
        (columns
         (:file_path :desc "path to the file containing this property"
-                    :type text)
+                    :type varchar
+                    :length ,org-sql--file-path-varchar-length)
         (:property_offset :desc "file offset of this property in the org file"
                           :type integer)
         (:key_text :desc "this property's key"
@@ -303,7 +324,8 @@ to store them. This is in addition to any properties specifified by
        (desc . "Each row stores a property at the file level")
        (columns
         (:file_path :desc "path to file containin the property"
-                    :type text)
+                    :type varchar
+                    :length ,org-sql--file-path-varchar-length)
         (:property_offset :desc "file offset of this property in the org file"
                           :type integer))
        (constraints
@@ -323,7 +345,8 @@ to store them. This is in addition to any properties specifified by
        (desc . "Each row stores a property at the headline level")
        (columns
         (:file_path :desc "path to file containin the property"
-                    :type text)
+                    :type varchar
+                    :length ,org-sql--file-path-varchar-length)
         (:property_offset :desc "file offset of this property in the org file"
                           :type integer)
         (:headline_offset :desc "file offset of the headline with this property"
@@ -341,7 +364,8 @@ to store them. This is in addition to any properties specifified by
        (desc . "Each row stores one clock entry")
        (columns
         (:file_path :desc "path to the file containing this clock"
-                    :type text)
+                    :type varchar
+                    :length ,org-sql--file-path-varchar-length)
         (:headline_offset :desc "offset of the headline with this clock"
                           :type integer
                           :constraints (notnull))
@@ -365,7 +389,8 @@ to store them. This is in addition to any properties specifified by
        (desc . "Each row stores one logbook entry (except for clocks)")
        (columns
         (:file_path :desc "path to the file containing this entry"
-                    :type text)
+                    :type varchar
+                    :length ,org-sql--file-path-varchar-length)
         (:headline_offset :desc "offset of the headline with this entry"
                           :type integer
                           :constraints (notnull))
@@ -391,7 +416,8 @@ to store them. This is in addition to any properties specifified by
        (desc . "Each row stores additional metadata for a state change logbook entry")
        (columns
         (:file_path :desc "path to the file containing this entry"
-                    :type text)
+                    :type varchar
+                    :length ,org-sql--file-path-varchar-length)
         (:entry_offset :desc "offset of the logbook entry for this state change"
                        :type integer)
         (:state_old :desc "former todo state keyword"
@@ -412,7 +438,8 @@ to store them. This is in addition to any properties specifified by
        (desc . "Each row stores additional metadata for a planning change logbook entry")
        (columns
         (:file_path :desc "path to the file containing this entry"
-                    :type text)
+                    :type varchar
+                    :length ,org-sql--file-path-varchar-length)
         (:entry_offset :desc "offset of the logbook entry for this planning change"
                        :type integer)
         (:timestamp_offset :desc "offset of the former timestamp"
@@ -435,7 +462,8 @@ to store them. This is in addition to any properties specifified by
        (desc . "Each row stores one link")
        (columns
         (:file_path :desc "path to the file containing this link"
-                    :type text)
+                    :type varchar
+                    :length ,org-sql--file-path-varchar-length)
         (:headline_offset :desc "offset of the headline with this link"
                           :type integer
                           :constraints (notnull))
@@ -643,14 +671,15 @@ ARGS is a list of additional arguments to pass to `cl-subsetp'."
   "Execute one of ALIST-FORMS depending on TYPE.
 TYPE must be one of 'boolean', 'text', 'enum', or 'integer'."
   (declare (indent 1))
-  (-let (((keys &as &alist 'boolean 'text 'enum 'integer) alist-forms))
+  (-let (((keys &as &alist 'boolean 'enum 'integer 'text 'varchar) alist-forms))
     (unless (-none? #'null keys)
       (error "Must provide form for all types"))
     `(cl-case ,type
        (boolean ,@boolean)
-       (text ,@text)
        (enum ,@enum)
        (integer ,@integer)
+       (text ,@text)
+       (varchar ,@varchar)
        (t (error "Invalid type: %s" ,type)))))
 
 (defmacro org-sql--case-mode (mode &rest alist-forms)
@@ -982,6 +1011,9 @@ The returned function will depend on the MODE and TYPE."
               (integer #'number-to-string)
               (text
                (lambda (s)
+                 (quote-string (escape-string esc-newline esc-single-quote s))))
+              (varchar
+               (lambda (s)
                  (quote-string (escape-string esc-newline esc-single-quote s)))))))
       (lambda (s) (if s (funcall formatter s) "NULL")))))
 
@@ -1078,22 +1110,31 @@ of the table."
           (column-name* (org-sql--format-mql-column-name column-name))
           (mode (car config)))
     (org-sql--case-type type
+      (boolean
+       (org-sql--case-mode mode
+         ((mysql postgres) "BOOLEAN")
+         (sqlite "INTEGER")))
       (enum
        (org-sql--case-mode mode
-         (mysql "ENUM")
+         (mysql (->> (plist-get (cdr mql-column) :allowed)
+                     (--map (format "'%s'" it))
+                     (s-join ",")
+                     (format "ENUM(%s)")))
          (postgres (->> (format "enum_%s_%s" tbl-name column-name*)
                         (org-sql--format-mql-enum-name config)))
          (sqlite "TEXT")))
       ;; TODO maybe need to use VARHCAR for mysql since "TEXT can only be
       ;; indexed over a specified length" (whatever that means)
-      (text
-       "TEXT")
       (integer
        "INTEGER")
-      (boolean
+      (text
+       "TEXT")
+      (varchar
        (org-sql--case-mode mode
-         ((mysql postgres) "BOOLEAN")
-         (sqlite "INTEGER"))))))
+         (mysql
+          (-let (((&plist :length) (cdr mql-column)))
+            (if length (format "VARCHAR(%s)" length) "VARCHAR")))
+         ((postgres sqlite) "TEXT"))))))
 
 (defun org-sql--format-mql-schema-columns (config tbl-name mql-columns)
   "Return SQL string for MQL-COLUMNS.
