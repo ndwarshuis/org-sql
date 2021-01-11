@@ -432,7 +432,7 @@ to store them. This is in addition to any properties specifified by
                  :on_update cascade)))
 
       (links
-       (desc . "Each rows stores one link")
+       (desc . "Each row stores one link")
        (columns
         (:file_path :desc "path to the file containing this link"
                     :type text)
