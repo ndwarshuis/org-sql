@@ -466,6 +466,9 @@ to store them. This is in addition to any properties specifified by
 (defconst org-sql--psql-exe "psql"
   "The postgres client command.")
 
+(defconst org-sql--mysql-exe "mysql"
+  "The mysql client command.")
+
 ;; (defconst org-sql--postgres-createdb-exe "createdb"
 ;;   "The postgres 'create database' command.")
 
@@ -654,12 +657,17 @@ TYPE must be one of 'boolean', 'text', 'enum', or 'integer'."
   "Execute one of ALIST-FORMS depending on MODE.
 TYPE must be one of 'sqlite' or 'postgres'."
   (declare (indent 1))
-  (-let (((keys &as &alist 'sqlite 'postgres) alist-forms))
+  (-let (((keys &as &alist 'sqlite 'postgres 'mysql)
+          (--splice (listp (car it))
+                    (-let (((keys . form) it))
+                      (--map (cons it form) keys))
+                    alist-forms)))
     (unless (-none? #'null keys)
       (error "Must provide form for all modes"))
     `(cl-case ,mode
        (postgres ,@postgres)
        (sqlite ,@sqlite)
+       (mysql ,@mysql)
        (t (error "Invalid mode: %s" ,mode)))))
 
 ;; ensure integrity of the metaschema
@@ -950,27 +958,31 @@ The returned function will depend on the MODE and TYPE."
         (s)
         (format "'%s'" s))
        (escape-string
-        (newline s)
+        (newline single-quote s)
         (let ((newline* (format "'||%s||'" newline)))
-          (->> (s-replace-regexp "'" "''" s)
+          (->> (s-replace-regexp "'" single-quote s)
                (s-replace-regexp "\n" newline*)))))
     ;; TODO this could be way more elegant (build the lambda with forms)
-    (let ((formatter
-           (org-sql--case-type type
-             (boolean
-              (org-sql--case-mode mode
-                (postgres (lambda (b) (if (= b 1) "TRUE" "FALSE")))
-                (sqlite (lambda (b) (if (= b 1) "1" "0")))))
-             (enum (lambda (e) (quote-string (symbol-name e))))
-             (integer #'number-to-string)
-             (text
-              (org-sql--case-mode mode
-                (postgres
-                 (lambda (s)
-                   (quote-string (escape-string "chr(10)" s))))
-                (sqlite
-                 (lambda (s)
-                   (quote-string (escape-string "char(10)" s)))))))))
+    (let* ((esc-newline
+            (org-sql--case-mode mode
+              (mysql "\\n")
+              (postgres "chr(10)")
+              (sqlite "char(10)")))
+           (esc-single-quote
+            (org-sql--case-mode mode
+              (mysql "\\'")
+              ((postgres sqlite) "''")))
+           (formatter
+            (org-sql--case-type type
+              (boolean
+               (org-sql--case-mode mode
+                 ((mysql postgres) (lambda (b) (if (= b 1) "TRUE" "FALSE")))
+                 (sqlite (lambda (b) (if (= b 1) "1" "0")))))
+              (enum (lambda (e) (quote-string (symbol-name e))))
+              (integer #'number-to-string)
+              (text
+               (lambda (s)
+                 (quote-string (escape-string esc-newline esc-single-quote s)))))))
       (lambda (s) (if s (funcall formatter s) "NULL")))))
 
 (defun org-sql--compile-mql-schema-formatter-alist (mode mql-tables)
@@ -1008,7 +1020,7 @@ separated by SEP."
 (defun org-sql--format-mql-table-name (config tbl-name)
   "Return TBL-NAME as a formatted string according to CONFIG."
   (org-sql--case-mode (car config)
-    (sqlite
+    ((mysql sqlite)
      (symbol-name tbl-name))
     (postgres
      (-let (((&plist :schema) (cdr config)))
@@ -1063,21 +1075,25 @@ MQL-TABLES. CONFIG is the `org-sql-db-config'."
 CONFIG is the `org-sql-db-config' list and TBL-NAME is the name
 of the table."
   (-let* (((column-name . (&plist :type)) mql-column)
-          (column-name* (org-sql--format-mql-column-name column-name)))
-    (org-sql--case-mode (car config)
-      (sqlite
-       (org-sql--case-type type
-         (enum "TEXT")
-         (text "TEXT")
-         (integer "INTEGER")
-         (boolean "INTEGER")))
-      (postgres
-       (org-sql--case-type type
-         (enum (->> (format "enum_%s_%s" tbl-name column-name*)
-                    (org-sql--format-mql-enum-name config)))
-         (text "TEXT")
-         (integer "INTEGER")
-         (boolean "BOOLEAN"))))))
+          (column-name* (org-sql--format-mql-column-name column-name))
+          (mode (car config)))
+    (org-sql--case-type type
+      (enum
+       (org-sql--case-mode mode
+         (mysql "ENUM")
+         (postgres (->> (format "enum_%s_%s" tbl-name column-name*)
+                        (org-sql--format-mql-enum-name config)))
+         (sqlite "TEXT")))
+      ;; TODO maybe need to use VARHCAR for mysql since "TEXT can only be
+      ;; indexed over a specified length" (whatever that means)
+      (text
+       "TEXT")
+      (integer
+       "INTEGER")
+      (boolean
+       (org-sql--case-mode mode
+         ((mysql postgres) "BOOLEAN")
+         (sqlite "INTEGER"))))))
 
 (defun org-sql--format-mql-schema-columns (config tbl-name mql-columns)
   "Return SQL string for MQL-COLUMNS.
@@ -1159,7 +1175,7 @@ CONFIG is the `org-sql-db-config' list."
        (let ((create-types (->> (org-sql--format-mql-schema-enum-types config mql-tables)
                                 (s-join ""))))
          (concat create-types create-tables)))
-      (sqlite
+      ((mysql sqlite)
        create-tables))))
 
 ;; insert
@@ -1234,7 +1250,7 @@ SQL-STATEMENTS is a list of SQL statements to be included in the
 transaction. MODE is the SQL mode."
   (-let ((bare-transaction (-some->> sql-statements
                              (s-join "")
-                             (format "BEGIN TRANSACTION;%sCOMMIT;"))))
+                             (format "BEGIN;%sCOMMIT;"))))
     ;; TODO might want to add performance options here
     (when bare-transaction
       (org-sql--case-mode mode
@@ -2077,6 +2093,28 @@ state as the orgfiles on disk."
 
 ;;; SQL command wrappers
 
+(defun org-sql--exec-mysql-command-no-db (config-keys &rest args)
+  "Execute a mysql command with ARGS.
+CONFIG-KEYS is the plist component if `org-sql-db-config'.
+The connection options for the postgres server. will be handled here."
+  (-let* (((&plist :hostname :port :username :password) config-keys)
+          (h (-some->> hostname (list "-h")))
+          (p (-some->> port (list "-P")))
+          (u (-some->> username (list "-u")))
+          (batch-args '("-Nsr"))
+          (process-environment
+           (if (not password) process-environment
+             (cons (format "MYSQL_PWD=%s" password) process-environment))))
+    (apply #'org-sql--run-command org-sql--mysql-exe
+           (append h p u batch-args args))))
+
+(defun org-sql--exec-mysql-command (config-keys &rest args)
+  "Execute a mysql command with ARGS.
+CONFIG-KEYS is the plist component if `org-sql-db-config'.
+The connection options for the postgres server. will be handled here."
+  (-let* (((&plist :database) config-keys))
+    (apply #'org-sql--exec-mysql-command-no-db config-keys "-D" database args)))
+
 (defun org-sql--exec-sqlite-command (config-keys &rest args)
   "Execute a sqlite command with ARGS.
 CONFIG-KEYS is the plist component if `org-sql-db-config'."
@@ -2118,10 +2156,12 @@ uses the 'psql' client command in the background."
 The database connection will be handled transparently."
   (-let* (((mode . keyvals) org-sql-db-config))
     (org-sql--case-mode mode
-      (sqlite
-       (org-sql--exec-sqlite-command keyvals sql-cmd))
+      (mysql
+       (org-sql--exec-mysql-command keyvals "-e" sql-cmd))
       (postgres
-       (org-sql--exec-postgres-command keyvals "-c" sql-cmd)))))
+       (org-sql--exec-postgres-command keyvals "-c" sql-cmd))
+      (sqlite
+       (org-sql--exec-sqlite-command keyvals sql-cmd)))))
 
 ;; TODO is this necessary now that I am not using a shell to execute?
 (defun org-sql--send-sql* (sql-cmd)
@@ -2133,10 +2173,13 @@ The database connection will be handled transparently."
       (f-write sql-cmd 'utf-8 tmp-path)
       (let ((res
              (org-sql--case-mode mode
-               (sqlite
-                (org-sql--exec-sqlite-command keyvals (format ".read %s" tmp-path)))
+               (mysql
+                ;; TODO this is hacky, just use the stdin handle in the emacs api?
+                (org-sql--exec-mysql-command keyvals "<" tmp-path))
                (postgres
-                (org-sql--exec-postgres-command keyvals "-f" tmp-path)))))
+                (org-sql--exec-postgres-command keyvals "-f" tmp-path))
+               (sqlite
+                (org-sql--exec-sqlite-command keyvals (format ".read %s" tmp-path))))))
         (f-delete tmp-path)
         res))))
 
@@ -2144,11 +2187,20 @@ The database connection will be handled transparently."
 
 (defun org-sql--db-exists ()
   "Return t if the configured database exists."
+  ;; this is a bit weird because "the database" is used at different levels
+  ;; for each dbms
   (-let (((mode . keyvals) org-sql-db-config))
     (org-sql--case-mode mode
-      (sqlite
-       (-let (((&plist :path) keyvals))
-         (file-exists-p path)))
+      ;; connect to the server (without connecting to the db) and check that
+      ;; the db exists
+      (mysql
+       (-let* (((&plist :database) keyvals)
+               (cmd (format "SHOW DATABASES LIKE '%s';" database))
+               ((rc . _) (org-sql--exec-mysql-command-no-db keyvals "-e" cmd)))
+         (if (/= 0 rc) (error out)
+           (equal database (car (s-lines out))))))
+      ;; connect to the server and the db and check to see that the desired
+      ;; schema exists in the database
       (postgres
        (-let* (((&plist :database) keyvals)
                ((&plist :schema :database) keyvals)
@@ -2161,7 +2213,11 @@ The database connection will be handled transparently."
                 (--find (and (equal (car it) (or schema "public"))
                              (equal (cadr it) database))
                         it)
-                (and it t))))))))
+                (and it t)))))
+      ;; check to see that the db file exists
+      (sqlite
+       (-let (((&plist :path) keyvals))
+         (file-exists-p path))))))
 
 (defun org-sql--db-has-valid-schema ()
   "Return t if the configured database has a valid schema.
@@ -2169,10 +2225,8 @@ Note that this currently only tests the existence of the schema's tables."
   (-let* ((table-names (--map (symbol-name (car it)) org-sql--mql-tables))
           ((sql-cmd parse-fun)
            (org-sql--case-mode (car org-sql-db-config)
-             (sqlite
-              (list ".tables"
-                    (lambda (s)
-                      (--mapcat (s-split " " it t) (s-lines s)))))
+             (mysql
+              (list "SHOW TABLES;" #'s-lines))
              (postgres
               (-let* (((&plist :schema) (cdr org-sql-db-config))
                       (schema* (or schema "public"))
@@ -2183,11 +2237,14 @@ Note that this currently only tests the existence of the schema's tables."
                              (s-lines)
                              (--map (s-split "|" it))
                              (--filter (equal schema* (car it)))
-                             (--map (cadr it)))))))))
+                             (--map (cadr it)))))))
+             (sqlite
+              (list ".tables"
+                    (lambda (s)
+                      (--mapcat (s-split " " it t) (s-lines s)))))))
           ((rc . out) (org-sql--send-sql sql-cmd)))
     (if (/= 0 rc) (error out)
-      ;; (progn (print out)
-             (org-sql--sets-equal table-names (funcall parse-fun out) :test #'equal))))
+      (org-sql--sets-equal table-names (funcall parse-fun out) :test #'equal))))
 
 (defun org-sql--db-create ()
   "Create the configured database."
@@ -2197,6 +2254,8 @@ Note that this currently only tests the existence of the schema's tables."
        ;; this is a silly command that should work on all platforms (eg doesn't
        ;; require `touch' to make an empty file)
        (org-sql--exec-sqlite-command keyvals ".schema"))
+      (mysql
+       (error "Must manually create MySQL database as root"))
       (postgres
        (-let* (((&plist :database) keyvals)
                ((&plist :schema) keyvals)
@@ -2215,6 +2274,8 @@ Note that this currently only tests the existence of the schema's tables."
       (sqlite
        (-let (((&plist :path) keyvals))
          (delete-file path)))
+      (mysql
+       (error "Must manually delete the MySQL database as root"))
       (postgres
        (-let* (((&plist :database) keyvals)
                ((&plist :schema) keyvals)

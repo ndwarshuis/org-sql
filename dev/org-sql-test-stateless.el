@@ -1718,7 +1718,7 @@ list then join the cdr of IN with newlines."
       (expect (org-sql--format-mql-delete config formatter-alist mql-delete)
               :to-equal "DELETE FROM notpublic.table-foo;")))
 
-  (it "delete (no namespace; where)"
+  (it "delete (postgres namespace; where)"
     (let ((mql-delete '(table-foo (where :enum bim)))
           (config '(postgres :schema "notpublic")))
       (expect (org-sql--format-mql-delete config formatter-alist mql-delete)
@@ -1767,7 +1767,7 @@ list then join the cdr of IN with newlines."
       (expect
        (org-sql--format-sql-transaction mode statements)
        :to-equal
-       "PRAGMA foreign_keys = ON;BEGIN TRANSACTION;INSERT INTO foo (bar) values (1);COMMIT;")))
+       "PRAGMA foreign_keys = ON;BEGIN;INSERT INTO foo (bar) values (1);COMMIT;")))
 
   (it "transaction (postgres)"
     (let ((mode 'postgres)
@@ -1775,7 +1775,7 @@ list then join the cdr of IN with newlines."
       (expect
        (org-sql--format-sql-transaction mode statements)
        :to-equal
-       "BEGIN TRANSACTION;INSERT INTO foo (bar) values (1);COMMIT;"))))
+       "BEGIN;INSERT INTO foo (bar) values (1);COMMIT;"))))
 
 (describe "file metadata spec"
   (it "classify file metadata"

@@ -10,13 +10,14 @@ services:
       - POSTGRES_USER=org_sql
     ports:
       - 60001:5432
-  # mariadb:
-  #   image: mariadb:10.5.8
-  #   container_name: org-sql-mariadb
-  #   restart: always
-  #   environment:    
-  #     - MYSQL_ROOT_PASSWORD=toor
-  #     - MYSQL_USER=org_sql
-  #     - MYSQL_PASSWORD=org_sql_mariadb
-  #   ports:
-  #     - 60002:3306
+  mariadb:
+    image: mariadb:10.5.8
+    container_name: org-sql-mariadb
+    restart: always
+    environment:    
+      - MYSQL_ROOT_PASSWORD=toor
+      - MYSQL_USER=org_sql
+      - MYSQL_PASSWORD=org_sql
+      - MYSQL_DATABASE=org_sql
+    ports:
+      - 60002:3306
