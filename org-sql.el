@@ -685,7 +685,7 @@ TYPE must be one of 'boolean', 'text', 'enum', or 'integer'."
   "Execute one of ALIST-FORMS depending on MODE.
 TYPE must be one of 'sqlite' or 'postgres'."
   (declare (indent 1))
-  (-let (((keys &as &alist 'sqlite 'postgres 'mysql)
+  (-let (((keys &as &alist 'mysql 'postgres 'sqlserver 'sqlite)
           (--splice (listp (car it))
                     (-let (((keys . form) it))
                       (--map (cons it form) keys))
@@ -693,9 +693,10 @@ TYPE must be one of 'sqlite' or 'postgres'."
     (unless (-none? #'null keys)
       (error "Must provide form for all modes"))
     `(cl-case ,mode
+       (mysql ,@mysql)
        (postgres ,@postgres)
        (sqlite ,@sqlite)
-       (mysql ,@mysql)
+       (sqlserver ,@sqlserver)
        (t (error "Invalid mode: %s" ,mode)))))
 
 ;; ensure integrity of the metaschema
@@ -972,7 +973,7 @@ CONFIG is the `org-sql-db-config' list."
   (unless (equal out "")
     (let ((sep (org-sql--case-mode (car config)
                  (mysql "\t")
-                 ((postgres sqlite) "|"))))
+                 ((postgres sqlite sqlserver) "|"))))
       (->> (s-trim out)
            (s-split "\n")
            (--map (s-split sep it))
@@ -998,17 +999,20 @@ The returned function will depend on the MODE and TYPE."
             (org-sql--case-mode mode
               (mysql "\\\\n")
               (postgres "'||chr(10)||'")
-              (sqlite "'||char(10)||'")))
+              (sqlite "'||char(10)||'")
+              ;; TODO not sure if this also needs Char(13) in front of Char(10)
+              ;; for the carriage return (alas...newline war)
+              (sqlserver "+Char(10)+")))
            (esc-single-quote
             (org-sql--case-mode mode
               (mysql "\\\\'")
-              ((postgres sqlite) "''")))
+              ((postgres sqlite sqlserver) "''")))
            (formatter
             (org-sql--case-type type
               (boolean
                (org-sql--case-mode mode
                  ((mysql postgres) (lambda (b) (if (= b 1) "TRUE" "FALSE")))
-                 (sqlite (lambda (b) (if (= b 1) "1" "0")))))
+                 ((sqlite sqlserver) (lambda (b) (if (= b 1) "1" "0")))))
               (enum (lambda (e) (quote-string (symbol-name e))))
               (integer #'number-to-string)
               (text
@@ -1054,9 +1058,11 @@ separated by SEP."
 (defun org-sql--format-mql-table-name (config tbl-name)
   "Return TBL-NAME as a formatted string according to CONFIG."
   (org-sql--case-mode (car config)
+    ;; these are straightforward since they don't use namespaces
     ((mysql sqlite)
      (symbol-name tbl-name))
-    (postgres
+    ;; these require a custom namespace (aka schema) prefix if available
+    ((postgres sqlserver)
      (-let (((&plist :schema) (cdr config)))
        (if (not schema) (symbol-name tbl-name)
          (format "%s.%s" schema tbl-name))))))
@@ -1111,11 +1117,13 @@ of the table."
   (-let* (((column-name . (&plist :type)) mql-column)
           (column-name* (org-sql--format-mql-column-name column-name))
           (mode (car config)))
+    ;; TODO use ntext for sql server instead of text?
     (org-sql--case-type type
       (boolean
        (org-sql--case-mode mode
          ((mysql postgres) "BOOLEAN")
-         (sqlite "INTEGER")))
+         (sqlite "INTEGER")
+         (sqlserver "BIT")))
       (enum
        (org-sql--case-mode mode
          (mysql (->> (plist-get (cdr mql-column) :allowed)
@@ -1124,7 +1132,7 @@ of the table."
                      (format "ENUM(%s)")))
          (postgres (->> (format "enum_%s_%s" tbl-name column-name*)
                         (org-sql--format-mql-enum-name config)))
-         (sqlite "TEXT")))
+         ((sqlite sqlserver) "TEXT")))
       ;; TODO maybe need to use VARHCAR for mysql since "TEXT can only be
       ;; indexed over a specified length" (whatever that means)
       (integer
@@ -1136,7 +1144,7 @@ of the table."
          (mysql
           (-let (((&plist :length) (cdr mql-column)))
             (if length (format "VARCHAR(%s)" length) "VARCHAR")))
-         ((postgres sqlite) "TEXT"))))))
+         ((postgres sqlite sqlserver) "TEXT"))))))
 
 (defun org-sql--format-mql-schema-columns (config tbl-name mql-columns)
   "Return SQL string for MQL-COLUMNS.
@@ -1200,7 +1208,7 @@ CONFIG is the `org-sql-db-config' list."
   (-let* (((tbl-name . (&alist 'columns 'constraints)) mql-table)
           (tbl-name* (org-sql--format-mql-table-name config tbl-name))
           (defer (org-sql--case-mode (car config)
-                   (mysql nil)
+                   ((mysql sqlserver) nil)
                    ((postgres sqlite) t))))
     (->> (org-sql--format-mql-schema-table-constraints config constraints defer)
          (append (org-sql--format-mql-schema-columns config tbl-name columns))
@@ -1218,7 +1226,7 @@ CONFIG is the `org-sql-db-config' list."
        (let ((create-types (->> (org-sql--format-mql-schema-enum-types config mql-tables)
                                 (s-join ""))))
          (concat create-types create-tables)))
-      ((mysql sqlite)
+      ((mysql sqlite sqlserver)
        create-tables))))
 
 ;; insert
@@ -1298,7 +1306,9 @@ transaction. MODE is the SQL mode."
     (when bare-transaction
       (org-sql--case-mode mode
         (sqlite (concat "PRAGMA foreign_keys = ON;" bare-transaction))
-        ((mysql postgres) bare-transaction)))))
+        ;; TODO pretty sure that sql server actually needs the full "BEGIN
+        ;; TRANSACTION"
+        ((mysql postgres sqlserver) bare-transaction)))))
 
 ;;; org-element/org-ml wrapper functions
 
