@@ -127,7 +127,6 @@ to store them. This is in addition to any properties specifified by
        (constraints
         (primary :keys (:file_path))))
 
-
       (headlines
        (desc . "Each row stores one headline in a given org file and its metadata")
        (columns
@@ -966,14 +965,18 @@ is the md5 of this org file."
 
 ;;; SQL string parsing functions
 
-(defun org-sql--parse-output-to-plist (cols out)
+(defun org-sql--parse-output-to-plist (config cols out)
   "Parse SQL output string OUT to an plist representing the data.
-COLS are the column names as symbols used to obtain OUT."
+COLS are the column names as symbols used to obtain OUT.
+CONFIG is the `org-sql-db-config' list."
   (unless (equal out "")
-    (->> (s-trim out)
-         (s-split "\n")
-         (--map (s-split "|" it))
-         (--map (-interleave cols it)))))
+    (let ((sep (org-sql--case-mode (car config)
+                 (mysql "\t")
+                 ((postgres sqlite) "|"))))
+      (->> (s-trim out)
+           (s-split "\n")
+           (--map (s-split sep it))
+           (--map (-interleave cols it))))))
 
 ;;; MQL -> SQL string formatting functions
 
@@ -988,18 +991,17 @@ The returned function will depend on the MODE and TYPE."
         (format "'%s'" s))
        (escape-string
         (newline single-quote s)
-        (let ((newline* (format "'||%s||'" newline)))
-          (->> (s-replace-regexp "'" single-quote s)
-               (s-replace-regexp "\n" newline*)))))
+        (->> (s-replace-regexp "'" single-quote s)
+             (s-replace-regexp "\n" newline))))
     ;; TODO this could be way more elegant (build the lambda with forms)
     (let* ((esc-newline
             (org-sql--case-mode mode
-              (mysql "\\n")
-              (postgres "chr(10)")
-              (sqlite "char(10)")))
+              (mysql "\\\\n")
+              (postgres "'||chr(10)||'")
+              (sqlite "'||char(10)||'")))
            (esc-single-quote
             (org-sql--case-mode mode
-              (mysql "\\'")
+              (mysql "\\\\'")
               ((postgres sqlite) "''")))
            (formatter
             (org-sql--case-type type
@@ -1152,9 +1154,6 @@ of the table."
                  (format "%s %s" column-str))))))
     (-map #'format-column mql-columns)))
 
-;; TODO defer is hardcoded to t here since postgresql and sqlite both support
-;; deferrable constraints. None of the db's that I plan to add support this, so
-;; this argument will be used then
 (defun org-sql--format-mql-schema-table-constraints (config mql-tbl-constraints defer)
   "Return SQL string for MQL-TBL-CONSTRAINTS.
 If DEFER is t, add 'INITIALLY DEFERRED' to the end of each
@@ -1199,8 +1198,11 @@ foreign key constraint. CONFIG is the `org-sql-db-config' list."
   "Return CREATE TABLE (...) SQL string for MQL-TABLE.
 CONFIG is the `org-sql-db-config' list."
   (-let* (((tbl-name . (&alist 'columns 'constraints)) mql-table)
-          (tbl-name* (org-sql--format-mql-table-name config tbl-name)))
-    (->> (org-sql--format-mql-schema-table-constraints config constraints t)
+          (tbl-name* (org-sql--format-mql-table-name config tbl-name))
+          (defer (org-sql--case-mode (car config)
+                   (mysql nil)
+                   ((postgres sqlite) t))))
+    (->> (org-sql--format-mql-schema-table-constraints config constraints defer)
          (append (org-sql--format-mql-schema-columns config tbl-name columns))
          (s-join ",")
          (format "CREATE TABLE IF NOT EXISTS %s (%s);" tbl-name*))))
@@ -1296,7 +1298,7 @@ transaction. MODE is the SQL mode."
     (when bare-transaction
       (org-sql--case-mode mode
         (sqlite (concat "PRAGMA foreign_keys = ON;" bare-transaction))
-        (postgres bare-transaction)))))
+        ((mysql postgres) bare-transaction)))))
 
 ;;; org-element/org-ml wrapper functions
 
@@ -2091,7 +2093,7 @@ Each fmeta will have it's :disk-path set to nil."
           ((rc . out) (org-sql--send-sql sql-select)))
     (if (/= 0 rc) (error out)
       (->> (s-trim out)
-           (org-sql--parse-output-to-plist columns)
+           (org-sql--parse-output-to-plist org-sql-db-config columns)
            (--map (-let (((&plist :md5 h :file_path p) it))
                     (org-sql--to-fmeta nil p h)))))))
 
@@ -2142,12 +2144,15 @@ The connection options for the postgres server. will be handled here."
           (h (-some->> hostname (list "-h")))
           (p (-some->> port (list "-P")))
           (u (-some->> username (list "-u")))
-          (batch-args '("-Nsr"))
+          ;; TODO add a switch for this?
+          (protocol-arg '("--protocol=TCP"))
+          ;; TODO should this have the -r option?
+          (batch-args '("-Ns"))
           (process-environment
            (if (not password) process-environment
              (cons (format "MYSQL_PWD=%s" password) process-environment))))
     (apply #'org-sql--run-command org-sql--mysql-exe
-           (append h p u batch-args args))))
+           (append h p u protocol-arg batch-args args))))
 
 (defun org-sql--exec-mysql-command (config-keys &rest args)
   "Execute a mysql command with ARGS.
@@ -2215,8 +2220,7 @@ The database connection will be handled transparently."
       (let ((res
              (org-sql--case-mode mode
                (mysql
-                ;; TODO this is hacky, just use the stdin handle in the emacs api?
-                (org-sql--exec-mysql-command keyvals "<" tmp-path))
+                (org-sql--exec-mysql-command keyvals "-e" (format "source %s" tmp-path)))
                (postgres
                 (org-sql--exec-postgres-command keyvals "-f" tmp-path))
                (sqlite
@@ -2237,7 +2241,7 @@ The database connection will be handled transparently."
       (mysql
        (-let* (((&plist :database) keyvals)
                (cmd (format "SHOW DATABASES LIKE '%s';" database))
-               ((rc . _) (org-sql--exec-mysql-command-no-db keyvals "-e" cmd)))
+               ((rc . out) (org-sql--exec-mysql-command-no-db keyvals "-e" cmd)))
          (if (/= 0 rc) (error out)
            (equal database (car (s-lines out))))))
       ;; connect to the server and the db and check to see that the desired
@@ -2267,7 +2271,7 @@ Note that this currently only tests the existence of the schema's tables."
           ((sql-cmd parse-fun)
            (org-sql--case-mode (car org-sql-db-config)
              (mysql
-              (list "SHOW TABLES;" #'s-lines))
+              (list "SHOW TABLES;" (lambda (s) (s-lines (s-trim s)))))
              (postgres
               (-let* (((&plist :schema) (cdr org-sql-db-config))
                       (schema* (or schema "public"))
@@ -2316,7 +2320,13 @@ Note that this currently only tests the existence of the schema's tables."
        (-let (((&plist :path) keyvals))
          (delete-file path)))
       (mysql
-       (error "Must manually delete the MySQL database as root"))
+       (->> org-sql--mql-tables
+            (--map (symbol-name (car it)))
+            (s-join ",")
+            (format "DROP TABLE IF EXISTS %s;")
+            (format "SET FOREIGN_KEY_CHECKS = 0;%sSET FOREIGN_KEY_CHECKS = 1;")
+            (org-sql--exec-mysql-command keyvals "-e")))
+       ;; (error "Must manually delete the MySQL database as root"))
       (postgres
        (-let* (((&plist :database) keyvals)
                ((&plist :schema) keyvals)
