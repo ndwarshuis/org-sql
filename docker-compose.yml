@@ -21,3 +21,12 @@ services:
       - MYSQL_DATABASE=org_sql
     ports:
       - 60002:3306
+  sqlserver:
+    build: ./docker/sql-server
+    container_name: org-sql-sqlserver
+    restart: always
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=org_sql222@@@
+    ports:
+      - 60003:1433

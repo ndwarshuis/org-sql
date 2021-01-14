@@ -1,0 +1,2 @@
+CREATE DATABASE org_sql;
+GO
