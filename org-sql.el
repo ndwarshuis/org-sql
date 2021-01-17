@@ -246,6 +246,7 @@ to store them. This is in addition to any properties specifified by
                           :type integer)
         (:planning_type :desc "the type of this planning entry"
                         :type enum
+                        :length 9
                         :allowed (closed scheduled deadline))
         (:timestamp_offset :desc "file offset of this entries timestamp"
                            :type integer
@@ -487,14 +488,17 @@ to store them. This is in addition to any properties specifified by
     language (MQL, basically a giant list)"))
 
 ;; TODO what about the windows users?
-(defconst org-sql--sqlite-exe "sqlite3"
-  "The sqlite client command.")
+(defconst org-sql--mysql-exe "mysql"
+  "The mysql client command.")
 
 (defconst org-sql--psql-exe "psql"
   "The postgres client command.")
 
-(defconst org-sql--mysql-exe "mysql"
-  "The mysql client command.")
+(defconst org-sql--sqlite-exe "sqlite3"
+  "The sqlite client command.")
+
+(defconst org-sql--sqlserver-exe "sqlcmd"
+  "The sqlserver client command.")
 
 ;; (defconst org-sql--postgres-createdb-exe "createdb"
 ;;   "The postgres 'create database' command.")
@@ -1132,19 +1136,20 @@ of the table."
                      (format "ENUM(%s)")))
          (postgres (->> (format "enum_%s_%s" tbl-name column-name*)
                         (org-sql--format-mql-enum-name config)))
-         ((sqlite sqlserver) "TEXT")))
-      ;; TODO maybe need to use VARHCAR for mysql since "TEXT can only be
-      ;; indexed over a specified length" (whatever that means)
+         (sqlite "TEXT")
+         (sqlserver (-if-let (length (plist-get (cdr mql-column) :length))
+                        (format "VARCHAR(%s)" length)
+                      "TEXT"))))
       (integer
        "INTEGER")
       (text
        "TEXT")
       (varchar
        (org-sql--case-mode mode
-         (mysql
+         ((mysql sqlserver)
           (-let (((&plist :length) (cdr mql-column)))
             (if length (format "VARCHAR(%s)" length) "VARCHAR")))
-         ((postgres sqlite sqlserver) "TEXT"))))))
+         ((postgres sqlite) "TEXT"))))))
 
 (defun org-sql--format-mql-schema-columns (config tbl-name mql-columns)
   "Return SQL string for MQL-COLUMNS.
@@ -1183,14 +1188,16 @@ foreign key constraint. CONFIG is the `org-sql-db-config' list."
                                    (s-join ",")))
                 (foreign-str (format "FOREIGN KEY (%s) REFERENCES %s (%s)"
                                      keys* ref* parent-keys*))
-                (on-delete* (-some->> on_delete
-                              (symbol-name)
-                              (upcase)
-                              (format "ON DELETE %s")))
-                (on-update* (-some->> on_update
-                              (symbol-name)
-                              (upcase)
-                              (format "ON UPDATE %s")))
+                (on-delete* (-some--> on_delete
+                              (cl-case it
+                                (no-action "NO ACTION")
+                                (cascade "CASCADE"))
+                              (format "ON DELETE %s" it)))
+                (on-update* (-some--> on_update
+                              (cl-case it
+                                (no-action "NO ACTION")
+                                (cascade "CASCADE"))
+                              (format "ON UPDATE %s" it)))
                 (deferrable (when defer "DEFERRABLE INITIALLY DEFERRED")))
           (->> (list foreign-str on-delete* on-update* deferrable)
                (-non-nil)
@@ -1209,11 +1216,16 @@ CONFIG is the `org-sql-db-config' list."
           (tbl-name* (org-sql--format-mql-table-name config tbl-name))
           (defer (org-sql--case-mode (car config)
                    ((mysql sqlserver) nil)
-                   ((postgres sqlite) t))))
+                   ((postgres sqlite) t)))
+          (fmt (org-sql--case-mode (car config)
+                 ((mysql postgres sqlite) "CREATE TABLE IF NOT EXISTS %s (%s);")
+                 (sqlserver
+                  (-let (((&plist :database) (cdr config)))
+                    (format "IF NOT EXISTS (SELECT * FROM sys.tables where name = '%%1$s') CREATE TABLE %%1$s (%%2$s);" database))))))
     (->> (org-sql--format-mql-schema-table-constraints config constraints defer)
          (append (org-sql--format-mql-schema-columns config tbl-name columns))
          (s-join ",")
-         (format "CREATE TABLE IF NOT EXISTS %s (%s);" tbl-name*))))
+         (format fmt tbl-name*))))
 
 (defun org-sql--format-mql-schema (config mql-tables)
   "Return schema SQL string for MQL-TABLES.
@@ -2207,6 +2219,23 @@ uses the 'psql' client command in the background."
           (f (list "-At")))
     (apply #'org-sql--exec-postgres-command-sub 'psql config-keys (append d f args))))
 
+(defun org-sql--exec-sqlserver-command-no-db (config-keys &rest args)
+  (-let* (((&plist :hostname :port :username :password) config-keys)
+          ;; TODO support more than just tcp connections
+          (S (list "-S" (format "tcp:%s,%s" hostname port)))
+          (U (-some->> username (list "-U")))
+          (sep '("-s" "|"))
+          (no-headers '("-h" "-1"))
+          (process-environment
+           (if (not password) process-environment
+             (cons (format "SQLCMDPASSWORD=%s" password) process-environment))))
+    (apply #'org-sql--run-command org-sql--sqlserver-exe
+           (append S U no-headers sep args))))
+
+(defun org-sql--exec-sqlserver-command (config-keys &rest args)
+  (-let* (((&plist :database) config-keys))
+    (apply #'org-sql--exec-sqlserver-command-no-db config-keys "-d" database args)))
+
 (defun org-sql--send-sql (sql-cmd)
   "Execute SQL-CMD.
 The database connection will be handled transparently."
@@ -2217,7 +2246,9 @@ The database connection will be handled transparently."
       (postgres
        (org-sql--exec-postgres-command keyvals "-c" sql-cmd))
       (sqlite
-       (org-sql--exec-sqlite-command keyvals sql-cmd)))))
+       (org-sql--exec-sqlite-command keyvals sql-cmd))
+      (sqlserver
+       (org-sql--exec-sqlserver-command keyvals "-Q" (format "set nocount on; %s" sql-cmd))))))
 
 ;; TODO is this necessary now that I am not using a shell to execute?
 (defun org-sql--send-sql* (sql-cmd)
@@ -2234,7 +2265,9 @@ The database connection will be handled transparently."
                (postgres
                 (org-sql--exec-postgres-command keyvals "-f" tmp-path))
                (sqlite
-                (org-sql--exec-sqlite-command keyvals (format ".read %s" tmp-path))))))
+                (org-sql--exec-sqlite-command keyvals (format ".read %s" tmp-path)))
+               (sqlserver
+                (org-sql--exec-sqlserver-command keyvals "-i" tmp-path)))))
         (f-delete tmp-path)
         res))))
 
@@ -2272,7 +2305,19 @@ The database connection will be handled transparently."
       ;; check to see that the db file exists
       (sqlite
        (-let (((&plist :path) keyvals))
-         (file-exists-p path))))))
+         (file-exists-p path)))
+      (sqlserver
+       (-let* (((&plist :schema :database) keyvals)
+               (cmd "select name from [org_sql].sys.schemas;")
+               ((rc . out) (org-sql--exec-sqlserver-command keyvals "-Q" cmd)))
+         (if (/= 0 rc) (error out)
+           (--> (s-split "\n" out)
+                (--map (s-split "|" it) it)
+                ;; TODO get the default schema name and check that
+                (--find (and (equal (car it) (or schema "dbo"))
+                             (equal (cadr it) database))
+                        it)
+                (and it t))))))))
 
 (defun org-sql--db-has-valid-schema ()
   "Return t if the configured database has a valid schema.
@@ -2296,7 +2341,18 @@ Note that this currently only tests the existence of the schema's tables."
              (sqlite
               (list ".tables"
                     (lambda (s)
-                      (--mapcat (s-split " " it t) (s-lines s)))))))
+                      (--mapcat (s-split " " it t) (s-lines s)))))
+             (sqlserver
+              (-let* (((&plist :schema) (cdr org-sql-db-config))
+                      (schema* (or schema "dbo"))
+                      (cmd (format "SELECT schema_name(schema_id), name FROM sys.tables;" schema*)))
+                (list cmd
+                      (lambda (s)
+                        (->> (s-trim s)
+                             (s-lines)
+                             (--map (s-split "|" it))
+                             (--filter (equal schema* (car it)))
+                             (--map (cadr it)))))))))
           ((rc . out) (org-sql--send-sql sql-cmd)))
     (if (/= 0 rc) (error out)
       (org-sql--sets-equal table-names (funcall parse-fun out) :test #'equal))))
@@ -2309,26 +2365,35 @@ Note that this currently only tests the existence of the schema's tables."
        ;; this is a silly command that should work on all platforms (eg doesn't
        ;; require `touch' to make an empty file)
        (org-sql--exec-sqlite-command keyvals ".schema"))
+      ;; noop since we shouldn't assume we have permission to create the db
       (mysql
-       (error "Must manually create MySQL database as root"))
+       (cons 0 ""))
+       ;; (error "Must manually create MySQL database as root"))
       (postgres
        (-let* (((&plist :database) keyvals)
                ((&plist :schema) keyvals)
                (cmd (format "CREATE SCHEMA IF NOT EXISTS %s;" (or schema "public"))))
-         (org-sql--exec-postgres-command keyvals "-c" cmd))))))
+         (org-sql--exec-postgres-command keyvals "-c" cmd)))
+      (sqlserver
+       (-let* (((&plist :database :schema) keyvals))
+         (when schema
+           (let* ((select (format "SELECT * FROM sys.schemas WHERE name = N'%s'" schema))
+                  (create (format "CREATE SCHEMA %s" schema))
+                  (cmd (format "IF NOT EXISTS (%s) EXEC('%s');" select create)))
+             (org-sql--exec-sqlserver-command keyvals "-Q" cmd))))))))
 
 (defun org-sql--db-create-tables ()
   "Create the schema for the configured database."
   (let ((sql-cmd (org-sql--format-mql-schema org-sql-db-config org-sql--mql-tables)))
-    (org-sql--send-sql sql-cmd)))
+    ;; (print sql-cmd)
+    (let ((res (org-sql--send-sql sql-cmd)))
+      (print res)
+      res)))
 
 (defun org-sql--delete-db ()
   "Delete the configured database."
   (-let (((mode . keyvals) org-sql-db-config))
     (org-sql--case-mode mode
-      (sqlite
-       (-let (((&plist :path) keyvals))
-         (delete-file path)))
       (mysql
        (->> org-sql--mql-tables
             (--map (symbol-name (car it)))
@@ -2341,7 +2406,17 @@ Note that this currently only tests the existence of the schema's tables."
        (-let* (((&plist :database) keyvals)
                ((&plist :schema) keyvals)
                (cmd (format "DROP SCHEMA IF EXISTS %s CASCADE;" (or schema "public"))))
-         (org-sql--exec-postgres-command keyvals "-c" cmd))))))
+         (org-sql--exec-postgres-command keyvals "-c" cmd)))
+      (sqlite
+       (-let (((&plist :path) keyvals))
+         (delete-file path)))
+      (sqlserver
+       (-let (((&plist :database :schema) keyvals))
+         (when schema
+           (let* ((select (format "SELECT * FROM sys.schemas WHERE name = N'%s'" schema))
+                  (drop (format "DROP SCHEMA %s" schema))
+                  (cmd (format "IF EXISTS (%s) EXEC('%s');" select drop)))
+             (org-sql--exec-sqlserver-command keyvals "-Q" cmd))))))))
 
 ;;;
 ;;; PUBLIC API
