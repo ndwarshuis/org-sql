@@ -4,7 +4,7 @@ services:
   psql:
     image: postgres:12.4-alpine
     container_name: org-sql-postgres
-    restart: always
+    restart: no
     environment:    
       - POSTGRES_PASSWORD=org_sql
       - POSTGRES_USER=org_sql
@@ -13,7 +13,7 @@ services:
   mariadb:
     image: mariadb:10.5.8
     container_name: org-sql-mariadb
-    restart: always
+    restart: no
     environment:    
       - MYSQL_ROOT_PASSWORD=toor
       - MYSQL_USER=org_sql
@@ -24,7 +24,7 @@ services:
   sqlserver:
     build: ./docker/sql-server
     container_name: org-sql-sqlserver
-    restart: always
+    restart: no
     environment:
       - ACCEPT_EULA=Y
       - SA_PASSWORD=org_sql222@@@
