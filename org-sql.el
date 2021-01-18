@@ -1135,10 +1135,13 @@ of the table."
          (sqlserver "BIT")))
       (char
        (org-sql--case-mode mode
-         ((mysql sqlserver postgres)
+         ((mysql sqlserver)
           (-let (((&plist :length) (cdr mql-column)))
             (if length (format "CHAR(%s)" length) "CHAR")))
-         (sqlite "TEXT")))
+         ;; postgres should use TEXT here because (according to the docs) "there
+         ;; is no performance difference among char/varchar/text except for the
+         ;; length-checking"
+         ((postgres sqlite) "TEXT")))
       (enum
        (org-sql--case-mode mode
          (mysql (->> (plist-get (cdr mql-column) :allowed)
@@ -1160,6 +1163,7 @@ of the table."
          ((mysql sqlserver)
           (-let (((&plist :length) (cdr mql-column)))
             (if length (format "VARCHAR(%s)" length) "VARCHAR")))
+         ;; see above why postgres uses TEXT here
          ((postgres sqlite) "TEXT"))))))
 
 (defun org-sql--format-mql-schema-columns (config tbl-name mql-columns)
