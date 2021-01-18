@@ -114,6 +114,7 @@ to store them. This is in addition to any properties specifified by
   "Length of the file_hash column char type.")
 
 (eval-and-compile
+  ;; TODO use UUID type where possible for the hash column
   (defconst org-sql--mql-tables
     `((file_metadata
        (desc . "Each row stores filesystem metadata for one tracked org file")
@@ -2113,7 +2114,7 @@ Each fmeta will have it's :db-path set to nil. Only files in
       ((get-md5
         (fp)
         (-let (((rc . hash) (org-sql--run-command "md5sum" fp)))
-          (if (= 0 rc) (string-to-number (car (s-split-up-to " " hash 1)) 16)
+          (if (= 0 rc) (car (s-split-up-to " " hash 1))
             (error "Could not get md5"))))
        (expand-if-dir
         (fp)
