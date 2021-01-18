@@ -108,7 +108,10 @@ to store them. This is in addition to any properties specifified by
   "Length of the file_path column varchar type.")
 
 (defconst org-sql--tag-varchar-length 32
-  "Length of the file_path column varchar type.")
+  "Length of the tag column varchar type.")
+
+(defconst org-sql--file_hash-char-length 32
+  "Length of the file_hash column char type.")
 
 (eval-and-compile
   (defconst org-sql--mql-tables
@@ -119,9 +122,8 @@ to store them. This is in addition to any properties specifified by
                     :type varchar
                     :length ,org-sql--file-path-varchar-length)
         (:file_hash :desc "hash (MD5) of the org file"
-                    ;; TODO the size of this can be more specific since md5 is
-                    ;; always 128 bit
-                    :type integer
+                    :type char
+                    :size ,org-sql--file_hash-char-length
                     :constraints (notnull)))
        (constraints
         (primary :keys (:file_path))))
@@ -130,7 +132,8 @@ to store them. This is in addition to any properties specifified by
        (desc . "Each row describes one org file (which may have multiple filepaths)")
        (columns
         (:file_hash :desc "hash (MD5) of the org file"
-                    :type integer)
+                    :type char
+                    :size ,org-sql--file_hash-char-length)
         (:size :desc "size of the org file in bytes"
                :type integer
                :constraints (notnull)))
@@ -147,7 +150,8 @@ to store them. This is in addition to any properties specifified by
        (desc . "Each row stores one headline in a given org file and its metadata")
        (columns
         (:file_hash :desc "hash (MD5) of the org file"
-                    :type integer)
+                    :type char
+                    :size ,org-sql--file_hash-char-length)
         (:headline_offset :desc "file offset of the headline's first character"
                           :type integer)
         (:headline_text :desc "raw text of the headline"
@@ -178,7 +182,8 @@ to store them. This is in addition to any properties specifified by
        (desc . "Each row stores the ancestor and depth of a headline relationship (eg closure table)")
        (columns
         (:file_hash :desc "hash (MD5) of the org file"
-                    :type integer)
+                    :type char
+                    :size ,org-sql--file_hash-char-length)
         (:headline_offset :desc "offset of this headline"
                           :type integer)
         (:parent_offset :desc "offset of this headline's parent"
@@ -201,7 +206,8 @@ to store them. This is in addition to any properties specifified by
        (desc . "Each row stores one timestamp")
        (columns
         (:file_hash :desc "hash (MD5) of the org file"
-                    :type integer)
+                    :type char
+                    :size ,org-sql--file_hash-char-length)
         (:headline_offset :desc "offset of the headline containing this timestamp"
                           :type integer
                           :constraints (notnull))
@@ -250,7 +256,8 @@ to store them. This is in addition to any properties specifified by
        (desc . "Each row stores the metadata for headline planning timestamps.")
        (columns
         (:file_hash :desc "hash (MD5) of the org file"
-                    :type integer)
+                    :type char
+                    :size ,org-sql--file_hash-char-length)
         (:headline_offset :desc "file offset of the headline with this tag"
                           :type integer)
         (:planning_type :desc "the type of this planning entry"
@@ -271,7 +278,8 @@ to store them. This is in addition to any properties specifified by
        (desc . "Each row stores one tag at the file level")
        (columns
         (:file_hash :desc "hash (MD5) of the org file"
-                    :type integer)
+                    :type char
+                    :size ,org-sql--file_hash-char-length)
         (:tag :desc "the text value of this tag"
               :type varchar
               :length ,org-sql--tag-varchar-length))
@@ -286,7 +294,8 @@ to store them. This is in addition to any properties specifified by
        (desc . "Each row stores one tag")
        (columns
         (:file_hash :desc "hash (MD5) of the org file"
-                    :type integer)
+                    :type char
+                    :size ,org-sql--file_hash-char-length)
         (:headline_offset :desc "file offset of the headline with this tag"
                           :type integer)
         (:tag :desc "the text value of this tag"
@@ -306,7 +315,8 @@ to store them. This is in addition to any properties specifified by
        (desc . "Each row stores one property")
        (columns
         (:file_hash :desc "hash (MD5) of the org file"
-                    :type integer)
+                    :type char
+                    :size ,org-sql--file_hash-char-length)
         (:property_offset :desc "file offset of this property in the org file"
                           :type integer)
         (:key_text :desc "this property's key"
@@ -326,7 +336,8 @@ to store them. This is in addition to any properties specifified by
        (desc . "Each row stores a property at the file level")
        (columns
         (:file_hash :desc "hash (MD5) of the org file"
-                    :type integer)
+                    :type char
+                    :size ,org-sql--file_hash-char-length)
         (:property_offset :desc "file offset of this property in the org file"
                           :type integer))
        (constraints
@@ -344,7 +355,8 @@ to store them. This is in addition to any properties specifified by
        (desc . "Each row stores a property at the headline level")
        (columns
         (:file_hash :desc "hash (MD5) of the org file"
-                    :type integer)
+                    :type char
+                    :size ,org-sql--file_hash-char-length)
         (:property_offset :desc "file offset of this property in the org file"
                           :type integer)
         (:headline_offset :desc "file offset of the headline with this property"
@@ -365,7 +377,8 @@ to store them. This is in addition to any properties specifified by
        (desc . "Each row stores one clock entry")
        (columns
         (:file_hash :desc "hash (MD5) of the org file"
-                    :type integer)
+                    :type char
+                    :size ,org-sql--file_hash-char-length)
         (:headline_offset :desc "offset of the headline with this clock"
                           :type integer
                           :constraints (notnull))
@@ -388,7 +401,8 @@ to store them. This is in addition to any properties specifified by
        (desc . "Each row stores one logbook entry (except for clocks)")
        (columns
         (:file_hash :desc "hash (MD5) of the org file"
-                    :type integer)
+                    :type char
+                    :size ,org-sql--file_hash-char-length)
         (:headline_offset :desc "offset of the headline with this entry"
                           :type integer
                           :constraints (notnull))
@@ -413,7 +427,8 @@ to store them. This is in addition to any properties specifified by
        (desc . "Each row stores additional metadata for a state change logbook entry")
        (columns
         (:file_hash :desc "hash (MD5) of the org file"
-                    :type integer)
+                    :type char
+                    :size ,org-sql--file_hash-char-length)
         (:entry_offset :desc "offset of the logbook entry for this state change"
                        :type integer)
         (:state_old :desc "former todo state keyword"
@@ -433,7 +448,8 @@ to store them. This is in addition to any properties specifified by
        (desc . "Each row stores additional metadata for a planning change logbook entry")
        (columns
         (:file_hash :desc "hash (MD5) of the org file"
-                    :type integer)
+                    :type char
+                    :size ,org-sql--file_hash-char-length)
         (:entry_offset :desc "offset of the logbook entry for this planning change"
                        :type integer)
         (:timestamp_offset :desc "offset of the former timestamp"
@@ -454,7 +470,8 @@ to store them. This is in addition to any properties specifified by
        (desc . "Each row stores one link")
        (columns
         (:file_hash :desc "hash (MD5) of the org file"
-                    :type integer)
+                    :type char
+                    :size ,org-sql--file_hash-char-length)
         (:headline_offset :desc "offset of the headline with this link"
                           :type integer
                           :constraints (notnull))
@@ -664,11 +681,13 @@ ARGS is a list of additional arguments to pass to `cl-subsetp'."
   "Execute one of ALIST-FORMS depending on TYPE.
 TYPE must be one of 'boolean', 'text', 'enum', or 'integer'."
   (declare (indent 1))
-  (-let (((keys &as &alist 'boolean 'enum 'integer 'text 'varchar) alist-forms))
+  (-let (((keys &as &alist 'boolean 'char 'enum 'integer 'text 'varchar)
+          alist-forms))
     (unless (-none? #'null keys)
       (error "Must provide form for all types"))
     `(cl-case ,type
        (boolean ,@boolean)
+       (char ,@char)
        (enum ,@enum)
        (integer ,@integer)
        (text ,@text)
@@ -999,6 +1018,10 @@ The returned function will depend on the MODE and TYPE."
                (org-sql--case-mode mode
                  ((mysql postgres) (lambda (b) (if (= b 1) "TRUE" "FALSE")))
                  ((sqlite sqlserver) (lambda (b) (if (= b 1) "1" "0")))))
+              ;; TODO refactor this nonsense...
+              (char
+               (lambda (s)
+                 (quote-string (escape-string esc-newline esc-single-quote s))))
               (enum (lambda (e) (quote-string (symbol-name e))))
               (integer #'number-to-string)
               (text
@@ -1110,6 +1133,12 @@ of the table."
          ((mysql postgres) "BOOLEAN")
          (sqlite "INTEGER")
          (sqlserver "BIT")))
+      (char
+       (org-sql--case-mode mode
+         ((mysql sqlserver postgres)
+          (-let (((&plist :length) (cdr mql-column)))
+            (if length (format "CHAR(%s)" length) "CHAR")))
+         (sqlite "TEXT")))
       (enum
        (org-sql--case-mode mode
          (mysql (->> (plist-get (cdr mql-column) :allowed)
@@ -2080,7 +2109,7 @@ Each fmeta will have it's :db-path set to nil. Only files in
       ((get-md5
         (fp)
         (-let (((rc . hash) (org-sql--run-command "md5sum" fp)))
-          (if (= 0 rc) (car (s-split-up-to " " hash 1))
+          (if (= 0 rc) (string-to-number (car (s-split-up-to " " hash 1)) 16)
             (error "Could not get md5"))))
        (expand-if-dir
         (fp)
