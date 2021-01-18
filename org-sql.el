@@ -85,7 +85,7 @@ This is only used in combination with `org-replace-escapes'")
 (defconst org-sql--entry-keys
   (append
    (-map #'car org-sql--log-note-keys)
-   '(:file-path :headline-offset :entry-offset :note-text :header-text :old-ts :new-ts))
+   '(:file-hash :headline-offset :entry-offset :note-text :header-text :old-ts :new-ts))
   "Valid keys that may be used in logbook entry lists.")
 
 (defconst org-sql--ignored-properties-default
@@ -112,27 +112,42 @@ to store them. This is in addition to any properties specifified by
 
 (eval-and-compile
   (defconst org-sql--mql-tables
-    `((files
-       (desc . "Each row stores metadata for one tracked org file")
+    `((file_metadata
+       (desc . "Each row stores filesystem metadata for one tracked org file")
        (columns
         (:file_path :desc "path to the org file"
                     :type varchar
                     :length ,org-sql--file-path-varchar-length)
-        (:md5 :desc "md5 checksum of the org file"
-              :type text
-              :constraints (notnull))
+        (:file_hash :desc "hash (MD5) of the org file"
+                    ;; TODO the size of this can be more specific since md5 is
+                    ;; always 128 bit
+                    :type integer
+                    :constraints (notnull)))
+       (constraints
+        (primary :keys (:file_path))))
+
+      (file_hashes
+       (desc . "Each row describes one org file (which may have multiple filepaths)")
+       (columns
+        (:file_hash :desc "hash (MD5) of the org file"
+                    :type integer)
         (:size :desc "size of the org file in bytes"
                :type integer
                :constraints (notnull)))
+        ;; (:lines :desc "number of lines in the org file"
+        ;;         :type integer))
        (constraints
-        (primary :keys (:file_path))))
+        (primary :keys (:file_hash))
+        (foreign :ref file_metadata
+                 :keys (:file_hash)
+                 :parent_keys (:file_hash)
+                 :on_delete cascade)))
 
       (headlines
        (desc . "Each row stores one headline in a given org file and its metadata")
        (columns
-        (:file_path :desc "path to file containing the headline"
-                    :type varchar
-                    :length ,org-sql--file-path-varchar-length)
+        (:file_hash :desc "hash (MD5) of the org file"
+                    :type integer)
         (:headline_offset :desc "file offset of the headline's first character"
                           :type integer)
         (:headline_text :desc "raw text of the headline"
@@ -153,19 +168,18 @@ to store them. This is in addition to any properties specifified by
         (:content :desc "the headline contents"
                   :type text))
        (constraints
-        (primary :keys (:file_path :headline_offset))
-        (foreign :ref files
-                 :keys (:file_path)
-                 :parent-keys (:file_path)
+        (primary :keys (:file_hash :headline_offset))
+        (foreign :ref file_hashes
+                 :keys (:file_hash)
+                 :parent-keys (:file_hash)
                  :on_delete cascade
                  :on_update cascade)))
 
       (headline_closures
        (desc . "Each row stores the ancestor and depth of a headline relationship (eg closure table)")
        (columns
-        (:file_path :desc "path to the file containing this headline"
-                    :type varchar
-                    :length ,org-sql--file-path-varchar-length)
+        (:file_hash :desc "hash (MD5) of the org file"
+                    :type integer)
         (:headline_offset :desc "offset of this headline"
                           :type integer)
         (:parent_offset :desc "offset of this headline's parent"
@@ -173,24 +187,25 @@ to store them. This is in addition to any properties specifified by
         (:depth :desc "levels between this headline and the referred parent"
                 :type integer))
        (constraints
-        (primary :keys (:file_path :headline_offset :parent_offset))
+        (primary :keys (:file_hash :headline_offset :parent_offset))
         (foreign :ref headlines
-                 :keys (:file_path :headline_offset)
-                 :parent-keys (:file_path :headline_offset)
+                 :keys (:file_hash :headline_offset)
+                 :parent-keys (:file_hash :headline_offset)
                  :on_delete cascade
                  :on_update cascade)
         (foreign :ref headlines
-                 :keys (:file_path :parent_offset)
-                 :parent-keys (:file_path :headline_offset)
-                 :on_delete cascade
-                 :on_update cascade)))
+                 :keys (:file_hash :parent_offset)
+                 :parent-keys (:file_hash :headline_offset))))
+                 ;; :on_delete no-action
+                 ;; :on_update no-action)))
+                 ;; :on_delete cascade
+                 ;; :on_update cascade)))
 
       (timestamps
        (desc . "Each row stores one timestamp")
        (columns
-        (:file_path :desc "path to the file containing this timestamp"
-                    :type varchar
-                    :length ,org-sql--file-path-varchar-length)
+        (:file_hash :desc "hash (MD5) of the org file"
+                    :type integer)
         (:headline_offset :desc "offset of the headline containing this timestamp"
                           :type integer
                           :constraints (notnull))
@@ -229,19 +244,18 @@ to store them. This is in addition to any properties specifified by
         (:end_is_long :desc "true if the end time is in long format"
                       :type boolean))
        (constraints
-        (primary :keys (:file_path :timestamp_offset))
+        (primary :keys (:file_hash :timestamp_offset))
         (foreign :ref headlines
-                 :keys (:file_path :headline_offset)
-                 :parent-keys (:file_path :headline_offset)
+                 :keys (:file_hash :headline_offset)
+                 :parent-keys (:file_hash :headline_offset)
                  :on_delete cascade
                  :on_update cascade)))
 
       (planning_entries
        (desc . "Each row stores the metadata for headline planning timestamps.")
        (columns
-        (:file_path :desc "path to the file containing the entry"
-                    :type varchar
-                    :length ,org-sql--file-path-varchar-length)
+        (:file_hash :desc "hash (MD5) of the org file"
+                    :type integer)
         (:headline_offset :desc "file offset of the headline with this tag"
                           :type integer)
         (:planning_type :desc "the type of this planning entry"
@@ -252,36 +266,34 @@ to store them. This is in addition to any properties specifified by
                            :type integer
                            :constraints (notnull)))
        (constraints
-        (primary :keys (:file_path :headline_offset :planning_type))
+        (primary :keys (:file_hash :headline_offset :planning_type))
         (foreign :ref timestamps
-                 :keys (:file_path :timestamp_offset)
-                 :parent-keys (:file_path :timestamp_offset)
+                 :keys (:file_hash :timestamp_offset)
+                 :parent-keys (:file_hash :timestamp_offset)
                  :on_delete cascade
                  :on_update cascade)))
 
       (file_tags
        (desc . "Each row stores one tag at the file level")
        (columns
-        (:file_path :desc "path to the file containing the tag"
-                    :type varchar
-                    :length ,org-sql--file-path-varchar-length)
+        (:file_hash :desc "hash (MD5) of the org file"
+                    :type integer)
         (:tag :desc "the text value of this tag"
               :type varchar
               :length ,org-sql--tag-varchar-length))
        (constraints
-        (primary :keys (:file_path :tag))
-        (foreign :ref files
-                 :keys (:file_path)
-                 :parent-keys (:file_path)
+        (primary :keys (:file_hash :tag))
+        (foreign :ref file_hashes
+                 :keys (:file_hash)
+                 :parent-keys (:file_hash)
                  :on_delete cascade
                  :on_update cascade)))
 
       (headline_tags
        (desc . "Each row stores one tag")
        (columns
-        (:file_path :desc "path to the file containing the tag"
-                    :type varchar
-                    :length ,org-sql--file-path-varchar-length)
+        (:file_hash :desc "hash (MD5) of the org file"
+                    :type integer)
         (:headline_offset :desc "file offset of the headline with this tag"
                           :type integer)
         (:tag :desc "the text value of this tag"
@@ -291,19 +303,18 @@ to store them. This is in addition to any properties specifified by
                        :type boolean
                        :constraints (notnull)))
        (constraints
-        (primary :keys (:file_path :headline_offset :tag :is_inherited))
+        (primary :keys (:file_hash :headline_offset :tag :is_inherited))
         (foreign :ref headlines
-                 :keys (:file_path :headline_offset)
-                 :parent-keys (:file_path :headline_offset)
+                 :keys (:file_hash :headline_offset)
+                 :parent-keys (:file_hash :headline_offset)
                  :on_delete cascade
                  :on_update cascade)))
 
       (properties
        (desc . "Each row stores one property")
        (columns
-        (:file_path :desc "path to the file containing this property"
-                    :type varchar
-                    :length ,org-sql--file-path-varchar-length)
+        (:file_hash :desc "hash (MD5) of the org file"
+                    :type integer)
         (:property_offset :desc "file offset of this property in the org file"
                           :type integer)
         (:key_text :desc "this property's key"
@@ -313,59 +324,61 @@ to store them. This is in addition to any properties specifified by
                    :type text
                    :constraints (notnull)))
        (constraints
-        (primary :keys (:file_path :property_offset))
-        (foreign :ref files
-                 :keys (:file_path)
-                 :parent-keys (:file_path)
+        (primary :keys (:file_hash :property_offset))
+        (foreign :ref file_hashes
+                 :keys (:file_hash)
+                 :parent-keys (:file_hash)
                  :on_delete cascade
                  :on_update cascade)))
 
       (file_properties
        (desc . "Each row stores a property at the file level")
        (columns
-        (:file_path :desc "path to file containin the property"
-                    :type varchar
-                    :length ,org-sql--file-path-varchar-length)
+        (:file_hash :desc "hash (MD5) of the org file"
+                    :type integer)
         (:property_offset :desc "file offset of this property in the org file"
                           :type integer))
        (constraints
-        (primary :keys (:file_path :property_offset))
-        (foreign :ref files
-                 :keys (:file_path)
-                 :parent-keys (:file_path)
+        (primary :keys (:file_hash :property_offset))
+        (foreign :ref file_hashes
+                 :keys (:file_hash)
+                 :parent-keys (:file_hash)
                  :on_delete cascade
                  :on_update cascade)
         (foreign :ref properties
-                 :keys (:file_path :property_offset)
-                 :parent-keys (:file_path :property_offset)
+                 :keys (:file_hash :property_offset)
+                 :parent-keys (:file_hash :property_offset)
                  :on_delete cascade
                  :on_update cascade)))
 
       (headline_properties
        (desc . "Each row stores a property at the headline level")
        (columns
-        (:file_path :desc "path to file containin the property"
-                    :type varchar
-                    :length ,org-sql--file-path-varchar-length)
+        (:file_hash :desc "hash (MD5) of the org file"
+                    :type integer)
         (:property_offset :desc "file offset of this property in the org file"
                           :type integer)
         (:headline_offset :desc "file offset of the headline with this property"
                           :type integer
                           :constraints (notnull)))
        (constraints
-        (primary :keys (:file_path :property_offset))
+        (primary :keys (:file_hash :property_offset))
+        (foreign :ref properties
+                 :keys (:file_hash :property_offset)
+                 :parent-keys (:file_hash :property_offset)
+                 :on_delete cascade
+                 :on_update cascade)
         (foreign :ref headlines
-                 :keys (:file_path :headline_offset)
-                 :parent-keys (:file_path :headline_offset)
+                 :keys (:file_hash :headline_offset)
+                 :parent-keys (:file_hash :headline_offset)
                  :on_delete cascade
                  :on_update cascade)))
       
       (clocks
        (desc . "Each row stores one clock entry")
        (columns
-        (:file_path :desc "path to the file containing this clock"
-                    :type varchar
-                    :length ,org-sql--file-path-varchar-length)
+        (:file_hash :desc "hash (MD5) of the org file"
+                    :type integer)
         (:headline_offset :desc "offset of the headline with this clock"
                           :type integer
                           :constraints (notnull))
@@ -378,19 +391,18 @@ to store them. This is in addition to any properties specifified by
         (:clock_note :desc "the note entry beneath this clock"
                      :type text))
        (constraints
-        (primary :keys (:file_path :clock_offset))
+        (primary :keys (:file_hash :clock_offset))
         (foreign :ref headlines
-                 :keys (:file_path :headline_offset)
-                 :parent-keys (:file_path :headline_offset)
+                 :keys (:file_hash :headline_offset)
+                 :parent-keys (:file_hash :headline_offset)
                  :on_delete cascade
                  :on_update cascade)))
 
       (logbook_entries
        (desc . "Each row stores one logbook entry (except for clocks)")
        (columns
-        (:file_path :desc "path to the file containing this entry"
-                    :type varchar
-                    :length ,org-sql--file-path-varchar-length)
+        (:file_hash :desc "hash (MD5) of the org file"
+                    :type integer)
         (:headline_offset :desc "offset of the headline with this entry"
                           :type integer
                           :constraints (notnull))
@@ -405,19 +417,18 @@ to store them. This is in addition to any properties specifified by
         (:note :desc "the text of this entry underneath the header"
                :type text))
        (constraints
-        (primary :keys (:file_path :entry_offset))
+        (primary :keys (:file_hash :entry_offset))
         (foreign :ref headlines
-                 :keys (:file_path :headline_offset)
-                 :parent-keys (:file_path :headline_offset)
+                 :keys (:file_hash :headline_offset)
+                 :parent-keys (:file_hash :headline_offset)
                  :on_delete cascade
                  :on_update cascade)))
 
       (state_changes
        (desc . "Each row stores additional metadata for a state change logbook entry")
        (columns
-        (:file_path :desc "path to the file containing this entry"
-                    :type varchar
-                    :length ,org-sql--file-path-varchar-length)
+        (:file_hash :desc "hash (MD5) of the org file"
+                    :type integer)
         (:entry_offset :desc "offset of the logbook entry for this state change"
                        :type integer)
         (:state_old :desc "former todo state keyword"
@@ -427,43 +438,41 @@ to store them. This is in addition to any properties specifified by
                     :type text
                     :constraints (notnull)))
        (constraints
-        (primary :keys (:file_path :entry_offset))
+        (primary :keys (:file_hash :entry_offset))
         (foreign :ref logbook_entries
-                 :keys (:file_path :entry_offset)
-                 :parent-keys (:file_path :entry_offset)
+                 :keys (:file_hash :entry_offset)
+                 :parent-keys (:file_hash :entry_offset)
                  :on_delete cascade
                  :on_update cascade)))
 
       (planning_changes
        (desc . "Each row stores additional metadata for a planning change logbook entry")
        (columns
-        (:file_path :desc "path to the file containing this entry"
-                    :type varchar
-                    :length ,org-sql--file-path-varchar-length)
+        (:file_hash :desc "hash (MD5) of the org file"
+                    :type integer)
         (:entry_offset :desc "offset of the logbook entry for this planning change"
                        :type integer)
         (:timestamp_offset :desc "offset of the former timestamp"
                            :type integer
                            :constraints (notnull)))
        (constraints
-        (primary :keys (:file_path :entry_offset))
+        (primary :keys (:file_hash :entry_offset))
         (foreign :ref timestamps
-                 :keys (:file_path :timestamp_offset)
-                 :parent-keys (:file_path :timestamp_offset)
+                 :keys (:file_hash :timestamp_offset)
+                 :parent-keys (:file_hash :timestamp_offset)
                  :on_delete cascade
                  :on_update cascade)
         (foreign :ref logbook_entries
-                 :keys (:file_path :entry_offset)
-                 :parent-keys (:file_path :entry_offset)
+                 :keys (:file_hash :entry_offset)
+                 :parent-keys (:file_hash :entry_offset)
                  :on_delete cascade
                  :on_update cascade)))
 
       (links
        (desc . "Each row stores one link")
        (columns
-        (:file_path :desc "path to the file containing this link"
-                    :type varchar
-                    :length ,org-sql--file-path-varchar-length)
+        (:file_hash :desc "hash (MD5) of the org file"
+                    :type integer)
         (:headline_offset :desc "offset of the headline with this link"
                           :type integer
                           :constraints (notnull))
@@ -478,10 +487,10 @@ to store them. This is in addition to any properties specifified by
                     :type text
                     :constraints (notnull)))
        (constraints
-        (primary :keys (:file_path :link_offset))
+        (primary :keys (:file_hash :link_offset))
         (foreign :ref headlines
-                 :keys (:file_path :headline_offset)
-                 :parent-keys (:file_path :headline_offset)
+                 :keys (:file_hash :headline_offset)
+                 :parent-keys (:file_hash :headline_offset)
                  :on_delete cascade
                  :on_update cascade))))
     "Org-SQL database schema represented in internal meta query
@@ -741,12 +750,7 @@ TYPE must be one of 'sqlite' or 'postgres'."
             (-some->> (-difference parent-keys parent-columns)
               (-map #'symbol-name)
               (s-join ", ")
-              (error "Mismatched foreign keys between %s and %s: %s" tbl-name ref))
-            ;; This isn't strictly a requirement (but still good practice); make
-            ;; sure the foreign key refer to the primary key in the parent table
-            (when (or (-difference parent-keys parent-primary)
-                      (-difference parent-primary parent-keys))
-              (error "Mismatched foreign and primary keys between %s and %s" tbl-name ref)))))
+              (error "Mismatched foreign keys between %s and %s: %s" tbl-name ref)))))
       (-let* (((tbl-name . meta) tbl-schema)
               (foreign (->> (alist-get 'constraints meta)
                             (--filter (eq (car it) 'foreign))
@@ -876,13 +880,11 @@ If not present, return the current value of CLOCK-OUT-NOTES."
   (org-sql--top-section-get-binary-startup
    "lognoteclock-out" "nolognoteclock-out" clock-out-notes top-section))
 
-(defun org-sql--to-fstate (file-path hash attributes log-note-headings
-                                     todo-keywords lb-config tree)
+(defun org-sql--to-fstate (file-hash attributes log-note-headings todo-keywords
+                                     lb-config tree)
   "Return a plist representing the state of an org buffer.
 The plist will include:
-- `:file-path': the path to this org file on disk (given by
-  FILE-PATH)
-- `:md5': the hash of this org file (given by HASH)
+- `:file-hash': the hash of this org file (given by FILE-HASH)
 - `:attributes': the ATTRIBUTES list for the file as returned via
   `file-attributes'
 - `:top-section': the org-element TREE representation of this
@@ -896,8 +898,7 @@ The plist will include:
   (which depends on TODO-KEYWORDS and LOG-NOTE-HEADINGS)"
   (let* ((children (org-ml-get-children tree))
          (top-section (-some-> (assq 'section children) (org-ml-get-children))))
-    (list :file-path file-path
-          :md5 hash
+    (list :file-hash file-hash
           :attributes attributes
           :top-section top-section
           :headlines (if top-section (cdr children) children)
@@ -943,13 +944,13 @@ If not present, return the current value of CLOCK-INTO-DRAWER."
 
 An HSTATE represents the current headline being processed and
 will include the follwing keys/values:
-- `:file-path' the path to the current file being processed
+- `:file-hash' the path to the current file being processed
 - `:lb-config' the supercontents config plist
 - `:log-note-matcher': a list of log-note-matchers for this org
   file as returned by `org-sql--build-log-note-heading-matchers'
 - `:headline' the current headline node."
-  (-let (((&plist :file-path f :lb-config c :log-note-matcher m) fstate))
-    (list :file-path f
+  (-let (((&plist :file-hash h :lb-config c :log-note-matcher m) fstate))
+    (list :file-hash h
           :lb-config (org-sql--headline-update-supercontents-config c headline)
           :log-note-matcher m
           :headline headline)))
@@ -961,12 +962,12 @@ Only the :lb-config and :headline keys will be changed."
        (org-sql--map-plist :lb-config
          (org-sql--headline-update-supercontents-config it headline))))
 
-(defun org-sql--to-fmeta (disk-path db-path hash)
+(defun org-sql--to-fmeta (disk-path db-path file-hash)
   "Return a plist representing org file status.
 DISK-PATH is the path to the org file on disk, DB-PATH is the
-path on disk recorded in the database for this org file, and HASH
-is the md5 of this org file."
-  (list :disk-path disk-path :db-path db-path :hash hash))
+path on disk recorded in the database for this org file, and
+FILE-HASH is the md5 of this org file."
+  (list :disk-path disk-path :db-path db-path :file-hash file-hash))
 
 ;;; SQL string parsing functions
 
@@ -1513,7 +1514,7 @@ whose keys are a subset of `org-sql--entry-keys'."
   "Return entry list from ITEM.
 See `org-sql--to-entry' for the meaning of the returned list.
 HSTATE is a list given by `org-sql--to-hstate'."
-  (-let* (((&plist :file-path :headline) hstate)
+  (-let* (((&plist :file-hash :headline) hstate)
           (headline-offset (org-ml-get-property :begin headline))
           ((header-node . rest) (org-sql--split-item item))
           (header-offset (org-ml-get-property :begin header-node))
@@ -1547,7 +1548,7 @@ HSTATE is a list given by `org-sql--to-hstate'."
       (let ((old-ts (get-timestamp-node old-state))
             (new-ts (get-timestamp-node new-state)))
         (org-sql--to-entry type
-          :file-path file-path
+          :file-hash file-hash
           :entry-offset (org-ml-get-property :begin item)
           :headline-offset headline-offset
           :header-text header-text
@@ -1592,11 +1593,11 @@ to NOTE-TEXT; otherwise just as (CLOCK)."
                                 :header-text
                                 :note-text
                                 :headline-offset
-                                :file-path
+                                :file-hash
                                 :ts))
           entry))
     (org-sql--add-mql-insert acc logbook_entries
-      :file_path file-path
+      :file_hash file-hash
       :headline_offset headline-offset
       :entry_offset entry-offset
       :entry_type (symbol-name entry-type)
@@ -1608,10 +1609,10 @@ to NOTE-TEXT; otherwise just as (CLOCK)."
 
 (defun org-sql--add-mql-insert-state-change (acc entry)
   "Add MQL-insert for state change ENTRY to ACC."
-  (-let (((&plist :entry-offset :file-path :old-state :new-state) (cdr entry)))
+  (-let (((&plist :entry-offset :file-hash :old-state :new-state) (cdr entry)))
     (--> (org-sql--add-mql-insert-headline-logbook-item acc entry)
          (org-sql--add-mql-insert it state_changes
-           :file_path file-path
+           :file_hash file-hash
            :entry_offset entry-offset
            :state_old old-state
            :state_new new-state))))
@@ -1619,11 +1620,11 @@ to NOTE-TEXT; otherwise just as (CLOCK)."
 (defun org-sql--add-mql-insert-planning-change (acc hstate entry)
   "Add MQL-insert for planning change ENTRY to ACC.
 HSTATE is a plist as returned by `org-sql--to-hstate'."
-  (-let (((&plist :entry-offset :file-path :headline-offset :old-ts) (cdr entry)))
+  (-let (((&plist :entry-offset :file-hash :headline-offset :old-ts) (cdr entry)))
     (--> (org-sql--add-mql-insert-headline-logbook-item acc entry)
          (org-sql--add-mql-insert-timestamp it hstate old-ts)
          (org-sql--add-mql-insert it planning_changes
-           :file_path file-path
+           :file_hash file-hash
            :entry_offset entry-offset
            :timestamp_offset (org-ml-get-property :begin old-ts)))))
 
@@ -1633,7 +1634,7 @@ LOGBOOK is the logbook value of the supercontents list returned
 by `org-ml-headline-get-supercontents'. HSTATE is a plist as
 returned by `org-sql--to-hstate'."
   ;; TODO what about unknown stuff?
-  (-let (((&plist :headline :file-path) hstate))
+  (-let (((&plist :headline :file-hash) hstate))
     (cl-flet
         ((add-entry
           (acc entry)
@@ -1656,10 +1657,10 @@ returned by `org-sql--to-hstate'."
   "Add MQL-insert for CLOCK to ACC.
 NOTE-TEXT is either a string or nil representing the clock-note.
 HSTATE is a plist as returned by `org-sql--to-hstate'."
-  (-let (((&plist :headline :file-path) hstate)
+  (-let (((&plist :headline :file-hash) hstate)
          (value (org-ml-get-property :value clock)))
     (org-sql--add-mql-insert acc clocks
-      :file_path file-path
+      :file_hash file-hash
       :headline_offset (org-ml-get-property :begin headline)
       :clock_offset (org-ml-get-property :begin clock)
       :time_start (-some-> value
@@ -1688,7 +1689,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
     ;; TODO only do this once
     (-let* ((ignore-list (append org-sql--ignored-properties-default
                                  org-sql-excluded-properties))
-            ((&plist :headline :file-path) hstate)
+            ((&plist :headline :file-hash) hstate)
             (headline-offset (org-ml-get-property :begin headline)))
       (cl-flet
           ((is-ignored
@@ -1698,12 +1699,12 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
             (acc np)
             (let ((property-offset (org-ml-get-property :begin np)))
               (--> (org-sql--add-mql-insert acc properties
-                     :file_path file-path
+                     :file_hash file-hash
                      :property_offset property-offset
                      :key_text (org-ml-get-property :key np)
                      :val_text (org-ml-get-property :value np))
                    (org-sql--add-mql-insert it headline_properties
-                     :file_path file-path
+                     :file_hash file-hash
                      :headline_offset headline-offset
                      :property_offset property-offset)))))
         (->> (org-ml-headline-get-node-properties headline)
@@ -1714,13 +1715,13 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
   "Add MQL-insert for each tag in the current headline to ACC.
 HSTATE is a plist as returned by `org-sql--to-hstate'."
   (if (eq 'all org-sql-excluded-tags) acc
-    (-let* (((&plist :headline :file-path) hstate)
+    (-let* (((&plist :headline :file-hash) hstate)
             (offset (org-ml-get-property :begin headline)))
       (cl-flet
           ((add-tag
             (acc tag inherited)
             (org-sql--add-mql-insert acc headline_tags
-              :file_path file-path
+              :file_hash file-hash
               :headline_offset offset
               :tag tag
               :is_inherited (if inherited 1 0)))
@@ -1740,7 +1741,7 @@ CONTENTS is a list corresponding to that returned by
 `org-ml-headline-get-supercontents'. HSTATE is a plist as
 returned by `org-sql--to-hstate'."
   (if (eq 'all org-sql-excluded-link-types) acc
-    (-let* (((&plist :headline :file-path) hstate)
+    (-let* (((&plist :headline :file-hash) hstate)
             (offset (org-ml-get-property :begin headline))
             (links (->> (--mapcat (org-ml-match '(:any * link) it) contents)
                         (--remove (member (org-ml-get-property :type it)
@@ -1749,7 +1750,7 @@ returned by `org-sql--to-hstate'."
           ((add-link
             (acc link)
             (org-sql--add-mql-insert acc links
-              :file_path file-path
+              :file_hash file-hash
               :headline_offset offset
               :link_offset (org-ml-get-property :begin link)
               :link_path (org-ml-get-property :path link)
@@ -1768,10 +1769,10 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
         (when time (if (org-ml-time-is-long time) 1 0))))
     (-let* ((start (org-ml-timestamp-get-start-time timestamp))
             (end (org-ml-timestamp-get-end-time timestamp))
-            ((&plist :headline :file-path) hstate)
+            ((&plist :headline :file-hash) hstate)
             (headline-offset (org-ml-get-property :begin headline)))
       (org-sql--add-mql-insert acc timestamps
-        :file_path file-path
+        :file_hash file-path
         :headline_offset headline-offset
         :timestamp_offset (org-ml-get-property :begin timestamp)
         :is_active (if (org-ml-timestamp-is-active timestamp) 1 0)
@@ -1807,7 +1808,7 @@ returned by `org-sql--to-hstate'."
 (defun org-sql--add-mql-insert-headline-planning (acc hstate)
   "Add MQL-insert for each planning timestamp in the current headline to ACC.
 HSTATE is a plist as returned by `org-sql--to-hstate'."
-  (-let (((&plist :headline :file-path) hstate))
+  (-let (((&plist :headline :file-hash) hstate))
     (-if-let (planning (org-ml-headline-get-planning headline))
         (let ((offset (org-ml-get-property :begin headline)))
           (cl-flet
@@ -1816,7 +1817,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
                 (-if-let (ts (org-ml-get-property type planning))
                     (--> (org-sql--add-mql-insert-timestamp acc hstate ts)
                          (org-sql--add-mql-insert it planning_entries
-                           :file_path file-path
+                           :file_hash file-hash
                            :headline_offset offset
                            :planning_type (->> (symbol-name type)
                                                (s-chop-prefix ":")
@@ -1831,13 +1832,13 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
 (defun org-sql--add-mql-insert-headline-closures (acc hstate)
   "Add MQL-insert for parent closures from the current headline to ACC.
 HSTATE is a plist as returned by `org-sql--to-hstate'."
-  (-let* (((&plist :headline :file-path) hstate)
+  (-let* (((&plist :headline :file-hash) hstate)
           (offset (org-ml-get-property :begin headline)))
     (cl-flet
         ((add-closure
           (acc parent-offset depth)
           (org-sql--add-mql-insert acc headline_closures
-            :file_path file-path
+            :file_hash file-hash
             :headline_offset offset
             :parent_offset parent-offset
             :depth depth)))
@@ -1859,12 +1860,12 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
                  (-drop 2))
           (`(nil ,h ,m) (+ (* 60 (string-to-number h)) (string-to-number m)))
           (`(,m) (string-to-number m)))))
-    (-let* (((&plist :file-path :lb-config :headline) hstate)
+    (-let* (((&plist :file-hash :lb-config :headline) hstate)
             (supercontents (org-ml-headline-get-supercontents lb-config headline))
             (logbook (org-ml-supercontents-get-logbook supercontents))
             (contents (org-ml-supercontents-get-contents supercontents)))
       (--> (org-sql--add-mql-insert acc headlines
-             :file_path file-path
+             :file_hash file-hash
              :headline_offset (org-ml-get-property :begin headline)
              :headline_text (org-ml-get-property :raw-value headline)
              :keyword (org-ml-get-property :todo-keyword headline)
@@ -1902,12 +1903,12 @@ FSTATE is a list given by `org-sql--to-fstate'."
 (defun org-sql--add-mql-insert-file-tags (acc fstate)
   "Add MQL-insert for each file tag in file to ACC.
 FSTATE is a list given by `org-sql--to-fstate'."
-  (-let (((&plist :file-path :top-section) fstate))
+  (-let (((&plist :file-hash :top-section) fstate))
     (cl-flet
         ((add-tag
           (acc tag)
           (org-sql--add-mql-insert acc file_tags
-            :file_path file-path
+            :file_hash file-hash
             :tag tag)))
       (->> (--filter (org-ml-is-type 'keyword it) top-section)
            (--filter (equal (org-ml-get-property :key it) "FILETAGS"))
@@ -1918,7 +1919,7 @@ FSTATE is a list given by `org-sql--to-fstate'."
 (defun org-sql--add-mql-insert-file-properties (acc fstate)
   "Add MQL-insert for each file property in file to ACC.
 FSTATE is a list given by `org-sql--to-fstate'."
-  (-let (((&plist :file-path :top-section) fstate))
+  (-let (((&plist :file-hash :top-section) fstate))
     (cl-flet
         ((add-property
           (acc keyword)
@@ -1926,12 +1927,12 @@ FSTATE is a list given by `org-sql--to-fstate'."
                  ((key value) (--> (org-ml-get-property :value keyword)
                                    (s-split-up-to " " it 1))))
             (--> (org-sql--add-mql-insert acc properties
-                   :file_path file-path
+                   :file_hash file-hash
                    :property_offset offset
                    :key_text key
                    :val_text value)
                  (org-sql--add-mql-insert it file_properties
-                   :file_path file-path
+                   :file_hash file-hash
                    :property_offset offset)))))
       (->> (--filter (org-ml-is-type 'keyword it) top-section)
            (--filter (equal (org-ml-get-property :key it) "PROPERTY"))
@@ -1940,11 +1941,16 @@ FSTATE is a list given by `org-sql--to-fstate'."
 (defun org-sql--add-mql-insert-file (acc fstate)
   "Add MQL-insert for file in FSTATE to ACC.
 FSTATE is a list given by `org-sql--to-fstate'."
-  (-let (((&plist :file-path :md5 :attributes) fstate))
-    (-> (org-sql--add-mql-insert acc files
-          :file_path file-path
-          :md5 md5
-          :size (file-attribute-size attributes)))))
+  (-let (((&plist :file-hash :attributes) fstate))
+    (--> acc
+      ;; TODO there is not longer a file path in the fstate, this needs to be
+      ;; moved out
+      (org-sql--add-mql-insert it file_metadata
+        :file_path file-path
+        :file_hash md5)
+      (org-sql--add-mql-insert it file_hashes
+        :file_hash md5
+        :size (file-attribute-size attributes)))))
 
 (defun org-sql--fstate-to-mql-insert (fstate)
   "Return all MQL-inserts for FSTATE.
@@ -1959,14 +1965,14 @@ FSTATE is a list given by `org-sql--to-fstate'."
 (defun org-sql--fmeta-to-mql-update (fmeta)
   "Return MQL-update for FMETA.
 FMETA is a list given by `org-sql--to-fmeta'."
-  (-let (((&plist :disk-path :hash) fmeta))
-    (org-sql--mql-update files (:file_path disk-path) (:md5 hash))))
+  (-let (((&plist :disk-path :file-hash) fmeta))
+    (org-sql--mql-update file_metadata (:file_path disk-path) (:file_hash file-hash))))
 
 (defun org-sql--fmeta-to-mql-delete (fmeta)
   "Return MQL-delete for FMETA.
 FMETA is a list given by `org-sql--to-fmeta'."
-  (-let (((&plist :db-path) fmeta))
-    (org-sql--mql-delete files (:file_path db-path))))
+  (-let (((&plist :file-hash) fmeta))
+    (org-sql--mql-delete file_metadata (:file_hash file-hash))))
 
 ;; fmeta function (see `org-sql--to-fmeta')
 
@@ -1981,14 +1987,14 @@ unique hashes."
   (cl-flet*
       ((hash<
         (a b)
-        (-let (((&plist :hash a-hash) a)
-               ((&plist :hash b-hash) b))
+        (-let (((&plist :file-hash a-hash) a)
+               ((&plist :file-hash b-hash) b))
           (string< a-hash b-hash)))
        (combine
         (a b)
-        (-let (((&plist :disk-path :hash) a)
-               ((&plist :db-path :hash) b))
-          (org-sql--to-fmeta disk-path db-path hash)))
+        (-let (((&plist :disk-path :file-hash) a)
+               ((&plist :db-path :file-hash) b))
+          (org-sql--to-fmeta disk-path db-path file-hash)))
        (merge
         (as bs)
         (let (acc)
@@ -2067,7 +2073,7 @@ Return a cons cell like (RETURNCODE . OUTPUT)."
 (defun org-sql--fmeta-get-fstate (fmeta)
   "Return the fstate for FMETA.
 FSTATE is a list as given by `org-sql--to-fstate'."
-  (-let* (((&plist :disk-path :hash) fmeta)
+  (-let* (((&plist :disk-path :file-hash) fmeta)
           (attributes (file-attributes disk-path)))
           ;; (log-note-headings
           ;;  (or (alist-get disk-path org-sql-log-note-headings-overrides
@@ -2079,8 +2085,8 @@ FSTATE is a list as given by `org-sql--to-fstate'."
             (lb-config (list :log-into-drawer org-log-into-drawer
                              :clock-into-drawer org-clock-into-drawer
                              :clock-out-notes org-log-note-clock-out)))
-        (org-sql--to-fstate disk-path hash attributes org-log-note-headings
-                            todo-keywords lb-config tree)))))
+        (org-sql--to-fstate file-hash attributes org-log-note-headings todo-keywords
+                            lb-config tree)))))
 
 ;;; reading fmeta from external state
 
@@ -2109,9 +2115,9 @@ Each fmeta will have it's :db-path set to nil. Only files in
 (defun org-sql--db-get-fmeta ()
   "Get a list of fmeta for the database.
 Each fmeta will have it's :disk-path set to nil."
-  (-let* ((columns '(:file_path :md5))
+  (-let* ((columns '(:file_path :file_hash))
           ;; TODO add compile check for this
-          (sql-select (org-sql--format-mql-select org-sql-db-config nil `(files (columns ,@columns))))
+          (sql-select (org-sql--format-mql-select org-sql-db-config nil `(file_metadata (columns ,@columns))))
           ((rc . out) (org-sql--send-sql sql-select)))
     (if (/= 0 rc) (error out)
       (->> (s-trim out)
@@ -2435,12 +2441,14 @@ This means the state of all files from `org-sql-files' will be
 pushed and updated to the database."
   (let ((inhibit-message t))
     (org-save-all-org-buffers))
+  ;; (print (org-sql--get-transactions))
+  ;; (print (org-sql--send-sql* (concat (org-sql--get-transactions) "SHOW ENGINE INNODB STATUS;"))))
   (org-sql--send-sql* (org-sql--get-transactions)))
 
 (defun org-sql-clear-db ()
   "Clear the Org-SQL database without deleting it."
   ;; only delete from files as we assume actions here cascade down
-  (->> (org-sql--mql-delete files nil)
+  (->> (org-sql--mql-delete file_metadata nil)
        (org-sql--format-mql-delete org-sql-db-config nil)
        (org-sql--send-sql)))
 
