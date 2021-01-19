@@ -116,20 +116,7 @@ to store them. This is in addition to any properties specifified by
 (eval-and-compile
   ;; TODO use UUID type where possible for the hash column
   (defconst org-sql--mql-tables
-    `((file_metadata
-       (desc . "Each row stores filesystem metadata for one tracked org file")
-       (columns
-        (:file_path :desc "path to the org file"
-                    :type varchar
-                    :length ,org-sql--file-path-varchar-length)
-        (:file_hash :desc "hash (MD5) of the org file"
-                    :type char
-                    :size ,org-sql--file_hash-char-length
-                    :constraints (notnull)))
-       (constraints
-        (primary :keys (:file_path))))
-
-      (file_hashes
+    `((file_hashes
        (desc . "Each row describes one org file (which may have multiple filepaths)")
        (columns
         (:file_hash :desc "hash (MD5) of the org file"
@@ -141,10 +128,24 @@ to store them. This is in addition to any properties specifified by
         ;; (:lines :desc "number of lines in the org file"
         ;;         :type integer))
        (constraints
-        (primary :keys (:file_hash))
-        (foreign :ref file_metadata
+        (primary :keys (:file_hash))))
+
+      (file_metadata
+       (desc . "Each row stores filesystem metadata for one tracked org file")
+       (columns
+        (:file_path :desc "path to the org file"
+                    :type varchar
+                    :length ,org-sql--file-path-varchar-length)
+        (:file_hash :desc "hash (MD5) of the org file"
+                    :type char
+                    :size ,org-sql--file_hash-char-length
+                    :constraints (notnull)))
+       (constraints
+        (primary :keys (:file_path))
+        (foreign :ref file_hashes
                  :keys (:file_hash)
-                 :parent_keys (:file_hash)
+                 :parent-keys (:file_hash)
+                 ;; TODO this 'on_delete' is not lispy because it has a '_'
                  :on_delete cascade)))
 
       (headlines
@@ -881,8 +882,8 @@ If not present, return the current value of CLOCK-OUT-NOTES."
   (org-sql--top-section-get-binary-startup
    "lognoteclock-out" "nolognoteclock-out" clock-out-notes top-section))
 
-(defun org-sql--to-fstate (file-hash attributes log-note-headings todo-keywords
-                                     lb-config tree)
+(defun org-sql--to-fstate (file-hash paths-with-attributes log-note-headings
+                                     todo-keywords lb-config tree)
   "Return a plist representing the state of an org buffer.
 The plist will include:
 - `:file-hash': the hash of this org file (given by FILE-HASH)
@@ -900,7 +901,7 @@ The plist will include:
   (let* ((children (org-ml-get-children tree))
          (top-section (-some-> (assq 'section children) (org-ml-get-children))))
     (list :file-hash file-hash
-          :attributes attributes
+          :paths-with-attributes paths-with-attributes
           :top-section top-section
           :headlines (if top-section (cdr children) children)
           :lb-config (->> lb-config
@@ -963,12 +964,15 @@ Only the :lb-config and :headline keys will be changed."
        (org-sql--map-plist :lb-config
          (org-sql--headline-update-supercontents-config it headline))))
 
-(defun org-sql--to-fmeta (disk-path db-path file-hash)
-  "Return a plist representing org file status.
-DISK-PATH is the path to the org file on disk, DB-PATH is the
-path on disk recorded in the database for this org file, and
-FILE-HASH is the md5 of this org file."
-  (list :disk-path disk-path :db-path db-path :file-hash file-hash))
+;; (defun org-sql--to-fmeta (disk-path db-path file-hash)
+;;   "Return a plist representing org file status.
+;; DISK-PATH is the path to the org file on disk, DB-PATH is the
+;; path on disk recorded in the database for this org file, and
+;; FILE-HASH is the md5 of this org file."
+;;   (list :disk-path disk-path :db-path db-path :file-hash file-hash))
+
+(defun org-sql--to-fmeta (file-path file-hash)
+  (list :file-path file-path :file-hash file-hash))
 
 ;;; SQL string parsing functions
 
@@ -1788,7 +1792,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
             ((&plist :headline :file-hash) hstate)
             (headline-offset (org-ml-get-property :begin headline)))
       (org-sql--add-mql-insert acc timestamps
-        :file_hash file-path
+        :file_hash file-hash
         :headline_offset headline-offset
         :timestamp_offset (org-ml-get-property :begin timestamp)
         :is_active (if (org-ml-timestamp-is-active timestamp) 1 0)
@@ -1954,41 +1958,59 @@ FSTATE is a list given by `org-sql--to-fstate'."
            (--filter (equal (org-ml-get-property :key it) "PROPERTY"))
            (-reduce-from #'add-property acc)))))
 
-(defun org-sql--add-mql-insert-file (acc fstate)
+(defun org-sql--add-mql-insert-file-hash (acc fstate)
   "Add MQL-insert for file in FSTATE to ACC.
 FSTATE is a list given by `org-sql--to-fstate'."
-  (-let (((&plist :file-hash :attributes) fstate))
-    (--> acc
-      ;; TODO there is not longer a file path in the fstate, this needs to be
-      ;; moved out
-      (org-sql--add-mql-insert it file_metadata
-        :file_path file-path
-        :file_hash md5)
-      (org-sql--add-mql-insert it file_hashes
-        :file_hash md5
-        :size (file-attribute-size attributes)))))
+  (-let (((&plist :file-hash) fstate))
+    (org-sql--add-mql-insert acc file_hashes
+      :file_hash file-hash
+      ;; TODO this is wrong obviously
+      :size 0)))
+
+(defun org-sql--add-mql-insert-file-metadata (acc fstate)
+  "Add MQL-insert for file in FSTATE to ACC.
+FSTATE is a list given by `org-sql--to-fstate'."
+  (-let (((&plist :paths-with-attributes :file-hash) fstate))
+    (--reduce-from (org-sql--add-mql-insert acc file_metadata
+                     :file_hash file-hash
+                     :file_path (car it))
+                   acc paths-with-attributes)))
 
 (defun org-sql--fstate-to-mql-insert (fstate)
   "Return all MQL-inserts for FSTATE.
 FSTATE is a list given by `org-sql--to-fstate'."
   (-> nil
-      (org-sql--add-mql-insert-file fstate)
+      (org-sql--add-mql-insert-file-hash fstate)
+      (org-sql--add-mql-insert-file-metadata fstate)
       (org-sql--add-mql-insert-file-properties fstate)
       (org-sql--add-mql-insert-file-tags fstate)
       (org-sql--add-mql-insert-headlines fstate)
       (reverse)))
 
-(defun org-sql--fmeta-to-mql-update (fmeta)
-  "Return MQL-update for FMETA.
-FMETA is a list given by `org-sql--to-fmeta'."
-  (-let (((&plist :disk-path :file-hash) fmeta))
-    (org-sql--mql-update file_metadata (:file_path disk-path) (:file_hash file-hash))))
+;; (defun org-sql--fmeta-to-mql-update (fmeta)
+;;   "Return MQL-update for FMETA.
+;; FMETA is a list given by `org-sql--to-fmeta'."
+;;   (-let (((&plist :disk-path :file-hash) fmeta))
+;;     (org-sql--mql-update file_metadata (:file_path disk-path) (:file_hash file-hash))))
 
-(defun org-sql--fmeta-to-mql-delete (fmeta)
-  "Return MQL-delete for FMETA.
-FMETA is a list given by `org-sql--to-fmeta'."
-  (-let (((&plist :file-hash) fmeta))
-    (org-sql--mql-delete file_metadata (:file_hash file-hash))))
+;; (defun org-sql--fmeta-to-mql-delete (fmeta)
+;;   "Return MQL-delete for FMETA.
+;; FMETA is a list given by `org-sql--to-fmeta'."
+;;   (-let (((&plist :file-hash) fmeta))
+;;     (org-sql--mql-delete file_hashes (:file_hash file-hash))))
+
+(defun org-sql--fmeta-to-mql-delete (file-hash)
+  (org-sql--mql-delete file_hashes (:file_hash file-hash)))
+
+(defun org-sql--fmeta-to-mql-path-delete (file-hash file-paths)
+  (--map (org-sql--mql-delete file_metadata (:file_path it :file_hash file-hash))
+         file-paths))
+
+(defun org-sql--fmeta-to-mql-path-insert (file-hash file-paths)
+  (--map (org-sql--mql-insert file_metadata
+           :file_path it
+           :file_hash file-hash)
+         file-paths))
 
 ;; fmeta function (see `org-sql--to-fmeta')
 
@@ -2043,6 +2065,7 @@ DISK-FMETA and DB-FMETA are lists of file cells where each member is like
 \(md5 . filepath). Return an alist where the keys represent the
 actions to take on the files on disk/in the database. The keys of
 the alist will be 'noops', 'inserts', 'updates', and 'deletes'."
+  ;; TODO all but the 'update' operation can be done just be checking the hashes
   (cl-flet
       ((get-path
         (key alist)
@@ -2066,6 +2089,45 @@ the alist will be 'noops', 'inserts', 'updates', and 'deletes'."
     (->> (org-sql--merge-fmeta disk-fmeta db-fmeta)
          (-group-by #'get-group))))
 
+;; NEW FMETA GROUPING FUNCTIONS
+(defun org-sql--partition-fmeta (disk-fmeta db-fmeta)
+  (let (hash-in-db paths-dont-match files-to-insert paths-to-insert
+                   paths-to-delete cur-disk cur-db n)
+    (while disk-fmeta
+      (setq hash-in-db nil
+            paths-dont-match nil
+            n (length db-fmeta)
+            cur-disk (car disk-fmeta))
+      (while (< 0 n)
+        (setq cur-db (nth (1- n) db-fmeta))
+        (when (equal (plist-get cur-disk :file-hash)
+                     (plist-get cur-db :file-hash))
+          (when (not (equal (plist-get cur-disk :file-path)
+                            (plist-get cur-db :file-path)))
+            (setq paths-dont-match t
+                  paths-to-delete (cons cur-db paths-to-delete)))
+          (setq hash-in-db t
+                db-fmeta (-remove-at (1- n) db-fmeta)))
+        (setq n (1- n)))
+      (if hash-in-db
+          (when paths-dont-match
+            (setq paths-to-insert (cons cur-disk paths-to-insert)))
+        (setq files-to-insert (cons cur-disk files-to-insert)))
+      (setq disk-fmeta (cdr disk-fmeta)))
+    `((files-to-insert ,@files-to-insert)
+      (paths-to-insert ,@paths-to-insert)
+      (paths-to-delete ,@paths-to-delete)
+      (files-to-delete ,@db-fmeta))))
+
+;; this works for both inserts and renames
+(defun org-sql--group-fmetas-by-hash (fmetas)
+  (->> (--map (cons (plist-get it :file-hash) (plist-get it :file-path)) fmetas)
+       (-group-by #'car)
+       (--map (cons (car it) (-map #'cdr (cdr it))))))
+
+(defun org-sql--fmeta-to-hashes (fmetas)
+  (--map (plist-get it :file-hash) fmetas))
+
 ;;;
 ;;; STATEFUL FUNCTIONS
 ;;;
@@ -2086,23 +2148,18 @@ Return a cons cell like (RETURNCODE . OUTPUT)."
 
 ;;; fmeta -> fstate
 
-(defun org-sql--fmeta-get-fstate (fmeta)
-  "Return the fstate for FMETA.
-FSTATE is a list as given by `org-sql--to-fstate'."
-  (-let* (((&plist :disk-path :file-hash) fmeta)
-          (attributes (file-attributes disk-path)))
-          ;; (log-note-headings
-          ;;  (or (alist-get disk-path org-sql-log-note-headings-overrides
-          ;;                 nil nil #'equal)
-          ;;      org-log-note-headings)))
-    (with-current-buffer (find-file-noselect disk-path t)
+(defun org-sql--fmeta-get-fstate (file-hash file-paths)
+  (let ((paths-with-attributes (--map (cons it (file-attributes it)) file-paths)))
+    ;; just pick the first file path to open
+    (with-current-buffer (find-file-noselect (car file-paths) t)
       (let ((tree (org-element-parse-buffer))
             (todo-keywords (-map #'substring-no-properties org-todo-keywords-1))
             (lb-config (list :log-into-drawer org-log-into-drawer
                              :clock-into-drawer org-clock-into-drawer
                              :clock-out-notes org-log-note-clock-out)))
-        (org-sql--to-fstate file-hash attributes org-log-note-headings todo-keywords
-                            lb-config tree)))))
+        (org-sql--to-fstate file-hash paths-with-attributes
+                            org-log-note-headings todo-keywords lb-config
+                            tree)))))
 
 ;;; reading fmeta from external state
 
@@ -2126,7 +2183,8 @@ Each fmeta will have it's :db-path set to nil. Only files in
            (-map #'expand-file-name)
            (-filter #'file-exists-p)
            (-uniq)
-           (--map (org-sql--to-fmeta it nil (get-md5 it)))))))
+           ;; (--map (org-sql--to-fmeta it nil (get-md5 it)))))))
+           (--map (org-sql--to-fmeta it (get-md5 it)))))))
 
 (defun org-sql--db-get-fmeta ()
   "Get a list of fmeta for the database.
@@ -2138,8 +2196,9 @@ Each fmeta will have it's :disk-path set to nil."
     (if (/= 0 rc) (error out)
       (->> (s-trim out)
            (org-sql--parse-output-to-plist org-sql-db-config columns)
-           (--map (-let (((&plist :md5 h :file_path p) it))
-                    (org-sql--to-fmeta nil p h)))))))
+           (--map (-let (((&plist :file_hash h :file_path p) it))
+                    ;; (org-sql--to-fmeta nil p h)))))))
+                    (org-sql--to-fmeta p h)))))))
 
 (defun org-sql--get-transactions ()
   "Return SQL string of the update transaction.
@@ -2151,26 +2210,58 @@ state as the orgfiles on disk."
           (formatter-alist
            (->> org-sql--mql-tables
                 (--map (org-sql--compile-mql-schema-formatter-alist mode it))))
-          ((&alist 'updates 'inserts 'deletes)
-           (org-sql--classify-fmeta disk-fmeta db-fmeta)))
+          ((&alist 'files-to-insert
+                   'files-to-delete
+                   'paths-to-insert
+                   'paths-to-delete)
+           (org-sql--partition-fmeta disk-fmeta db-fmeta)))
     (cl-flet
-        ((inserts-to-sql
+        ((file-inserts-to-sql
           (fmeta)
-          (->> (org-sql--fmeta-get-fstate fmeta)
-               (org-sql--fstate-to-mql-insert)
+          (->> (org-sql--group-fmetas-by-hash fmeta)
+               (--mapcat (->> (org-sql--fmeta-get-fstate (car it) (cdr it))
+                              (org-sql--fstate-to-mql-insert)))
                (--map (org-sql--format-mql-insert org-sql-db-config formatter-alist it))))
-         (updates-to-sql
+         (file-deletes-to-sql
           (fmeta)
-          (->> (org-sql--fmeta-to-mql-update fmeta)
-               (org-sql--format-mql-update org-sql-db-config formatter-alist)))
-         (deletes-to-sql
+          (->> (org-sql--fmeta-to-hashes fmeta)
+               (--map (->> (org-sql--fmeta-to-mql-delete it)
+                           (org-sql--format-mql-delete org-sql-db-config formatter-alist)))))
+         (path-inserts-to-sql
           (fmeta)
-          (->> (org-sql--fmeta-to-mql-delete fmeta)
-               (org-sql--format-mql-delete org-sql-db-config formatter-alist))))
-      (->> (append (-map #'deletes-to-sql deletes)
-                   (-map #'updates-to-sql updates)
-                   (-mapcat #'inserts-to-sql inserts))
+          (->> (org-sql--group-fmetas-by-hash fmeta)
+               (--mapcat (org-sql--fmeta-to-mql-path-insert (car it) (cdr it)))
+               (--map (org-sql--format-mql-insert org-sql-db-config formatter-alist it))))
+         (path-deletes-to-sql
+          (fmeta)
+          (->> (org-sql--group-fmetas-by-hash fmeta)
+               (--mapcat (org-sql--fmeta-to-mql-path-delete (car it) (cdr it)))
+               (--map (org-sql--format-mql-delete org-sql-db-config formatter-alist it)))))
+      (->> (append (path-inserts-to-sql paths-to-insert)
+                   (path-deletes-to-sql paths-to-delete)
+                   (file-deletes-to-sql files-to-delete)
+                   (file-inserts-to-sql files-to-insert))
            (org-sql--format-sql-transaction mode)))))
+    ;;       ((&alist 'updates 'inserts 'deletes)
+    ;;        (org-sql--classify-fmeta disk-fmeta db-fmeta)))
+    ;; (cl-flet
+    ;;     ((inserts-to-sql
+    ;;       (fmeta)
+    ;;       (->> (org-sql--fmeta-get-fstate fmeta)
+    ;;            (org-sql--fstate-to-mql-insert)
+    ;;            (--map (org-sql--format-mql-insert org-sql-db-config formatter-alist it))))
+    ;;      (updates-to-sql
+    ;;       (fmeta)
+    ;;       (->> (org-sql--fmeta-to-mql-update fmeta)
+    ;;            (org-sql--format-mql-update org-sql-db-config formatter-alist)))
+    ;;      (deletes-to-sql
+    ;;       (fmeta)
+    ;;       (->> (org-sql--fmeta-to-mql-delete fmeta)
+    ;;            (org-sql--format-mql-delete org-sql-db-config formatter-alist))))
+    ;;   (->> (append (-map #'deletes-to-sql deletes)
+    ;;                (-map #'updates-to-sql updates)
+    ;;                (-mapcat #'inserts-to-sql inserts))
+    ;;        (org-sql--format-sql-transaction mode)))))
 
 (defun org-sql-dump-update-transactions ()
   "Dump the update transaction to a separate buffer."
@@ -2261,6 +2352,7 @@ uses the 'psql' client command in the background."
 (defun org-sql--send-sql (sql-cmd)
   "Execute SQL-CMD.
 The database connection will be handled transparently."
+  ;; (print sql-cmd)
   (-let* (((mode . keyvals) org-sql-db-config))
     (org-sql--case-mode mode
       (mysql
@@ -2276,6 +2368,7 @@ The database connection will be handled transparently."
 (defun org-sql--send-sql* (sql-cmd)
   "Execute SQL-CMD as a separate file input.
 The database connection will be handled transparently."
+  ;; (print sql-cmd)
   (if (not sql-cmd) '(0 . "")
     (-let* ((tmp-path (format "%sorg-sql-cmd-%s" (temporary-file-directory) (round (float-time))))
             ((mode . keyvals) org-sql-db-config))
@@ -2409,7 +2502,7 @@ Note that this currently only tests the existence of the schema's tables."
   (let ((sql-cmd (org-sql--format-mql-schema org-sql-db-config org-sql--mql-tables)))
     ;; (print sql-cmd)
     (let ((res (org-sql--send-sql sql-cmd)))
-      (print res)
+      ;; (print res)
       res)))
 
 (defun org-sql--delete-db ()
@@ -2464,8 +2557,11 @@ pushed and updated to the database."
 (defun org-sql-clear-db ()
   "Clear the Org-SQL database without deleting it."
   ;; only delete from files as we assume actions here cascade down
-  (->> (org-sql--mql-delete file_metadata nil)
+  (->> (org-sql--mql-delete file_hashes nil)
        (org-sql--format-mql-delete org-sql-db-config nil)
+       (list)
+       (org-sql--format-sql-transaction (car org-sql-db-config))
+       ;; (format "PRAGMA foreign_keys = ON; %s")
        (org-sql--send-sql)))
 
 (defun org-sql-reset-db ()
