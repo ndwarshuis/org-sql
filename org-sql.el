@@ -509,12 +509,6 @@ to store them. This is in addition to any properties specifified by
 (defconst org-sql--sqlserver-exe "sqlcmd"
   "The sqlserver client command.")
 
-;; (defconst org-sql--postgres-createdb-exe "createdb"
-;;   "The postgres 'create database' command.")
-
-;; (defconst org-sql--postgres-dropdb-exe "dropdb"
-;;   "The postgres 'drop database' command.")
-
 ;;;
 ;;; CUSTOMIZATION OPTIONS
 ;;;
@@ -696,7 +690,7 @@ TYPE must be one of 'boolean', 'text', 'enum', or 'integer'."
        (varchar ,@varchar)
        (t (error "Invalid type: %s" ,type)))))
 
-(defmacro org-sql--case-mode (mode &rest alist-forms)
+(defmacro org-sql--case-mode (config &rest alist-forms)
   "Execute one of ALIST-FORMS depending on MODE.
 TYPE must be one of 'sqlite' or 'postgres'."
   (declare (indent 1))
@@ -707,12 +701,20 @@ TYPE must be one of 'sqlite' or 'postgres'."
                     alist-forms)))
     (unless (-none? #'null keys)
       (error "Must provide form for all modes"))
-    `(cl-case ,mode
+    `(cl-case (car ,config)
        (mysql ,@mysql)
        (postgres ,@postgres)
        (sqlite ,@sqlite)
        (sqlserver ,@sqlserver)
-       (t (error "Invalid mode: %s" ,mode)))))
+       (t (error "Invalid mode: %s" (car ,config))))))
+
+(defmacro org-sql--with-config-keys (keys config &rest body)
+  "Execute BODY with keys bound to KEYS from CONFIG.
+CONFIG is the `org-sql-db-config' list and KEYS are a list of
+keys/symbols like those from the &plist switch from `-let'."
+  (declare (indent 2))
+  `(-let (((&plist ,@keys) (cdr ,config)))
+     ,@body))
 
 ;; ensure integrity of the metaschema
 
@@ -981,7 +983,7 @@ Only the :lb-config and :headline keys will be changed."
 COLS are the column names as symbols used to obtain OUT.
 CONFIG is the `org-sql-db-config' list."
   (unless (equal out "")
-    (let ((sep (org-sql--case-mode (car config)
+    (let ((sep (org-sql--case-mode config
                  (mysql "\t")
                  ((postgres sqlite sqlserver) "|"))))
       (->> (s-trim out)
@@ -993,7 +995,7 @@ CONFIG is the `org-sql-db-config' list."
 
 ;; formatting function tree
 
-(defun org-sql--compile-mql-format-function (mode type)
+(defun org-sql--compile-mql-format-function (config type)
   "Return SQL value formatting function.
 The returned function will depend on the MODE and TYPE."
   (cl-flet
@@ -1006,7 +1008,7 @@ The returned function will depend on the MODE and TYPE."
              (s-replace-regexp "\n" newline))))
     ;; TODO this could be way more elegant (build the lambda with forms)
     (let* ((esc-newline
-            (org-sql--case-mode mode
+            (org-sql--case-mode config
               (mysql "\\\\n")
               (postgres "'||chr(10)||'")
               (sqlite "'||char(10)||'")
@@ -1014,13 +1016,13 @@ The returned function will depend on the MODE and TYPE."
               ;; for the carriage return (alas...newline war)
               (sqlserver "+Char(10)+")))
            (esc-single-quote
-            (org-sql--case-mode mode
+            (org-sql--case-mode config
               (mysql "\\\\'")
               ((postgres sqlite sqlserver) "''")))
            (formatter
             (org-sql--case-type type
               (boolean
-               (org-sql--case-mode mode
+               (org-sql--case-mode config
                  ((mysql postgres) (lambda (b) (if (= b 1) "TRUE" "FALSE")))
                  ((sqlite sqlserver) (lambda (b) (if (= b 1) "1" "0")))))
               ;; TODO refactor this nonsense...
@@ -1037,7 +1039,7 @@ The returned function will depend on the MODE and TYPE."
                  (quote-string (escape-string esc-newline esc-single-quote s)))))))
       (lambda (s) (if s (funcall formatter s) "NULL")))))
 
-(defun org-sql--compile-mql-schema-formatter-alist (mode mql-tables)
+(defun org-sql--compile-mql-schema-formatter-alist (config mql-tables)
   "Return an alist of formatting functions for MQL-TABLES.
 MODE is the SQL mode. The alist will mirror MSL schema except that the
 car for each column will be a formatting function."
@@ -1045,7 +1047,7 @@ car for each column will be a formatting function."
       ((get-type-function
         (mql-column)
         (-let* (((name . (&plist :type)) mql-column))
-          (cons name (org-sql--compile-mql-format-function mode type)))))
+          (cons name (org-sql--compile-mql-format-function config type)))))
     (-let* (((tbl-name . (&alist 'columns)) mql-tables))
       (cons tbl-name (-map #'get-type-function columns)))))
 
@@ -1071,7 +1073,7 @@ separated by SEP."
 
 (defun org-sql--format-mql-table-name (config tbl-name)
   "Return TBL-NAME as a formatted string according to CONFIG."
-  (org-sql--case-mode (car config)
+  (org-sql--case-mode config
     ;; these are straightforward since they don't use namespaces
     ((mysql sqlite)
      (symbol-name tbl-name))
@@ -1129,17 +1131,16 @@ MQL-TABLES. CONFIG is the `org-sql-db-config'."
 CONFIG is the `org-sql-db-config' list and TBL-NAME is the name
 of the table."
   (-let* (((column-name . (&plist :type)) mql-column)
-          (column-name* (org-sql--format-mql-column-name column-name))
-          (mode (car config)))
+          (column-name* (org-sql--format-mql-column-name column-name)))
     ;; TODO use ntext for sql server instead of text?
     (org-sql--case-type type
       (boolean
-       (org-sql--case-mode mode
+       (org-sql--case-mode config
          ((mysql postgres) "BOOLEAN")
          (sqlite "INTEGER")
          (sqlserver "BIT")))
       (char
-       (org-sql--case-mode mode
+       (org-sql--case-mode config
          ((mysql sqlserver)
           (-let (((&plist :length) (cdr mql-column)))
             (if length (format "CHAR(%s)" length) "CHAR")))
@@ -1148,7 +1149,7 @@ of the table."
          ;; length-checking"
          ((postgres sqlite) "TEXT")))
       (enum
-       (org-sql--case-mode mode
+       (org-sql--case-mode config
          (mysql (->> (plist-get (cdr mql-column) :allowed)
                      (--map (format "'%s'" it))
                      (s-join ",")
@@ -1164,7 +1165,7 @@ of the table."
       (text
        "TEXT")
       (varchar
-       (org-sql--case-mode mode
+       (org-sql--case-mode config
          ((mysql sqlserver)
           (-let (((&plist :length) (cdr mql-column)))
             (if length (format "VARCHAR(%s)" length) "VARCHAR")))
@@ -1201,7 +1202,7 @@ foreign key constraint. CONFIG is the `org-sql-db-config' list."
        (format-foreign
         (keyvals)
         ;; TODO shouldn't need 'on update' anymore
-        (-let* (((&plist :ref :keys :parent-keys :on_delete :on_update) keyvals)
+        (-let* (((&plist :ref :keys :parent-keys :on_delete) keyvals)
                 (ref* (org-sql--format-mql-table-name config ref))
                 (keys* (->> keys (-map #'org-sql--format-mql-column-name) (s-join ",")))
                 (parent-keys* (->> parent-keys
@@ -1214,13 +1215,8 @@ foreign key constraint. CONFIG is the `org-sql-db-config' list."
                                 (no-action "NO ACTION")
                                 (cascade "CASCADE"))
                               (format "ON DELETE %s" it)))
-                (on-update* (-some--> on_update
-                              (cl-case it
-                                (no-action "NO ACTION")
-                                (cascade "CASCADE"))
-                              (format "ON UPDATE %s" it)))
                 (deferrable (when defer "DEFERRABLE INITIALLY DEFERRED")))
-          (->> (list foreign-str on-delete* on-update* deferrable)
+          (->> (list foreign-str on-delete* deferrable)
                (-non-nil)
                (s-join " "))))
        (format-constraint
@@ -1235,13 +1231,13 @@ foreign key constraint. CONFIG is the `org-sql-db-config' list."
 CONFIG is the `org-sql-db-config' list."
   (-let* (((tbl-name . (&alist 'columns 'constraints)) mql-table)
           (tbl-name* (org-sql--format-mql-table-name config tbl-name))
-          (defer (org-sql--case-mode (car config)
+          (defer (org-sql--case-mode config
                    ((mysql sqlserver) nil)
                    ((postgres sqlite) t)))
-          (fmt (org-sql--case-mode (car config)
+          (fmt (org-sql--case-mode config
                  ((mysql postgres sqlite) "CREATE TABLE IF NOT EXISTS %s (%s);")
                  (sqlserver
-                  (-let (((&plist :database) (cdr config)))
+                  (org-sql--with-config-keys (:database) config
                     (format "IF NOT EXISTS (SELECT * FROM sys.tables where name = '%%1$s') CREATE TABLE %%1$s (%%2$s);" database))))))
     (->> (org-sql--format-mql-schema-table-constraints config constraints defer)
          (append (org-sql--format-mql-schema-columns config tbl-name columns))
@@ -1254,7 +1250,7 @@ CONFIG is the `org-sql-db-config' list."
   (let ((create-tables (->> mql-tables
                             (--map (org-sql--format-mql-schema-table config it))
                             (s-join ""))))
-    (org-sql--case-mode (car config)
+    (org-sql--case-mode config
       (postgres
        (let ((create-types (->> (org-sql--format-mql-schema-enum-types config mql-tables)
                                 (s-join ""))))
@@ -1282,17 +1278,17 @@ FORMATTER-ALIST is an alist of functions given by
 
 ;; update
 
-(defun org-sql--format-mql-update (config formatter-alist mql-update)
-  "Return SQL string for MQL-UPDATE.
-FORMATTER-ALIST is an alist of functions given by
-`org-sql--compile-mql-format-function'. CONFIG is the
-`org-sql-db-config' list."
-  (-let* (((tbl-name . (&alist 'set 'where)) mql-update)
-          (tbl-name* (org-sql--format-mql-table-name config tbl-name))
-          (formatter-list (alist-get tbl-name formatter-alist))
-          (set* (org-sql--format-mql-plist formatter-list "," set))
-          (where* (org-sql--format-mql-plist formatter-list " and " where)))
-    (format "UPDATE %s SET %s WHERE %s;" tbl-name* set* where*)))
+;; (defun org-sql--format-mql-update (config formatter-alist mql-update)
+;;   "Return SQL string for MQL-UPDATE.
+;; FORMATTER-ALIST is an alist of functions given by
+;; `org-sql--compile-mql-format-function'. CONFIG is the
+;; `org-sql-db-config' list."
+;;   (-let* (((tbl-name . (&alist 'set 'where)) mql-update)
+;;           (tbl-name* (org-sql--format-mql-table-name config tbl-name))
+;;           (formatter-list (alist-get tbl-name formatter-alist))
+;;           (set* (org-sql--format-mql-plist formatter-list "," set))
+;;           (where* (org-sql--format-mql-plist formatter-list " and " where)))
+;;     (format "UPDATE %s SET %s WHERE %s;" tbl-name* set* where*)))
 
 ;; delete
 
@@ -1327,7 +1323,7 @@ FORMATTER-ALIST is an alist of functions given by
 
 ;;; SQL string -> SQL string formatting functions
 
-(defun org-sql--format-sql-transaction (mode sql-statements)
+(defun org-sql--format-sql-transaction (config sql-statements)
   "Return SQL string for a transaction.
 SQL-STATEMENTS is a list of SQL statements to be included in the
 
@@ -1337,7 +1333,7 @@ transaction. MODE is the SQL mode."
                              (format "BEGIN;%sCOMMIT;"))))
     ;; TODO might want to add performance options here
     (when bare-transaction
-      (org-sql--case-mode mode
+      (org-sql--case-mode config
         (sqlite (concat "PRAGMA foreign_keys = ON;" bare-transaction))
         ;; TODO pretty sure that sql server actually needs the full "BEGIN
         ;; TRANSACTION"
@@ -1987,18 +1983,6 @@ FSTATE is a list given by `org-sql--to-fstate'."
       (org-sql--add-mql-insert-headlines fstate)
       (reverse)))
 
-;; (defun org-sql--fmeta-to-mql-update (fmeta)
-;;   "Return MQL-update for FMETA.
-;; FMETA is a list given by `org-sql--to-fmeta'."
-;;   (-let (((&plist :disk-path :file-hash) fmeta))
-;;     (org-sql--mql-update file_metadata (:file_path disk-path) (:file_hash file-hash))))
-
-;; (defun org-sql--fmeta-to-mql-delete (fmeta)
-;;   "Return MQL-delete for FMETA.
-;; FMETA is a list given by `org-sql--to-fmeta'."
-;;   (-let (((&plist :file-hash) fmeta))
-;;     (org-sql--mql-delete file_hashes (:file_hash file-hash))))
-
 (defun org-sql--fmeta-to-mql-delete (file-hash)
   (org-sql--mql-delete file_hashes (:file_hash file-hash)))
 
@@ -2014,82 +1998,6 @@ FSTATE is a list given by `org-sql--to-fstate'."
 
 ;; fmeta function (see `org-sql--to-fmeta')
 
-(defun org-sql--merge-fmeta (disk-fmeta db-fmeta)
-  "Return a list of merged fmeta.
-Each member of the returned list and the arguments is a list
-given by `org-sql--to-fmeta'. DISK-FMETA is fmeta for org files
-on disk and DB-FMETA is fmeta for files in the database. This
-function will merge the two inputs such that those with common
-hashes will be considered equal and the final list will have only
-unique hashes."
-  (cl-flet*
-      ((hash<
-        (a b)
-        (-let (((&plist :file-hash a-hash) a)
-               ((&plist :file-hash b-hash) b))
-          (string< a-hash b-hash)))
-       (combine
-        (a b)
-        (-let (((&plist :disk-path :file-hash) a)
-               ((&plist :db-path :file-hash) b))
-          (org-sql--to-fmeta disk-path db-path file-hash)))
-       (merge
-        (as bs)
-        (let (acc)
-          (while (or as bs)
-            (pcase (cons as bs)
-              (`(,as* . nil)
-               (setq acc (append (nreverse as*) acc)
-                     as nil))
-              (`(nil . ,bs*)
-               (setq acc (append (nreverse bs*) acc)
-                     bs nil))
-              (`((,a . ,as*) . (,b . ,bs*))
-               (cond
-                ((hash< a b)
-                 (setq acc (cons a acc)
-                       as as*))
-                ((hash< b a)
-                 (setq acc (cons b acc)
-                       bs bs*))
-                (t
-                 (setq acc (cons (combine a b) acc)
-                       as as*
-                       bs bs*))))))
-          acc)))
-    (merge (sort disk-fmeta #'hash<) (sort db-fmeta #'hash<))))
-
-(defun org-sql--classify-fmeta (disk-fmeta db-fmeta)
-  "Return a list of classified file actions.
-DISK-FMETA and DB-FMETA are lists of file cells where each member is like
-\(md5 . filepath). Return an alist where the keys represent the
-actions to take on the files on disk/in the database. The keys of
-the alist will be 'noops', 'inserts', 'updates', and 'deletes'."
-  ;; TODO all but the 'update' operation can be done just be checking the hashes
-  (cl-flet
-      ((get-path
-        (key alist)
-        (alist-get key alist nil nil #'equal))
-       (get-group
-        (transaction)
-        (-let (((&plist :disk-path :db-path) transaction))
-          ;; for a given md5, check the corresponding path given for its disk
-          ;; location and in the db to determine the action to take
-          (cond
-           ;; if paths are equal, do nothing
-           ((equal disk-path db-path) 'noops)
-           ;; if paths non-nil but unequal, assume disk path changed and update
-           ((and disk-path db-path) 'updates)
-           ;; if path on in db doesn't exist, assume new file and insert
-           ((and disk-path (not db-path) 'inserts))
-           ;; if path on on disk doesn't exist, assume removed file and delete
-           ((and (not disk-path) db-path) 'deletes)
-           ;; at least one path should be non-nil, else there is a problem
-           (t (error "Transaction classifier: this should not happen"))))))
-    (->> (org-sql--merge-fmeta disk-fmeta db-fmeta)
-         (-group-by #'get-group))))
-
-;; NEW FMETA GROUPING FUNCTIONS
 (defun org-sql--partition-fmeta (disk-fmeta db-fmeta)
   (let (hash-in-db paths-dont-match files-to-insert paths-to-insert
                    paths-to-delete cur-disk cur-db n)
@@ -2127,6 +2035,28 @@ the alist will be 'noops', 'inserts', 'updates', and 'deletes'."
 
 (defun org-sql--fmeta-to-hashes (fmetas)
   (--map (plist-get it :file-hash) fmetas))
+
+;; IO helper functions
+
+(defmacro org-sql--on-success (first-form success-form error-form)
+  "Run form depending exit code.
+FIRST-FORM must return a cons cell like (RC . OUT) where RC is
+the return code and OUT is the output string (stdout and/or
+stderr). SUCCESS-FORM will be run if RC is 0 and ERROR-FORM will
+be run otherwise. In either case, OUT will be bound to the symbol
+'it-out'."
+  (declare (indent 1))
+  (let ((r (make-symbol "rc")))
+    `(-let (((,r . it-out) ,first-form))
+       (if (= 0 ,r) ,success-form ,error-form))))
+
+(defmacro org-sql--on-success* (first-form success-form)
+  "Run form on successful exit code.
+This is like `org-sql--on-success' but with '(error it-out)'
+supplied for ERROR-FORM. FIRST-FORM and SUCCESS-FORM have the
+same meaning."
+  (declare (indent 1))
+  `(org-sql--on-success ,first-form ,success-form (error it-out)))
 
 ;;;
 ;;; STATEFUL FUNCTIONS
@@ -2170,9 +2100,9 @@ Each fmeta will have it's :db-path set to nil. Only files in
   (cl-flet
       ((get-md5
         (fp)
-        (-let (((rc . hash) (org-sql--run-command "md5sum" fp)))
-          (if (= 0 rc) (car (s-split-up-to " " hash 1))
-            (error "Could not get md5"))))
+        (org-sql--on-success (org-sql--run-command "md5sum" fp)
+          (car (s-split-up-to " " it-out 1))
+          (error "Could not get md5")))
        (expand-if-dir
         (fp)
         (if (not (file-directory-p fp)) `(,fp)
@@ -2183,7 +2113,6 @@ Each fmeta will have it's :db-path set to nil. Only files in
            (-map #'expand-file-name)
            (-filter #'file-exists-p)
            (-uniq)
-           ;; (--map (org-sql--to-fmeta it nil (get-md5 it)))))))
            (--map (org-sql--to-fmeta it (get-md5 it)))))))
 
 (defun org-sql--db-get-fmeta ()
@@ -2191,13 +2120,11 @@ Each fmeta will have it's :db-path set to nil. Only files in
 Each fmeta will have it's :disk-path set to nil."
   (-let* ((columns '(:file_path :file_hash))
           ;; TODO add compile check for this
-          (sql-select (org-sql--format-mql-select org-sql-db-config nil `(file_metadata (columns ,@columns))))
-          ((rc . out) (org-sql--send-sql sql-select)))
-    (if (/= 0 rc) (error out)
-      (->> (s-trim out)
+          (sql-select (org-sql--format-mql-select org-sql-db-config nil `(file_metadata (columns ,@columns)))))
+    (org-sql--on-success* (org-sql--send-sql sql-select)
+      (->> (s-trim it-out)
            (org-sql--parse-output-to-plist org-sql-db-config columns)
            (--map (-let (((&plist :file_hash h :file_path p) it))
-                    ;; (org-sql--to-fmeta nil p h)))))))
                     (org-sql--to-fmeta p h)))))))
 
 (defun org-sql--get-transactions ()
@@ -2209,7 +2136,7 @@ state as the orgfiles on disk."
           (mode (car org-sql-db-config))
           (formatter-alist
            (->> org-sql--mql-tables
-                (--map (org-sql--compile-mql-schema-formatter-alist mode it))))
+                (--map (org-sql--compile-mql-schema-formatter-alist org-sql-db-config it))))
           ((&alist 'files-to-insert
                    'files-to-delete
                    'paths-to-insert
@@ -2241,27 +2168,7 @@ state as the orgfiles on disk."
                    (path-deletes-to-sql paths-to-delete)
                    (file-deletes-to-sql files-to-delete)
                    (file-inserts-to-sql files-to-insert))
-           (org-sql--format-sql-transaction mode)))))
-    ;;       ((&alist 'updates 'inserts 'deletes)
-    ;;        (org-sql--classify-fmeta disk-fmeta db-fmeta)))
-    ;; (cl-flet
-    ;;     ((inserts-to-sql
-    ;;       (fmeta)
-    ;;       (->> (org-sql--fmeta-get-fstate fmeta)
-    ;;            (org-sql--fstate-to-mql-insert)
-    ;;            (--map (org-sql--format-mql-insert org-sql-db-config formatter-alist it))))
-    ;;      (updates-to-sql
-    ;;       (fmeta)
-    ;;       (->> (org-sql--fmeta-to-mql-update fmeta)
-    ;;            (org-sql--format-mql-update org-sql-db-config formatter-alist)))
-    ;;      (deletes-to-sql
-    ;;       (fmeta)
-    ;;       (->> (org-sql--fmeta-to-mql-delete fmeta)
-    ;;            (org-sql--format-mql-delete org-sql-db-config formatter-alist))))
-    ;;   (->> (append (-map #'deletes-to-sql deletes)
-    ;;                (-map #'updates-to-sql updates)
-    ;;                (-mapcat #'inserts-to-sql inserts))
-    ;;        (org-sql--format-sql-transaction mode)))))
+           (org-sql--format-sql-transaction org-sql-db-config)))))
 
 (defun org-sql-dump-update-transactions ()
   "Dump the update transaction to a separate buffer."
@@ -2271,12 +2178,12 @@ state as the orgfiles on disk."
 
 ;;; SQL command wrappers
 
-(defun org-sql--exec-mysql-command-no-db (config-keys &rest args)
+(defun org-sql--exec-mysql-command-no-db (config &rest args)
   "Execute a mysql command with ARGS.
 CONFIG-KEYS is the plist component if `org-sql-db-config'.
 The connection options for the postgres server. will be handled here."
-  (-let* (((&plist :hostname :port :username :password) config-keys)
-          (h (-some->> hostname (list "-h")))
+  (org-sql--with-config-keys (:hostname :port :username :password) config
+    (let ((h (-some->> hostname (list "-h")))
           (p (-some->> port (list "-P")))
           (u (-some->> username (list "-u")))
           ;; TODO add a switch for this?
@@ -2286,103 +2193,96 @@ The connection options for the postgres server. will be handled here."
           (process-environment
            (if (not password) process-environment
              (cons (format "MYSQL_PWD=%s" password) process-environment))))
-    (apply #'org-sql--run-command org-sql--mysql-exe
-           (append h p u protocol-arg batch-args args))))
+      (apply #'org-sql--run-command org-sql--mysql-exe
+             (append h p u protocol-arg batch-args args)))))
 
-(defun org-sql--exec-mysql-command (config-keys &rest args)
+(defun org-sql--exec-mysql-command (config &rest args)
   "Execute a mysql command with ARGS.
 CONFIG-KEYS is the plist component if `org-sql-db-config'.
 The connection options for the postgres server. will be handled here."
-  (-let* (((&plist :database) config-keys))
-    (apply #'org-sql--exec-mysql-command-no-db config-keys "-D" database args)))
+  (org-sql--with-config-keys (:database) config
+    (apply #'org-sql--exec-mysql-command-no-db config "-D" database args)))
 
-(defun org-sql--exec-sqlite-command (config-keys &rest args)
+(defun org-sql--exec-sqlite-command (config &rest args)
   "Execute a sqlite command with ARGS.
-CONFIG-KEYS is the plist component if `org-sql-db-config'."
-  (-let (((&plist :path) config-keys))
+CONFIG is the plist component if `org-sql-db-config'."
+  (org-sql--with-config-keys (:path) config
     (apply #'org-sql--run-command org-sql--sqlite-exe (cons path args))))
 
-(defun org-sql--exec-postgres-command-sub (exe config-keys &rest args)
+(defun org-sql--exec-postgres-command-sub (config &rest args)
   "Execute a postgres command with ARGS.
-CONFIG-KEYS is the plist component if `org-sql-db-config'. EXE is
-a symbol for the executate to run and is one of 'psql',
-'createdb', or 'dropdb'. The connection options for the postgres
-server. will be handled here."
-  (-let* (((&plist :hostname :port :username :password) config-keys)
-          (h (-some->> hostname (list "-h")))
+CONFIG-KEYS is a list like `org-sql-db-config'."
+  (org-sql--with-config-keys (:hostname :port :username :password) config
+    (let ((h (-some->> hostname (list "-h")))
           (p (-some->> port (list "-p")))
           (u (-some->> username (list "-U")))
           (w '("-w"))
           (process-environment
            (if (not password) process-environment
-             (cons (format "PGPASSWORD=%s" password) process-environment)))
-          (exe* (cl-case exe
-                  (psql org-sql--psql-exe)
-                  (createdb org-sql--postgres-createdb-exe)
-                  (dropdb org-sql--postgres-dropdb-exe)
-                  (t (error "Invalid postgres exe: %s" exe)))))
-    (apply #'org-sql--run-command exe* (append h p u w args))))
+             (cons (format "PGPASSWORD=%s" password) process-environment))))
+      (apply #'org-sql--run-command org-sql--psql-exe (append h p u w args)))))
 
-(defun org-sql--exec-postgres-command (config-keys &rest args)
+(defun org-sql--exec-postgres-command (config &rest args)
   "Execute a postgres command with ARGS.
 CONFIG-KEYS is the plist component if `org-sql-db-config'. Note this
 uses the 'psql' client command in the background."
-  (-let* (((&plist :database) config-keys)
-          (d (-some->> database (list "-d")))
+  (org-sql--with-config-keys (:database) config
+    (let ((d (-some->> database (list "-d")))
           (f (list "-At")))
-    (apply #'org-sql--exec-postgres-command-sub 'psql config-keys (append d f args))))
+      (apply #'org-sql--exec-postgres-command-sub config (append d f args)))))
 
-(defun org-sql--exec-sqlserver-command-no-db (config-keys &rest args)
-  (-let* (((&plist :hostname :port :username :password) config-keys)
-          ;; TODO support more than just tcp connections
-          (S (list "-S" (format "tcp:%s,%s" hostname port)))
+(defun org-sql--exec-sqlserver-command-no-db (config &rest args)
+  (org-sql--with-config-keys (:hostname :port :username :password) config
+    ;; TODO support more than just tcp connections
+    (let ((S (list "-S" (format "tcp:%s,%s" hostname port)))
           (U (-some->> username (list "-U")))
           (sep '("-s" "|"))
           (no-headers '("-h" "-1"))
           (process-environment
            (if (not password) process-environment
              (cons (format "SQLCMDPASSWORD=%s" password) process-environment))))
-    (apply #'org-sql--run-command org-sql--sqlserver-exe
-           (append S U no-headers sep args))))
+      (apply #'org-sql--run-command org-sql--sqlserver-exe
+             (append S U no-headers sep args)))))
 
-(defun org-sql--exec-sqlserver-command (config-keys &rest args)
-  (-let* (((&plist :database) config-keys))
+(defun org-sql--exec-sqlserver-command (config &rest args)
+  (org-sql--with-config-keys (:database) config
     (apply #'org-sql--exec-sqlserver-command-no-db config-keys "-d" database args)))
 
 (defun org-sql--send-sql (sql-cmd)
   "Execute SQL-CMD.
 The database connection will be handled transparently."
-  ;; (print sql-cmd)
-  (-let* (((mode . keyvals) org-sql-db-config))
-    (org-sql--case-mode mode
-      (mysql
-       (org-sql--exec-mysql-command keyvals "-e" sql-cmd))
-      (postgres
-       (org-sql--exec-postgres-command keyvals "-c" sql-cmd))
-      (sqlite
-       (org-sql--exec-sqlite-command keyvals sql-cmd))
-      (sqlserver
-       (org-sql--exec-sqlserver-command keyvals "-Q" (format "set nocount on; %s" sql-cmd))))))
+  (org-sql--case-mode org-sql-db-config
+    (mysql
+     (org-sql--exec-mysql-command org-sql-db-config "-e" sql-cmd))
+    (postgres
+     (org-sql--exec-postgres-command org-sql-db-config "-c" sql-cmd))
+    (sqlite
+     (org-sql--exec-sqlite-command org-sql-db-config sql-cmd))
+    (sqlserver
+     (let ((cmd (format "set nocount on; %s" sql-cmd)))
+       (org-sql--exec-sqlserver-command org-sql-db-config "-Q" cmd)))))
 
-;; TODO is this necessary now that I am not using a shell to execute?
 (defun org-sql--send-sql* (sql-cmd)
   "Execute SQL-CMD as a separate file input.
 The database connection will be handled transparently."
-  ;; (print sql-cmd)
+  ;; TODO I don't think there are cases where I want to send a nil cmd, so
+  ;; nil should be an error
   (if (not sql-cmd) '(0 . "")
-    (-let* ((tmp-path (format "%sorg-sql-cmd-%s" (temporary-file-directory) (round (float-time))))
-            ((mode . keyvals) org-sql-db-config))
+    (-let ((tmp-path (->> (round (float-time))
+                          (format "%sorg-sql-cmd-%s" (temporary-file-directory)))))
       (f-write sql-cmd 'utf-8 tmp-path)
       (let ((res
-             (org-sql--case-mode mode
+             (org-sql--case-mode org-sql-db-config
                (mysql
-                (org-sql--exec-mysql-command keyvals "-e" (format "source %s" tmp-path)))
+                (org-sql--send-sql (format "source %s" tmp-path)))
                (postgres
-                (org-sql--exec-postgres-command keyvals "-f" tmp-path))
+                (org-sql--send-sql (format "\\i %s" tmp-path)))
                (sqlite
-                (org-sql--exec-sqlite-command keyvals (format ".read %s" tmp-path)))
+                (org-sql--send-sql (format ".read %s" tmp-path)))
                (sqlserver
-                (org-sql--exec-sqlserver-command keyvals "-i" tmp-path)))))
+                ;; I think ":r tmp-path" should work here to make this analogous
+                ;; with the others
+                (org-sql--exec-sqlserver-command org-sql-db-config "-i" tmp-path)))))
         (f-delete tmp-path)
         res))))
 
@@ -2393,145 +2293,134 @@ The database connection will be handled transparently."
   ;; this is a bit weird because "the database" is used at different levels
   ;; for each dbms
   (-let (((mode . keyvals) org-sql-db-config))
-    (org-sql--case-mode mode
+    (org-sql--case-mode org-sql-db-config
       ;; connect to the server (without connecting to the db) and check that
       ;; the db exists
       (mysql
-       (-let* (((&plist :database) keyvals)
-               (cmd (format "SHOW DATABASES LIKE '%s';" database))
-               ((rc . out) (org-sql--exec-mysql-command-no-db keyvals "-e" cmd)))
-         (if (/= 0 rc) (error out)
-           (equal database (car (s-lines out))))))
+       (org-sql--with-config-keys (:database) org-sql-db-config
+         (let ((cmd (format "SHOW DATABASES LIKE '%s';" database)))
+           (org-sql--on-success* (org-sql--exec-mysql-command-no-db keyvals "-e" cmd)
+             (equal database (car (s-lines it-out)))))))
       ;; connect to the server and the db and check to see that the desired
       ;; schema exists in the database
       (postgres
-       (-let* (((&plist :database) keyvals)
-               ((&plist :schema :database) keyvals)
-               ((rc . out) (org-sql--exec-postgres-command keyvals "-c" "\\dn")))
-         (if (/= 0 rc) (error out)
-           (--> (s-split "\n" out)
-                (--map (s-split "|" it) it)
-                ;; TODO this (or schema "public") thing is silly and should be
-                ;; refactored into something civilized (see other instances below)
-                (--find (and (equal (car it) (or schema "public"))
-                             (equal (cadr it) database))
-                        it)
-                (and it t)))))
+       (org-sql--with-config-keys (:database :schema) org-sql-db-config
+         (org-sql--on-success* (org-sql--send-sql "\\dn")
+           (--> (s-split "\n" it-out)
+             (--map (s-split "|" it) it)
+             ;; TODO this (or schema "public") thing is silly and should be
+             ;; refactored into something civilized (see other instances below)
+             (--find (and (equal (car it) (or schema "public"))
+                          (equal (cadr it) database))
+                     it)
+             (and it t)))))
       ;; check to see that the db file exists
       (sqlite
-       (-let (((&plist :path) keyvals))
+       (org-sql--with-config-keys (:path) org-sql-db-config
          (file-exists-p path)))
       (sqlserver
-       (-let* (((&plist :schema :database) keyvals)
-               (cmd "select name from [org_sql].sys.schemas;")
-               ((rc . out) (org-sql--exec-sqlserver-command keyvals "-Q" cmd)))
-         (if (/= 0 rc) (error out)
-           (--> (s-split "\n" out)
-                (--map (s-split "|" it) it)
-                ;; TODO get the default schema name and check that
-                (--find (and (equal (car it) (or schema "dbo"))
-                             (equal (cadr it) database))
-                        it)
-                (and it t))))))))
+       (org-sql--with-config-keys (:database :schema) org-sql-db-config
+         (let ((cmd "select name from [org_sql].sys.schemas;"))
+           (org-sql--on-success* (org-sql--send-sql keyvals "-Q" cmd)
+             (--> (s-split "\n" it-out)
+               (--map (s-split "|" it) it)
+               ;; TODO get the default schema name and check that
+               (--find (and (equal (car it) (or schema "dbo"))
+                            (equal (cadr it) database))
+                       it)
+               (and it t)))))))))
 
 (defun org-sql--db-has-valid-schema ()
   "Return t if the configured database has a valid schema.
 Note that this currently only tests the existence of the schema's tables."
   (-let* ((table-names (--map (symbol-name (car it)) org-sql--mql-tables))
           ((sql-cmd parse-fun)
-           (org-sql--case-mode (car org-sql-db-config)
+           (org-sql--case-mode org-sql-db-config
              (mysql
               (list "SHOW TABLES;" (lambda (s) (s-lines (s-trim s)))))
              (postgres
-              (-let* (((&plist :schema) (cdr org-sql-db-config))
-                      (schema* (or schema "public"))
-                      (cmd (format "\\dt %s.*" schema*)))
-                (list cmd
-                      (lambda (s)
-                        (->> (s-trim s)
-                             (s-lines)
-                             (--map (s-split "|" it))
-                             (--filter (equal schema* (car it)))
-                             (--map (cadr it)))))))
+              (org-sql--with-config-keys (:schema) org-sql-db-config
+                (let* ((schema* (or schema "public"))
+                       (cmd (format "\\dt %s.*" schema*)))
+                  (list cmd
+                        (lambda (s)
+                          (->> (s-trim s)
+                               (s-lines)
+                               (--map (s-split "|" it))
+                               (--filter (equal schema* (car it)))
+                               (--map (cadr it))))))))
              (sqlite
               (list ".tables"
                     (lambda (s)
                       (--mapcat (s-split " " it t) (s-lines s)))))
              (sqlserver
-              (-let* (((&plist :schema) (cdr org-sql-db-config))
-                      (schema* (or schema "dbo"))
-                      (cmd (format "SELECT schema_name(schema_id), name FROM sys.tables;" schema*)))
-                (list cmd
-                      (lambda (s)
-                        (->> (s-trim s)
-                             (s-lines)
-                             (--map (s-split "|" it))
-                             (--filter (equal schema* (car it)))
-                             (--map (cadr it)))))))))
-          ((rc . out) (org-sql--send-sql sql-cmd)))
-    (if (/= 0 rc) (error out)
-      (org-sql--sets-equal table-names (funcall parse-fun out) :test #'equal))))
+              (org-sql--with-config-keys (:schema) org-sql-db-config
+                (let* ((schema* (or schema "dbo"))
+                       (cmd (format "SELECT schema_name(schema_id), name FROM sys.tables;" schema*)))
+                  (list cmd
+                        (lambda (s)
+                          (->> (s-trim s)
+                               (s-lines)
+                               (--map (s-split "|" it))
+                               (--filter (equal schema* (car it)))
+                               (--map (cadr it)))))))))))
+    (org-sql--on-success* (org-sql--send-sql sql-cmd)
+      (org-sql--sets-equal table-names (funcall parse-fun it-out) :test #'equal))))
 
 (defun org-sql--db-create ()
   "Create the configured database."
-  (-let (((mode . keyvals) org-sql-db-config))
-    (org-sql--case-mode mode
-      (sqlite
-       ;; this is a silly command that should work on all platforms (eg doesn't
-       ;; require `touch' to make an empty file)
-       (org-sql--exec-sqlite-command keyvals ".schema"))
-      ;; noop since we shouldn't assume we have permission to create the db
-      (mysql
-       (cons 0 ""))
-       ;; (error "Must manually create MySQL database as root"))
-      (postgres
-       (-let* (((&plist :database) keyvals)
-               ((&plist :schema) keyvals)
-               (cmd (format "CREATE SCHEMA IF NOT EXISTS %s;" (or schema "public"))))
-         (org-sql--exec-postgres-command keyvals "-c" cmd)))
-      (sqlserver
-       (-let* (((&plist :database :schema) keyvals))
-         (when schema
-           (let* ((select (format "SELECT * FROM sys.schemas WHERE name = N'%s'" schema))
-                  (create (format "CREATE SCHEMA %s" schema))
-                  (cmd (format "IF NOT EXISTS (%s) EXEC('%s');" select create)))
-             (org-sql--exec-sqlserver-command keyvals "-Q" cmd))))))))
+  (org-sql--case-mode org-sql-db-config
+    (sqlite
+     ;; this is a silly command that should work on all platforms (eg doesn't
+     ;; require `touch' to make an empty file)
+     (org-sql--exec-sqlite-command org-sql-db-config ".schema"))
+    ;; noop since we shouldn't assume we have permission to create the db
+    (mysql
+     (cons 0 ""))
+    ;; (error "Must manually create MySQL database as root"))
+    (postgres
+     (org-sql--with-config-keys (:schema) org-sql-db-config
+       (let ((cmd (format "CREATE SCHEMA IF NOT EXISTS %s;" (or schema "public"))))
+         (org-sql--send-sql cmd))))
+    (sqlserver
+     (org-sql--with-config-keys (:schema) org-sql-db-config
+       (when schema
+         (let* ((select (format "SELECT * FROM sys.schemas WHERE name = N'%s'" schema))
+                (create (format "CREATE SCHEMA %s" schema))
+                (cmd (format "IF NOT EXISTS (%s) EXEC('%s');" select create)))
+           (org-sql--send-sql cmd)))))))
 
 (defun org-sql--db-create-tables ()
   "Create the schema for the configured database."
   (let ((sql-cmd (org-sql--format-mql-schema org-sql-db-config org-sql--mql-tables)))
-    ;; (print sql-cmd)
     (let ((res (org-sql--send-sql sql-cmd)))
-      ;; (print res)
       res)))
 
 (defun org-sql--delete-db ()
   "Delete the configured database."
-  (-let (((mode . keyvals) org-sql-db-config))
-    (org-sql--case-mode mode
-      (mysql
-       (->> org-sql--mql-tables
-            (--map (symbol-name (car it)))
-            (s-join ",")
-            (format "DROP TABLE IF EXISTS %s;")
-            (format "SET FOREIGN_KEY_CHECKS = 0;%sSET FOREIGN_KEY_CHECKS = 1;")
-            (org-sql--exec-mysql-command keyvals "-e")))
-       ;; (error "Must manually delete the MySQL database as root"))
-      (postgres
-       (-let* (((&plist :database) keyvals)
-               ((&plist :schema) keyvals)
-               (cmd (format "DROP SCHEMA IF EXISTS %s CASCADE;" (or schema "public"))))
-         (org-sql--exec-postgres-command keyvals "-c" cmd)))
-      (sqlite
-       (-let (((&plist :path) keyvals))
-         (delete-file path)))
-      (sqlserver
-       (-let (((&plist :database :schema) keyvals))
-         (when schema
-           (let* ((select (format "SELECT * FROM sys.schemas WHERE name = N'%s'" schema))
-                  (drop (format "DROP SCHEMA %s" schema))
-                  (cmd (format "IF EXISTS (%s) EXEC('%s');" select drop)))
-             (org-sql--exec-sqlserver-command keyvals "-Q" cmd))))))))
+  (org-sql--case-mode org-sql-db-config
+    (mysql
+     (->> org-sql--mql-tables
+          (--map (symbol-name (car it)))
+          (s-join ",")
+          (format "DROP TABLE IF EXISTS %s;")
+          (format "SET FOREIGN_KEY_CHECKS = 0;%sSET FOREIGN_KEY_CHECKS = 1;")
+          (org-sql--send-sql)))
+    ;; (error "Must manually delete the MySQL database as root"))
+    (postgres
+     (org-sql--with-config-keys (:schema) org-sql-db-config
+       (let ((cmd (format "DROP SCHEMA IF EXISTS %s CASCADE;" (or schema "public"))))
+         (org-sql--send-sql cmd))))
+    (sqlite
+     (org-sql--with-config-keys (:path) org-sql-db-config
+       (delete-file path)))
+    (sqlserver
+     (org-sql--with-config-keys (:schema) org-sql-db-config
+       (when schema
+         (let* ((select (format "SELECT * FROM sys.schemas WHERE name = N'%s'" schema))
+                (drop (format "DROP SCHEMA %s" schema))
+                (cmd (format "IF EXISTS (%s) EXEC('%s');" select drop)))
+           (org-sql--send-sql cmd)))))))
 
 ;;;
 ;;; PUBLIC API
@@ -2550,8 +2439,6 @@ This means the state of all files from `org-sql-files' will be
 pushed and updated to the database."
   (let ((inhibit-message t))
     (org-save-all-org-buffers))
-  ;; (print (org-sql--get-transactions))
-  ;; (print (org-sql--send-sql* (concat (org-sql--get-transactions) "SHOW ENGINE INNODB STATUS;"))))
   (org-sql--send-sql* (org-sql--get-transactions)))
 
 (defun org-sql-clear-db ()
@@ -2560,8 +2447,7 @@ pushed and updated to the database."
   (->> (org-sql--mql-delete file_hashes nil)
        (org-sql--format-mql-delete org-sql-db-config nil)
        (list)
-       (org-sql--format-sql-transaction (car org-sql-db-config))
-       ;; (format "PRAGMA foreign_keys = ON; %s")
+       (org-sql--format-sql-transaction org-sql-db-config)
        (org-sql--send-sql)))
 
 (defun org-sql-reset-db ()
