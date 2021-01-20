@@ -2064,12 +2064,12 @@ same meaning."
 
 ;;; low-level IO
 
-(defun org-sql--run-command (path &rest args)
+(defun org-sql--run-command (path args)
   "Execute PATH with ARGS.
 Return a cons cell like (RETURNCODE . OUTPUT)."
-  (apply #'org-sql--run-command* path nil args))
+  (org-sql--run-command* path nil args))
 
-(defun org-sql--run-command* (path file &rest args)
+(defun org-sql--run-command* (path file args)
   "Execute PATH with ARGS and FILE routed to stdin.
 Return a cons cell like (RETURNCODE . OUTPUT)."
   (with-temp-buffer
@@ -2100,7 +2100,7 @@ Each fmeta will have it's :db-path set to nil. Only files in
   (cl-flet
       ((get-md5
         (fp)
-        (org-sql--on-success (org-sql--run-command "md5sum" fp)
+        (org-sql--on-success (org-sql--run-command "md5sum" `(,fp))
           (car (s-split-up-to " " it-out 1))
           (error "Could not get md5")))
        (expand-if-dir
@@ -2178,11 +2178,12 @@ state as the orgfiles on disk."
 
 ;;; SQL command wrappers
 
-(defun org-sql--exec-mysql-command-no-db (config &rest args)
+(defun org-sql--exec-mysql-command-nodb (args)
   "Execute a mysql command with ARGS.
 CONFIG-KEYS is the plist component if `org-sql-db-config'.
 The connection options for the postgres server. will be handled here."
-  (org-sql--with-config-keys (:hostname :port :username :password) config
+  (org-sql--with-config-keys (:hostname :port :username :password)
+      org-sql-db-config
     (let ((h (-some->> hostname (list "-h")))
           (p (-some->> port (list "-P")))
           (u (-some->> username (list "-u")))
@@ -2193,46 +2194,50 @@ The connection options for the postgres server. will be handled here."
           (process-environment
            (if (not password) process-environment
              (cons (format "MYSQL_PWD=%s" password) process-environment))))
-      (apply #'org-sql--run-command org-sql--mysql-exe
-             (append h p u protocol-arg batch-args args)))))
+      (org-sql--run-command org-sql--mysql-exe
+                            (append h p u protocol-arg batch-args args)))))
 
-(defun org-sql--exec-mysql-command (config &rest args)
+(defun org-sql--exec-mysql-command (args)
   "Execute a mysql command with ARGS.
 CONFIG-KEYS is the plist component if `org-sql-db-config'.
 The connection options for the postgres server. will be handled here."
-  (org-sql--with-config-keys (:database) config
-    (apply #'org-sql--exec-mysql-command-no-db config "-D" database args)))
+  (org-sql--with-config-keys (:database) org-sql-db-config
+    (if (not database) (error "No database specified")
+      (org-sql--exec-mysql-command-nodb `("-D" ,database ,@args)))))
 
-(defun org-sql--exec-sqlite-command (config &rest args)
+(defun org-sql--exec-sqlite-command (args)
   "Execute a sqlite command with ARGS.
 CONFIG is the plist component if `org-sql-db-config'."
-  (org-sql--with-config-keys (:path) config
-    (apply #'org-sql--run-command org-sql--sqlite-exe (cons path args))))
+  (org-sql--with-config-keys (:path) org-sql-db-config
+    (if (not path) (error "No path specified")
+      (org-sql--run-command org-sql--sqlite-exe (cons path args)))))
 
-(defun org-sql--exec-postgres-command-sub (config &rest args)
+(defun org-sql--exec-postgres-command-nodb (args)
   "Execute a postgres command with ARGS.
 CONFIG-KEYS is a list like `org-sql-db-config'."
-  (org-sql--with-config-keys (:hostname :port :username :password) config
+  (org-sql--with-config-keys (:hostname :port :username :password)
+      org-sql-db-config
     (let ((h (-some->> hostname (list "-h")))
           (p (-some->> port (list "-p")))
           (u (-some->> username (list "-U")))
           (w '("-w"))
+          (f (list "-At"))
           (process-environment
            (if (not password) process-environment
              (cons (format "PGPASSWORD=%s" password) process-environment))))
-      (apply #'org-sql--run-command org-sql--psql-exe (append h p u w args)))))
+      (org-sql--run-command org-sql--psql-exe (append h p u f w args)))))
 
-(defun org-sql--exec-postgres-command (config &rest args)
+(defun org-sql--exec-postgres-command (args)
   "Execute a postgres command with ARGS.
 CONFIG-KEYS is the plist component if `org-sql-db-config'. Note this
 uses the 'psql' client command in the background."
-  (org-sql--with-config-keys (:database) config
-    (let ((d (-some->> database (list "-d")))
-          (f (list "-At")))
-      (apply #'org-sql--exec-postgres-command-sub config (append d f args)))))
+  (org-sql--with-config-keys (:database) org-sql-db-config
+    (if (not database) (error "No database specified")
+      (org-sql--exec-postgres-command-nodb `("-d" ,database ,@args)))))
 
-(defun org-sql--exec-sqlserver-command-no-db (config &rest args)
-  (org-sql--with-config-keys (:hostname :port :username :password) config
+(defun org-sql--exec-sqlserver-command-nodb (args)
+  (org-sql--with-config-keys (:hostname :port :username :password)
+      org-sql-db-config
     ;; TODO support more than just tcp connections
     (let ((S (list "-S" (format "tcp:%s,%s" hostname port)))
           (U (-some->> username (list "-U")))
@@ -2241,26 +2246,26 @@ uses the 'psql' client command in the background."
           (process-environment
            (if (not password) process-environment
              (cons (format "SQLCMDPASSWORD=%s" password) process-environment))))
-      (apply #'org-sql--run-command org-sql--sqlserver-exe
-             (append S U no-headers sep args)))))
+      (org-sql--run-command org-sql--sqlserver-exe (append S U no-headers sep args)))))
 
-(defun org-sql--exec-sqlserver-command (config &rest args)
-  (org-sql--with-config-keys (:database) config
-    (apply #'org-sql--exec-sqlserver-command-no-db config-keys "-d" database args)))
+(defun org-sql--exec-sqlserver-command (args)
+  (org-sql--with-config-keys (:database) org-sql-db-config
+    (if (not database) (error "No database specified")
+      (org-sql--exec-sqlserver-command-nodb `("-d" ,database ,@args)))))
 
 (defun org-sql--send-sql (sql-cmd)
   "Execute SQL-CMD.
 The database connection will be handled transparently."
   (org-sql--case-mode org-sql-db-config
     (mysql
-     (org-sql--exec-mysql-command org-sql-db-config "-e" sql-cmd))
+     (org-sql--exec-mysql-command `("-e" ,sql-cmd)))
     (postgres
-     (org-sql--exec-postgres-command org-sql-db-config "-c" sql-cmd))
+     (org-sql--exec-postgres-command `("-c" ,sql-cmd)))
     (sqlite
-     (org-sql--exec-sqlite-command org-sql-db-config sql-cmd))
+     (org-sql--exec-sqlite-command `(,sql-cmd)))
     (sqlserver
      (let ((cmd (format "set nocount on; %s" sql-cmd)))
-       (org-sql--exec-sqlserver-command org-sql-db-config "-Q" cmd)))))
+       (org-sql--exec-sqlserver-command `("-Q" ,cmd))))))
 
 (defun org-sql--send-sql* (sql-cmd)
   "Execute SQL-CMD as a separate file input.
@@ -2282,7 +2287,7 @@ The database connection will be handled transparently."
                (sqlserver
                 ;; I think ":r tmp-path" should work here to make this analogous
                 ;; with the others
-                (org-sql--exec-sqlserver-command org-sql-db-config "-i" tmp-path)))))
+                (org-sql--exec-sqlserver-command "-i" tmp-path)))))
         (f-delete tmp-path)
         res))))
 
@@ -2292,43 +2297,42 @@ The database connection will be handled transparently."
   "Return t if the configured database exists."
   ;; this is a bit weird because "the database" is used at different levels
   ;; for each dbms
-  (-let (((mode . keyvals) org-sql-db-config))
-    (org-sql--case-mode org-sql-db-config
-      ;; connect to the server (without connecting to the db) and check that
-      ;; the db exists
-      (mysql
-       (org-sql--with-config-keys (:database) org-sql-db-config
-         (let ((cmd (format "SHOW DATABASES LIKE '%s';" database)))
-           (org-sql--on-success* (org-sql--exec-mysql-command-no-db keyvals "-e" cmd)
-             (equal database (car (s-lines it-out)))))))
-      ;; connect to the server and the db and check to see that the desired
-      ;; schema exists in the database
-      (postgres
-       (org-sql--with-config-keys (:database :schema) org-sql-db-config
-         (org-sql--on-success* (org-sql--send-sql "\\dn")
+  (org-sql--case-mode org-sql-db-config
+    ;; connect to the server (without connecting to the db) and check that
+    ;; the db exists
+    (mysql
+     (org-sql--with-config-keys (:database) org-sql-db-config
+       (let ((cmd (format "SHOW DATABASES LIKE '%s';" database)))
+         (org-sql--on-success* (org-sql--exec-mysql-command-nodb `("-e" ,cmd))
+           (equal database (car (s-lines it-out)))))))
+    ;; connect to the server and the db and check to see that the desired
+    ;; schema exists in the database
+    (postgres
+     (org-sql--with-config-keys (:database :schema) org-sql-db-config
+       (org-sql--on-success* (org-sql--send-sql "\\dn")
+         (--> (s-split "\n" it-out)
+           (--map (s-split "|" it) it)
+           ;; TODO this (or schema "public") thing is silly and should be
+           ;; refactored into something civilized (see other instances below)
+           (--find (and (equal (car it) (or schema "public"))
+                        (equal (cadr it) database))
+                   it)
+           (and it t)))))
+    ;; check to see that the db file exists
+    (sqlite
+     (org-sql--with-config-keys (:path) org-sql-db-config
+       (file-exists-p path)))
+    (sqlserver
+     (org-sql--with-config-keys (:database :schema) org-sql-db-config
+       (let ((cmd "select name from [org_sql].sys.schemas;"))
+         (org-sql--on-success* (org-sql--send-sql cmd)
            (--> (s-split "\n" it-out)
              (--map (s-split "|" it) it)
-             ;; TODO this (or schema "public") thing is silly and should be
-             ;; refactored into something civilized (see other instances below)
-             (--find (and (equal (car it) (or schema "public"))
+             ;; TODO get the default schema name and check that
+             (--find (and (equal (car it) (or schema "dbo"))
                           (equal (cadr it) database))
                      it)
-             (and it t)))))
-      ;; check to see that the db file exists
-      (sqlite
-       (org-sql--with-config-keys (:path) org-sql-db-config
-         (file-exists-p path)))
-      (sqlserver
-       (org-sql--with-config-keys (:database :schema) org-sql-db-config
-         (let ((cmd "select name from [org_sql].sys.schemas;"))
-           (org-sql--on-success* (org-sql--send-sql keyvals "-Q" cmd)
-             (--> (s-split "\n" it-out)
-               (--map (s-split "|" it) it)
-               ;; TODO get the default schema name and check that
-               (--find (and (equal (car it) (or schema "dbo"))
-                            (equal (cadr it) database))
-                       it)
-               (and it t)))))))))
+             (and it t))))))))
 
 (defun org-sql--db-has-valid-schema ()
   "Return t if the configured database has a valid schema.
@@ -2373,7 +2377,7 @@ Note that this currently only tests the existence of the schema's tables."
     (sqlite
      ;; this is a silly command that should work on all platforms (eg doesn't
      ;; require `touch' to make an empty file)
-     (org-sql--exec-sqlite-command org-sql-db-config ".schema"))
+     (org-sql--exec-sqlite-command '(".schema")))
     ;; noop since we shouldn't assume we have permission to create the db
     (mysql
      (cons 0 ""))
