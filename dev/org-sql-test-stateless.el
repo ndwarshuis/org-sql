@@ -1678,7 +1678,7 @@ list then join the cdr of IN with newlines."
               (foreign :ref table-foo
                        :keys (:inttwo)
                        :parent-keys (:int)
-                       :on_update cascade
+                       ;; :on_update cascade
                        :on_delete cascade)))))
     (setq formatter-alist
           (->> test-schema
@@ -1704,19 +1704,19 @@ list then join the cdr of IN with newlines."
       (expect (org-sql--format-mql-insert config formatter-alist mql-insert)
               :to-equal "INSERT INTO notpublic.table-foo (bool,enum,int,text) VALUES (0,'bim',666,'hello');")))
 
-  (it "update (no namespace)"
-    (let ((mql-insert '(table-foo (set :bool 0)
-                                  (where :enum bim)))
-          (config '(sqlite)))
-      (expect (org-sql--format-mql-update config formatter-alist mql-insert)
-              :to-equal "UPDATE table-foo SET bool=0 WHERE enum='bim';")))
+  ;; (it "update (no namespace)"
+  ;;   (let ((mql-insert '(table-foo (set :bool 0)
+  ;;                                 (where :enum bim)))
+  ;;         (config '(sqlite)))
+  ;;     (expect (org-sql--format-mql-update config formatter-alist mql-insert)
+  ;;             :to-equal "UPDATE table-foo SET bool=0 WHERE enum='bim';")))
 
-  (it "update (postgres namespace)"
-    (let ((mql-insert '(table-foo (set :bool 0)
-                                  (where :enum bim)))
-          (config '(postgres :schema "notpublic")))
-      (expect (org-sql--format-mql-update config formatter-alist mql-insert)
-              :to-equal "UPDATE notpublic.table-foo SET bool=0 WHERE enum='bim';")))
+  ;; (it "update (postgres namespace)"
+  ;;   (let ((mql-insert '(table-foo (set :bool 0)
+  ;;                                 (where :enum bim)))
+  ;;         (config '(postgres :schema "notpublic")))
+  ;;     (expect (org-sql--format-mql-update config formatter-alist mql-insert)
+  ;;             :to-equal "UPDATE notpublic.table-foo SET bool=0 WHERE enum='bim';")))
 
   (it "delete (no namespace)"
     (let ((mql-delete '(table-foo))
@@ -1767,7 +1767,7 @@ list then join the cdr of IN with newlines."
        :to-equal
        (concat
         "CREATE TABLE IF NOT EXISTS table-foo (bool INTEGER,enum TEXT,int INTEGER,text TEXT,PRIMARY KEY (int));"
-        "CREATE TABLE IF NOT EXISTS table-bar (intone INTEGER,inttwo INTEGER,PRIMARY KEY (intone),FOREIGN KEY (inttwo) REFERENCES table-foo (int) ON DELETE CASCADE ON UPDATE CASCADE DEFERRABLE INITIALLY DEFERRED);"))))
+        "CREATE TABLE IF NOT EXISTS table-bar (intone INTEGER,inttwo INTEGER,PRIMARY KEY (intone),FOREIGN KEY (inttwo) REFERENCES table-foo (int) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED);"))))
 
   (it "create table (postgres)"
     (let ((config '(postgres)))
@@ -1777,7 +1777,7 @@ list then join the cdr of IN with newlines."
        (concat
         "CREATE TYPE enum_table-foo_enum AS ENUM ('bim','bam','boo');"
         "CREATE TABLE IF NOT EXISTS table-foo (bool BOOLEAN,enum enum_table-foo_enum,int INTEGER,text TEXT,PRIMARY KEY (int));"
-        "CREATE TABLE IF NOT EXISTS table-bar (intone INTEGER,inttwo INTEGER,PRIMARY KEY (intone),FOREIGN KEY (inttwo) REFERENCES table-foo (int) ON DELETE CASCADE ON UPDATE CASCADE DEFERRABLE INITIALLY DEFERRED);"))))
+        "CREATE TABLE IF NOT EXISTS table-bar (intone INTEGER,inttwo INTEGER,PRIMARY KEY (intone),FOREIGN KEY (inttwo) REFERENCES table-foo (int) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED);"))))
 
   (it "transaction (sqlite)"
     (let ((mode 'sqlite)
