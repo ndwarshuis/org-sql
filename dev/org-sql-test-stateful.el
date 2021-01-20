@@ -64,6 +64,7 @@
     (org-sql--send-sql select)))
 
 (defun expect-db-has-table-contents (config tbl-name &rest rows)
+  (declare (indent 2))
   (cl-flet
       ((test-row-match
         (row-plist row-out)
@@ -86,46 +87,63 @@
       (expect (length out) :to-be (length rows))
       (--each (-zip-pair rows out) (test-row-match (car it) (cdr it))))))
 
+(defmacro describe-reset-db (header &rest body)
+  (declare (indent 1))
+  `(describe ,header
+     (before-all
+       (org-sql--delete-db))
+     (after-all
+       (org-sql--delete-db))
+     ,@body))
+
+;; TODO split this into "database admin stuff" and "updating with org-sql stuff"
 (defmacro describe-sql-io-spec (title config)
   (declare (indent 1))
   `(describe ,title
      (before-all
        (setq org-sql-db-config ,config))
 
-     (before-each
-       (org-sql--delete-db))
+     (describe-reset-db "database exists"
+       (it "create database"
+         (expect-exit-success (org-sql--db-create)))
+       (it "test for existence"
+         (expect (org-sql--db-exists))))
 
-     (after-each
-       (org-sql--delete-db))
-     
-     (it "database exists"
-       (expect-exit-success (org-sql--db-create))
-       (expect (org-sql--db-exists)))
+     (describe-reset-db "database delete"
+       (it "create database"
+         (expect-exit-success (org-sql--db-create)))
+       (it "delete database"
+         (org-sql--delete-db))
+       (it "test for existence"
+         (expect (not (org-sql--db-exists)))))
 
-     (it "database delete"
-       (expect-exit-success (org-sql--db-create))
-       (org-sql--delete-db)
-       (expect (not (org-sql--db-exists))))
+     (describe-reset-db "tables exist"
+       (it "initialize database"
+         (expect-exit-success (org-sql-init-db)))
+       (it "test if schema valid"
+         (expect (org-sql--db-has-valid-schema))))
 
-     (it "tables exist"
-       (expect-exit-success (org-sql-init-db))
-       (expect (org-sql--db-has-valid-schema)))
-
-     (it "database update (single file)"
-       (let ((org-sql-files (list (f-join test-files "foo1.org"))))
-         (expect-exit-success (org-sql-init-db))
-         (expect-exit-success (org-sql-update-db))
+     (describe-reset-db "database update (single file)"
+       (it "initialize database"
+         (expect-exit-success (org-sql-init-db)))
+       (it "update database"
+         (let ((org-sql-files (list (f-join test-files "foo1.org"))))
+           (expect-exit-success (org-sql-update-db))))
+       (it "test for table existence"
          (expect-db-has-tables ,config
                                '(file_hashes . 1)
                                '(file_metadata . 1)
                                '(headlines . 1)
                                '(headline_closures . 1))))
 
-     (it "database update (fancy file)"
-       (let ((org-sql-files (list (f-join test-files "fancy.org")))
-             (org-log-into-drawer "LOGBOOK"))
-         (expect-exit-success (org-sql-init-db))
-         (expect-exit-success (org-sql-update-db))
+     (describe-reset-db "database update (fancy file)"
+       (it "initialize database"
+         (expect-exit-success (org-sql-init-db)))
+       (it "update database"
+         (let ((org-sql-files (list (f-join test-files "fancy.org")))
+               (org-log-into-drawer "LOGBOOK"))
+           (expect-exit-success (org-sql-update-db))))
+       (it "test for table existence"
          (expect-db-has-tables ,config
                                '(file_hashes . 1)
                                '(file_metadata . 1)
@@ -144,60 +162,110 @@
                                '(planning_changes . 4)
                                '(clocks . 1))))
 
-     (it "database update (renamed file)"
-       (let* ((path (f-join test-files "foo1.org"))
-              (org-sql-files (list path)))
-         (expect-exit-success (org-sql-init-db))
-         (expect-exit-success (org-sql-update-db))
-         (expect-db-has-table-contents ,config 'file_metadata `(:file_path ,path)))
-       ;; (print (org-sql--send-sql "SHOW CREATE TABLE headline_closures;"))
-       (let* ((path (f-join test-files "foo2.org"))
-              (org-sql-files (list path)))
-         (expect-exit-success (org-sql-update-db))
-         (expect-db-has-table-contents ,config 'file_metadata `(:file_path ,path))))
-         ;; (expect-db-has-table-contents ,config 'headlines `(:file_path ,path))))
+     (describe-reset-db "database update (renamed file)"
+       (it "initialize database"
+         (expect-exit-success (org-sql-init-db)))
+       (describe "first file name"
+         (before-all
+           (setq test-path (f-join test-files "foo1.org")))
+         (it "update database"
+           (let ((org-sql-files (list test-path)))
+             (expect-exit-success (org-sql-update-db))))
+         (it "test for file in tables"
+           (expect-db-has-table-contents ,config 'file_metadata
+             `(:file_path ,test-path))))
+       (describe "second file name"
+         (before-all
+           (setq test-path (f-join test-files "foo2.org")))
+         (it "update database"
+           (let ((org-sql-files (list test-path)))
+             (expect-exit-success (org-sql-update-db))))
+         (it "test for file in tables"
+           (expect-db-has-table-contents ,config 'file_metadata
+             `(:file_path ,test-path)))))
 
-     (it "database update (deleted file)"
-       (let ((org-sql-files (list (f-join test-files "foo1.org"))))
-         (expect-exit-success (org-sql-init-db))
-         (expect-exit-success (org-sql-update-db)))
-       (let* ((org-sql-files nil))
-         (expect-exit-success (org-sql-update-db))
-         (expect-db-has-tables ,config '(file_metadata . 0))))
+     (describe-reset-db "database update (deleted file)"
+       (it "initialize database"
+         (expect-exit-success (org-sql-init-db)))
+       (it "update database"
+         (let ((org-sql-files (list (f-join test-files "foo1.org"))))
+           (expect-exit-success (org-sql-update-db))))
+       (it "update database (untrack the original file)"
+         (let ((org-sql-files nil))
+           (expect-exit-success (org-sql-update-db))))
+       (it "test for file absence"
+         (expect-db-has-tables ,config
+                               '(file_metadata . 0)
+                               '(file_hashes . 0))))
 
-     (it "database update (altered file)"
-       (let* ((contents1 "* foo1")
-              (contents2 "* foo2")
-              (path "/tmp/org-sql-test-file.org")
-              (org-sql-files (list path)))
-         ;; write file and update db
-         (f-write-text contents1 'utf-8 path)
-         (expect-exit-success (org-sql-init-db))
-         (expect-exit-success (org-sql-update-db))
-         (expect-db-has-table-contents ,config 'file_hashes '(:file_hash "ece424e0090cff9b6f1ac50722c336c0"))
-         ;; close buffer, alter the file, and update again
-         (kill-buffer (find-file-noselect path t))
-         (f-write-text contents2 'utf-8 path)
-         (expect-exit-success (org-sql-update-db))
-         (expect-db-has-table-contents ,config 'file_hashes '(:file_hash "399bc042f23ea976a04b9102c18e9cb5"))
-         ;; clean up (yes killing the buffer is necessary)
-         (kill-buffer (find-file-noselect path t))
-         (f-delete path t)))
+     (describe-reset-db "database update (altered file)"
+       (it "initialize database"
+         (expect-exit-success (org-sql-init-db)))
+       (describe "first file state"
+         (before-all
+           (setq test-path "/tmp/org-sql-test-file.org"))
+         (it "update database"
+           (let ((contents1 "* foo1")
+                 (org-sql-files (list test-path)))
+             ;; write file and update db
+             (f-write-text contents1 'utf-8 test-path)
+             ;; (expect-exit-success (org-sql-init-db))
+             (expect-exit-success (org-sql-update-db))))
+         (it "test file hash"
+           (expect-db-has-table-contents ,config 'file_hashes
+             '(:file_hash "ece424e0090cff9b6f1ac50722c336c0"))))
+       (describe "second file state"
+         (before-all
+           (setq test-path "/tmp/org-sql-test-file.org"))
+         (it "update with new contents"
+           (let ((contents2 "* foo2")
+                 (org-sql-files (list test-path)))
+             ;; close buffer, alter the file, and update again
+             (kill-buffer (find-file-noselect test-path t))
+             (f-write-text contents2 'utf-8 test-path)
+             (expect-exit-success (org-sql-update-db))))
+         (it "test for new file hash"
+           (expect-db-has-table-contents ,config 'file_hashes
+             '(:file_hash "399bc042f23ea976a04b9102c18e9cb5")))
+         (it "clean up"
+           ;; yes killing the buffer is necessary
+           (kill-buffer (find-file-noselect test-path t))
+           (f-delete test-path t))))
 
-     (it "database clear"
-       (let ((org-sql-files (list (f-join test-files "foo1.org"))))
-         (expect-exit-success (org-sql-init-db))
-         (expect-exit-success (org-sql-update-db))
-         (expect-exit-success (org-sql-clear-db))
-         (expect-db-has-tables ,config '(file_hashes . 0))
-         (expect-db-has-tables ,config '(file_metadata . 0))
-         (expect-db-has-tables ,config '(headlines . 0))))
+     (describe-reset-db "database clear"
+       (it "initialize database"
+         (expect-exit-success (org-sql-init-db)))
+       (it "update database"
+         (let ((org-sql-files (list (f-join test-files "foo1.org"))))
+           (expect-exit-success (org-sql-update-db))))
+       (it "clear database"
+         (expect-exit-success (org-sql-clear-db)))
+       (it "test that all tables are empty"
+         (expect-db-has-tables ,config
+                               '(file_hashes . 0)
+                               '(file_metadata . 0)
+                               '(headlines . 0)
+                               '(timestamps . 0)
+                               '(properties . 0)
+                               '(file_properties . 0)
+                               '(headline_properties . 0)
+                               '(file_tags . 0)
+                               '(headlines_tags . 0)
+                               '(logbook_entries . 0)
+                               '(planning_changes . 0)
+                               '(state_changes . 0)
+                               '(planning_entries . 0)
+                               '(clocks . 0))))
 
-     (it "database reset"
-       (expect-exit-success (org-sql--db-create))
-       (expect (not (org-sql--db-has-valid-schema)))
-       (expect-exit-success (org-sql-reset-db))
-       (expect (org-sql--db-has-valid-schema)))
+     (describe-reset-db "database reset"
+       (it "create database"
+         (expect-exit-success (org-sql--db-create)))
+       (it "test if schema valid"
+         (expect (not (org-sql--db-has-valid-schema))))
+       (it "reset database"
+         (expect-exit-success (org-sql-reset-db)))
+       (it "test if schema valid again"
+         (expect (org-sql--db-has-valid-schema))))
 
      ))
 
