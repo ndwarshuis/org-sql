@@ -278,7 +278,7 @@
                                '(file_properties . 0)
                                '(headline_properties . 0)
                                '(file_tags . 0)
-                               '(headlines_tags . 0)
+                               '(headline_tags . 0)
                                '(logbook_entries . 0)
                                '(planning_changes . 0)
                                '(state_changes . 0)
