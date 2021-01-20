@@ -136,6 +136,34 @@
                                '(headlines . 1)
                                '(headline_closures . 1))))
 
+     (describe-reset-db "database update (two different files)"
+       (it "initialize database"
+         (expect-exit-success (org-sql-init-db)))
+       (it "update database"
+         (let ((org-sql-files (list (f-join test-files "foo1.org")
+                                    (f-join test-files "foo3.org"))))
+           (expect-exit-success (org-sql-update-db))))
+       (it "test for table existence"
+         (expect-db-has-tables ,config
+                               '(file_hashes . 2)
+                               '(file_metadata . 2)
+                               '(headlines . 2)
+                               '(headline_closures . 2))))
+
+     (describe-reset-db "database update (two identical files)"
+       (it "initialize database"
+         (expect-exit-success (org-sql-init-db)))
+       (it "update database"
+         (let ((org-sql-files (list (f-join test-files "foo1.org")
+                                    (f-join test-files "foo2.org"))))
+           (expect-exit-success (org-sql-update-db))))
+       (it "test for table existence"
+         (expect-db-has-tables ,config
+                               '(file_hashes . 1)
+                               '(file_metadata . 2)
+                               '(headlines . 1)
+                               '(headline_closures . 1))))
+
      (describe-reset-db "database update (fancy file)"
        (it "initialize database"
          (expect-exit-success (org-sql-init-db)))
