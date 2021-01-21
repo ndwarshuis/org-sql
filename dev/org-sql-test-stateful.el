@@ -174,7 +174,7 @@
      (it "tables should exist"
        (expect (org-sql--sets-equal org-sql-table-names (org-sql-list-tables)
                                     :test #'equal)))
-     (it "drop namespace"
+     (it "drop tables"
        (expect-exit-success (org-sql-drop-tables)))
      (it "tables should not exist"
        (expect (length (org-sql-list-tables)) :to-be 0))))
