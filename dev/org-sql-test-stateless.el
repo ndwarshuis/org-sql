@@ -513,7 +513,7 @@ list then join the cdr of IN with newlines."
     (it "fancy"
       (expect-sql (list "* TODO [#A] COMMENT another headline"
                         ":PROPERTIES:"
-                        ":Effort: 0:30"
+                        ":Effort: 1d"
                         ":END:"
                         "this /should/ appear")
         `(,testing-files-sml
@@ -521,7 +521,7 @@ list then join the cdr of IN with newlines."
                      :headline_offset 1
                      :headline_text "another headline"
                      :keyword "TODO"
-                     :effort 30
+                     :effort 1440
                      :priority "A"
                      :is_archived 0
                      :is_commented 1
