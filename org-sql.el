@@ -2291,52 +2291,46 @@ The database connection will be handled transparently."
         (f-delete tmp-path)
         res))))
 
-;;; high-level database operations
+;;;
+;;; Public API
+;;;
 
-(defun org-sql--db-exists ()
-  "Return t if the configured database exists."
-  ;; this is a bit weird because "the database" is used at different levels
-  ;; for each dbms
+;; There are three layers which we care about: the database itself, the
+;; namespace, and the tables in which the data will live. And these three have
+;; three operations we care about: create, drop, and testing for existence. The
+;; namespace (aka the "schema") is only defined for postgres and sql server.
+;; Furthermore, we can't assume the normal user has permissions to create the
+;; database itself for any of the "server" implementations (everything but
+;; SQLite), so the create/drop commands aren't defined for these either. The
+;; only layer that is defined for all three operations and all database is the
+;; table layer.
+;;
+;; The reason this matters is because there needs to be a way to define
+;; "composite" functions like "initialize" and "reset" a database from emacs.
+;; Because all supported DBMSs have different layers, these will mean different
+;; things and must take these restrictions into account.
+
+;; table layer
+
+(defun org-sql-create-tables ()
+  (let ((sql-cmd (org-sql--format-mql-schema org-sql-db-config org-sql--mql-tables)))
+    (let ((res (org-sql--send-sql sql-cmd)))
+      res)))
+
+(defun org-sql-drop-tables ()
   (org-sql--case-mode org-sql-db-config
-    ;; connect to the server (without connecting to the db) and check that
-    ;; the db exists
     (mysql
-     (org-sql--with-config-keys (:database) org-sql-db-config
-       (let ((cmd (format "SHOW DATABASES LIKE '%s';" database)))
-         (org-sql--on-success* (org-sql--exec-mysql-command-nodb `("-e" ,cmd))
-           (equal database (car (s-lines it-out)))))))
-    ;; connect to the server and the db and check to see that the desired
-    ;; schema exists in the database
-    (postgres
-     (org-sql--with-config-keys (:database :schema) org-sql-db-config
-       (org-sql--on-success* (org-sql--send-sql "\\dn")
-         (--> (s-split "\n" it-out)
-           (--map (s-split "|" it) it)
-           ;; TODO this (or schema "public") thing is silly and should be
-           ;; refactored into something civilized (see other instances below)
-           (--find (and (equal (car it) (or schema "public"))
-                        (equal (cadr it) database))
-                   it)
-           (and it t)))))
-    ;; check to see that the db file exists
-    (sqlite
-     (org-sql--with-config-keys (:path) org-sql-db-config
-       (file-exists-p path)))
-    (sqlserver
-     (org-sql--with-config-keys (:database :schema) org-sql-db-config
-       (let ((cmd "select name from [org_sql].sys.schemas;"))
-         (org-sql--on-success* (org-sql--send-sql cmd)
-           (--> (s-split "\n" it-out)
-             (--map (s-split "|" it) it)
-             ;; TODO get the default schema name and check that
-             (--find (and (equal (car it) (or schema "dbo"))
-                          (equal (cadr it) database))
-                     it)
-             (and it t))))))))
+     ;; TODO this command is basically the same for all DBMSs
+     (->> org-sql--mql-tables
+          (--map (symbol-name (car it)))
+          (s-join ",")
+          (format "DROP TABLE IF EXISTS %s;")
+          (format "SET FOREIGN_KEY_CHECKS = 0;%sSET FOREIGN_KEY_CHECKS = 1;")
+          (org-sql--send-sql)))
+    ((postgres sqlite sqlserver)
+     (error "This hasn't been defined yet; go yell at the developer"))))
 
-(defun org-sql--db-has-valid-schema ()
-  "Return t if the configured database has a valid schema.
-Note that this currently only tests the existence of the schema's tables."
+(defun org-sql-tables-exist ()
   (-let* ((table-names (--map (symbol-name (car it)) org-sql--mql-tables))
           ((sql-cmd parse-fun)
            (org-sql--case-mode org-sql-db-config
@@ -2344,9 +2338,8 @@ Note that this currently only tests the existence of the schema's tables."
               (list "SHOW TABLES;" (lambda (s) (s-lines (s-trim s)))))
              (postgres
               (org-sql--with-config-keys (:schema) org-sql-db-config
-                (let* ((schema* (or schema "public"))
-                       (cmd (format "\\dt %s.*" schema*)))
-                  (list cmd
+                (let ((schema* (or schema "public")))
+                  (list (format "\\dt %s.*" schema*)
                         (lambda (s)
                           (->> (s-trim s)
                                (s-lines)
@@ -2359,9 +2352,8 @@ Note that this currently only tests the existence of the schema's tables."
                       (--mapcat (s-split " " it t) (s-lines s)))))
              (sqlserver
               (org-sql--with-config-keys (:schema) org-sql-db-config
-                (let* ((schema* (or schema "dbo"))
-                       (cmd (format "SELECT schema_name(schema_id), name FROM sys.tables;" schema*)))
-                  (list cmd
+                (let* ((schema* (or schema "dbo")))
+                  (list (format "SELECT schema_name(schema_id), name FROM sys.tables;" schema*)
                         (lambda (s)
                           (->> (s-trim s)
                                (s-lines)
@@ -2371,17 +2363,13 @@ Note that this currently only tests the existence of the schema's tables."
     (org-sql--on-success* (org-sql--send-sql sql-cmd)
       (org-sql--sets-equal table-names (funcall parse-fun it-out) :test #'equal))))
 
-(defun org-sql--db-create ()
+;; namespace layer
+
+(defun org-sql-create-namespace ()
   "Create the configured database."
   (org-sql--case-mode org-sql-db-config
-    (sqlite
-     ;; this is a silly command that should work on all platforms (eg doesn't
-     ;; require `touch' to make an empty file)
-     (org-sql--exec-sqlite-command '(".schema")))
-    ;; noop since we shouldn't assume we have permission to create the db
-    (mysql
-     (cons 0 ""))
-    ;; (error "Must manually create MySQL database as root"))
+    ((mysql sqlite)
+     (error "Namespace schemas only exist for Postgres and SQL Server"))
     (postgres
      (org-sql--with-config-keys (:schema) org-sql-db-config
        (let ((cmd (format "CREATE SCHEMA IF NOT EXISTS %s;" (or schema "public"))))
@@ -2394,30 +2382,14 @@ Note that this currently only tests the existence of the schema's tables."
                 (cmd (format "IF NOT EXISTS (%s) EXEC('%s');" select create)))
            (org-sql--send-sql cmd)))))))
 
-(defun org-sql--db-create-tables ()
-  "Create the schema for the configured database."
-  (let ((sql-cmd (org-sql--format-mql-schema org-sql-db-config org-sql--mql-tables)))
-    (let ((res (org-sql--send-sql sql-cmd)))
-      res)))
-
-(defun org-sql--delete-db ()
-  "Delete the configured database."
+(defun org-sql-drop-namespace ()
   (org-sql--case-mode org-sql-db-config
-    (mysql
-     (->> org-sql--mql-tables
-          (--map (symbol-name (car it)))
-          (s-join ",")
-          (format "DROP TABLE IF EXISTS %s;")
-          (format "SET FOREIGN_KEY_CHECKS = 0;%sSET FOREIGN_KEY_CHECKS = 1;")
-          (org-sql--send-sql)))
-    ;; (error "Must manually delete the MySQL database as root"))
+    ((mysql sqlite)
+     (error "Namespace schemas only exist for Postgres and SQL Server"))
     (postgres
      (org-sql--with-config-keys (:schema) org-sql-db-config
        (let ((cmd (format "DROP SCHEMA IF EXISTS %s CASCADE;" (or schema "public"))))
          (org-sql--send-sql cmd))))
-    (sqlite
-     (org-sql--with-config-keys (:path) org-sql-db-config
-       (delete-file path)))
     (sqlserver
      (org-sql--with-config-keys (:schema) org-sql-db-config
        (when schema
@@ -2426,27 +2398,90 @@ Note that this currently only tests the existence of the schema's tables."
                 (cmd (format "IF EXISTS (%s) EXEC('%s');" select drop)))
            (org-sql--send-sql cmd)))))))
 
-;;;
-;;; PUBLIC API
-;;; 
+(defun org-sql-namespace-exists ()
+  ;; NOTE: namespace = "schema" for all databases that have "schemas"
+  (org-sql--case-mode org-sql-db-config
+    ((mysql sqlite)
+     (error "Namespace schemas only exist for Postgres and SQL Server"))
+    (postgres
+     (org-sql--with-config-keys (:database :schema) org-sql-db-config
+       (org-sql--on-success* (org-sql--send-sql "\\dn")
+         (--> (s-split "\n" it-out)
+           (--map (s-split "|" it) it)
+           ;; TODO this (or schema "public") thing is silly and should be
+           ;; refactored into something civilized (see other instances below)
+           (--find (and (equal (car it) (or schema "public"))
+                        (equal (cadr it) database))
+                   it)
+           (and it t)))))
+    (sqlserver
+     (org-sql--with-config-keys (:database :schema) org-sql-db-config
+       (let ((cmd "select name from [org_sql].sys.schemas;"))
+         (org-sql--on-success* (org-sql--send-sql cmd)
+           (--> (s-split "\n" it-out)
+             (--map (s-split "|" it) it)
+             ;; TODO get the default schema name and check that
+             (--find (and (equal (car it) (or schema "dbo"))
+                          (equal (cadr it) database))
+                     it)
+             (and it t))))))))
 
-;;; non-interactive
+;; database layer
+
+(defun org-sql-create-db ()
+  (org-sql--case-mode org-sql-db-config
+    ((mysql postgres sqlserver)
+     (error "Must manually create database using admin privileges"))
+    (sqlite
+     ;; this is a silly command that should work on all platforms (eg doesn't
+     ;; require `touch' to make an empty file)
+     (org-sql--exec-sqlite-command '(".schema")))))
+
+(defun org-sql-drop-db ()
+  (org-sql--case-mode org-sql-db-config
+    ((mysql postgres sqlserver)
+     (error "Must manually drop database using admin privileges"))
+    (sqlite
+     (org-sql--with-config-keys (:path) org-sql-db-config
+       (delete-file path)))))
+
+(defun org-sql-db-exists ()
+  (org-sql--case-mode org-sql-db-config
+    (mysql
+     (org-sql--with-config-keys (:database) org-sql-db-config
+       (let ((cmd (format "SHOW DATABASES LIKE '%s';" database)))
+         (org-sql--on-success* (org-sql--exec-mysql-command-nodb `("-e" ,cmd))
+           (equal database (car (s-lines it-out)))))))
+    (postgres
+     (org-sql--with-config-keys (:database) org-sql-db-config
+       (let ((cmd (format "SELECT 1 FROM pg_database WHERE datname='%s';" database)))
+         (org-sql--on-success* (org-sql--exec-postgres-command-nodb `("-c" ,cmd))
+           (equal "1" (s-trim it-out))))))
+    (sqlite
+     (org-sql--with-config-keys (:path) org-sql-db-config
+       (file-exists-p path)))
+    (sqlserver
+     (org-sql--with-config-keys (:database) org-sql-db-config
+       (error "This is not defined yet; go yell at the developer")))))
+
+;;; composite database functions
 
 (defun org-sql-init-db ()
-  "Initialize the Org-SQL database."
-  (org-sql--db-create)
-  (org-sql--db-create-tables))
+  (org-sql--case-mode org-sql-db-config
+    (mysql
+     nil)
+    ((postgres sqlserver)
+     (org-sql-create-namespace))
+    (sqlite
+     (org-sql-create-db)))
+  (org-sql-create-tables))
 
 (defun org-sql-update-db ()
-  "Update the Org-SQL database.
-This means the state of all files from `org-sql-files' will be
-pushed and updated to the database."
   (let ((inhibit-message t))
     (org-save-all-org-buffers))
   (org-sql--send-sql* (org-sql--get-transactions)))
 
 (defun org-sql-clear-db ()
-  "Clear the Org-SQL database without deleting it."
   ;; only delete from files as we assume actions here cascade down
   (->> (org-sql--mql-delete file_hashes nil)
        (org-sql--format-mql-delete org-sql-db-config nil)
@@ -2455,13 +2490,19 @@ pushed and updated to the database."
        (org-sql--send-sql)))
 
 (defun org-sql-reset-db ()
-  "Reset the Org-SQL database.
-This will delete the database and create a new one with the
-required schema."
-  (org-sql--delete-db)
+  (org-sql--case-mode org-sql-db-config
+    (mysql
+     ;; TODO might make sense to provide this as an option for the others (eg
+     ;; maybe they don't want to delete an entire schema when dropping the
+     ;; tables will do)
+     (org-sql-drop-tables))
+    ((postgres sqlserver)
+     (org-sql-drop-namespace))
+    (sqlite
+     (org-sql-delete-db)))
   (org-sql-init-db))
 
-;;; interactive
+;;; interactive functions
 
 (defun org-sql-user-update ()
   "Update the Org SQL database."
@@ -2490,10 +2531,10 @@ required schema."
 (defun org-sql-user-reset ()
   "Reset the database with default schema."
   (interactive)
-  (if (or (not (org-sql--db-exists))
+  (if (or (not (org-sql-db-exists))
           (y-or-n-p "Really reset database? "))
       (progn
-        (org-sql--delete-db)
+        (org-sql-drop-db)
         (message "Resetting Org SQL database")
         (let ((out (org-sql-init-db)))
           (when org-sql-debug
