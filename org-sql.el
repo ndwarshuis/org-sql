@@ -496,6 +496,9 @@ to store them. This is in addition to any properties specifified by
     "Org-SQL database schema represented in internal meta query
     language (MQL, basically a giant list)"))
 
+(defconst org-sql-table-names (--map (symbol-name (car it)) org-sql--mql-tables)
+  "The names of all required tables in org-sql.")
+
 ;; TODO what about the windows users?
 (defconst org-sql--mysql-exe "mysql"
   "The mysql client command.")
@@ -2320,48 +2323,57 @@ The database connection will be handled transparently."
 (defun org-sql-drop-tables ()
   (org-sql--case-mode org-sql-db-config
     (mysql
-     ;; TODO this command is basically the same for all DBMSs
-     (->> org-sql--mql-tables
-          (--map (symbol-name (car it)))
-          (s-join ",")
+     (->> (s-join "," org-sql-table-names)
           (format "DROP TABLE IF EXISTS %s;")
           (format "SET FOREIGN_KEY_CHECKS = 0;%sSET FOREIGN_KEY_CHECKS = 1;")
           (org-sql--send-sql)))
-    ((postgres sqlite sqlserver)
+    (postgres
+     (org-sql--with-config-keys (:schema) org-sql-db-config
+       (->> (if schema (--map (format "%s.%s" schema it) org-sql-table-names)
+              org-sql-table-names)
+            (s-join ",")
+            (format "DROP TABLE IF EXISTS %s CASCADE;")
+            (org-sql--send-sql))))
+    (sqlite
+     (->> (--map (format "DROP TABLE IF EXISTS %s;" it) org-sql-table-names)
+          ;; TODO figure out a better way to format the transaction
+          (s-join "")
+          (format "PRAGMA foreign_keys = OFF;BEGIN;%sCOMMIT;")
+          (org-sql--send-sql)))
+    (sqlserver
      (error "This hasn't been defined yet; go yell at the developer"))))
 
-(defun org-sql-tables-exist ()
-  (-let* ((table-names (--map (symbol-name (car it)) org-sql--mql-tables))
-          ((sql-cmd parse-fun)
-           (org-sql--case-mode org-sql-db-config
-             (mysql
-              (list "SHOW TABLES;" (lambda (s) (s-lines (s-trim s)))))
-             (postgres
-              (org-sql--with-config-keys (:schema) org-sql-db-config
-                (let ((schema* (or schema "public")))
-                  (list (format "\\dt %s.*" schema*)
-                        (lambda (s)
-                          (->> (s-trim s)
-                               (s-lines)
-                               (--map (s-split "|" it))
-                               (--filter (equal schema* (car it)))
-                               (--map (cadr it))))))))
-             (sqlite
-              (list ".tables"
-                    (lambda (s)
-                      (--mapcat (s-split " " it t) (s-lines s)))))
-             (sqlserver
-              (org-sql--with-config-keys (:schema) org-sql-db-config
-                (let* ((schema* (or schema "dbo")))
-                  (list (format "SELECT schema_name(schema_id), name FROM sys.tables;" schema*)
-                        (lambda (s)
-                          (->> (s-trim s)
-                               (s-lines)
-                               (--map (s-split "|" it))
-                               (--filter (equal schema* (car it)))
-                               (--map (cadr it)))))))))))
+(defun org-sql-list-tables ()
+  (-let (((sql-cmd parse-fun)
+          (org-sql--case-mode org-sql-db-config
+            (mysql
+             (list "SHOW TABLES;" (lambda (s) (s-lines (s-trim s)))))
+            (postgres
+             (org-sql--with-config-keys (:schema) org-sql-db-config
+               (let ((schema* (or schema "public")))
+                 (list (format "\\dt %s.*" schema*)
+                       (lambda (s)
+                         (->> (s-trim s)
+                              (s-lines)
+                              (--map (s-split "|" it))
+                              (--filter (equal schema* (car it)))
+                              (--map (cadr it))))))))
+            (sqlite
+             (list ".tables"
+                   (lambda (s)
+                     (--mapcat (s-split " " it t) (s-lines s)))))
+            (sqlserver
+             (org-sql--with-config-keys (:schema) org-sql-db-config
+               (let* ((schema* (or schema "dbo")))
+                 (list (format "SELECT schema_name(schema_id), name FROM sys.tables;" schema*)
+                       (lambda (s)
+                         (->> (s-trim s)
+                              (s-lines)
+                              (--map (s-split "|" it))
+                              (--filter (equal schema* (car it)))
+                              (--map (cadr it)))))))))))
     (org-sql--on-success* (org-sql--send-sql sql-cmd)
-      (org-sql--sets-equal table-names (funcall parse-fun it-out) :test #'equal))))
+      (funcall parse-fun it-out))))
 
 ;; namespace layer
 
@@ -2443,7 +2455,9 @@ The database connection will be handled transparently."
      (error "Must manually drop database using admin privileges"))
     (sqlite
      (org-sql--with-config-keys (:path) org-sql-db-config
-       (delete-file path)))))
+       (delete-file path)
+       ;; return a dummy return-code and stdout message
+       '(0 . "")))))
 
 (defun org-sql-db-exists ()
   (org-sql--case-mode org-sql-db-config
@@ -2491,15 +2505,15 @@ The database connection will be handled transparently."
 
 (defun org-sql-reset-db ()
   (org-sql--case-mode org-sql-db-config
+    ;; TODO might make sense to provide this as an option for the others (eg
+    ;; maybe they don't want to delete an entire schema when dropping the
+    ;; tables will do)
     (mysql
-     ;; TODO might make sense to provide this as an option for the others (eg
-     ;; maybe they don't want to delete an entire schema when dropping the
-     ;; tables will do)
      (org-sql-drop-tables))
     ((postgres sqlserver)
      (org-sql-drop-namespace))
     (sqlite
-     (org-sql-delete-db)))
+     (org-sql-drop-db)))
   (org-sql-init-db))
 
 ;;; interactive functions
