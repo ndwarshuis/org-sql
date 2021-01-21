@@ -5,7 +5,7 @@
 ;; Author: Nathan Dwarshuis <natedwarshuis@gmail.com>
 ;; Keywords: org-mode, data
 ;; Homepage: https://github.com/ndwarshuis/org-sql
-;; Package-Requires: ((emacs "27.1") (s "1.12") (dash "2.17") (org-ml "5.4.3"))
+;; Package-Requires: ((emacs "27.1") (s "1.12") (f "0.20.0") (dash "2.17") (org-ml "5.4.3"))
 ;; Version: 1.1.0
 
 ;; This program is free software; you can redistribute it and/or modify
@@ -57,6 +57,7 @@
 (require 'subr-x)
 (require 'dash)
 (require 's)
+(require 'f)
 (require 'sql)
 (require 'org)
 (require 'org-clock)
