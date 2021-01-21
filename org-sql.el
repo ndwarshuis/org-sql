@@ -2347,7 +2347,10 @@ The database connection will be handled transparently."
   (-let (((sql-cmd parse-fun)
           (org-sql--case-mode org-sql-db-config
             (mysql
-             (list "SHOW TABLES;" (lambda (s) (s-lines (s-trim s)))))
+             (list "SHOW TABLES;"
+                   (lambda (s)
+                     (let ((s* (s-trim s)))
+                       (unless (equal s* "") (s-lines s*))))))
             (postgres
              (org-sql--with-config-keys (:schema) org-sql-db-config
                (let ((schema* (or schema "public")))
