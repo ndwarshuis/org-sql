@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.1
+
+- recognize all effort formats (not just `MM` and `HH:MM`)
+- fix f.el dependency
+
 ## 1.1.0
 
 - use latest logbook/contents code from `org-ml`
