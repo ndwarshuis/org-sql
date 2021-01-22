@@ -972,14 +972,14 @@ Only the :lb-config and :headline keys will be changed."
        (org-sql--map-plist :lb-config
          (org-sql--headline-update-supercontents-config it headline))))
 
-;; (defun org-sql--to-fmeta (disk-path db-path file-hash)
+;; (defun org-sql--to-hashpathpair (disk-path db-path file-hash)
 ;;   "Return a plist representing org file status.
 ;; DISK-PATH is the path to the org file on disk, DB-PATH is the
 ;; path on disk recorded in the database for this org file, and
 ;; FILE-HASH is the md5 of this org file."
 ;;   (list :disk-path disk-path :db-path db-path :file-hash file-hash))
 
-(defun org-sql--to-fmeta (file-path file-hash)
+(defun org-sql--to-hashpathpair (file-path file-hash)
   (list :file-path file-path :file-hash file-hash))
 
 ;;; SQL string parsing functions
@@ -1989,58 +1989,55 @@ FSTATE is a list given by `org-sql--to-fstate'."
       (org-sql--add-mql-insert-headlines fstate)
       (reverse)))
 
-(defun org-sql--fmeta-to-mql-delete (file-hash)
+(defun org-sql--hashpathpair-to-mql-delete (file-hash)
   (org-sql--mql-delete file_hashes (:file_hash file-hash)))
 
-(defun org-sql--fmeta-to-mql-path-delete (file-hash file-paths)
+(defun org-sql--hashpathpair-to-mql-path-delete (file-hash file-paths)
   (--map (org-sql--mql-delete file_metadata (:file_path it :file_hash file-hash))
          file-paths))
 
-(defun org-sql--fmeta-to-mql-path-insert (file-hash file-paths)
+(defun org-sql--hashpathpair-to-mql-path-insert (file-hash file-paths)
   (--map (org-sql--mql-insert file_metadata
            :file_path it
            :file_hash file-hash)
          file-paths))
 
-;; fmeta function (see `org-sql--to-fmeta')
+;; hashpathpair function
 
-(defun org-sql--partition-fmeta (disk-fmeta db-fmeta)
+(defun org-sql--partition-hashpathpairs (disk-hashpathpairs db-hashpathpairs)
   (let (hash-in-db paths-dont-match files-to-insert paths-to-insert
                    paths-to-delete cur-disk cur-db n)
-    (while disk-fmeta
+    (while disk-hashpathpairs
       (setq hash-in-db nil
             paths-dont-match nil
-            n (length db-fmeta)
-            cur-disk (car disk-fmeta))
+            n (length db-hashpathpairs)
+            cur-disk (car disk-hashpathpairs))
       (while (< 0 n)
-        (setq cur-db (nth (1- n) db-fmeta))
-        (when (equal (plist-get cur-disk :file-hash)
-                     (plist-get cur-db :file-hash))
-          (when (not (equal (plist-get cur-disk :file-path)
-                            (plist-get cur-db :file-path)))
+        (setq cur-db (nth (1- n) db-hashpathpairs))
+        ;; first test if hashes are equal in the two pairs
+        (when (equal (car cur-disk) (car cur-db))
+          ;; if yes, test if the paths are equal
+          (when (not (equal (cdr cur-disk) (cdr cur-db)))
             (setq paths-dont-match t
                   paths-to-delete (cons cur-db paths-to-delete)))
           (setq hash-in-db t
-                db-fmeta (-remove-at (1- n) db-fmeta)))
+                db-hashpathpairs (-remove-at (1- n) db-hashpathpairs)))
         (setq n (1- n)))
       (if hash-in-db
           (when paths-dont-match
             (setq paths-to-insert (cons cur-disk paths-to-insert)))
         (setq files-to-insert (cons cur-disk files-to-insert)))
-      (setq disk-fmeta (cdr disk-fmeta)))
+      (setq disk-hashpathpairs (cdr disk-hashpathpairs)))
     `((files-to-insert ,@files-to-insert)
       (paths-to-insert ,@paths-to-insert)
       (paths-to-delete ,@paths-to-delete)
-      (files-to-delete ,@db-fmeta))))
+      (files-to-delete ,@db-hashpathpairs))))
 
-;; this works for both inserts and renames
-(defun org-sql--group-fmetas-by-hash (fmetas)
-  (->> (--map (cons (plist-get it :file-hash) (plist-get it :file-path)) fmetas)
-       (-group-by #'car)
-       (--map (cons (car it) (-map #'cdr (cdr it))))))
+(defun org-sql--group-hashpathpairs-by-hash (hashpathpairs)
+  (--map (cons (car it) (-map #'cdr (cdr it))) (-group-by #'car hashpathpairs)))
 
-(defun org-sql--fmeta-to-hashes (fmetas)
-  (--map (plist-get it :file-hash) fmetas))
+(defun org-sql--hashpathpairs-to-hashes (hashpathpairs)
+  (-map #'car hashpathpairs))
 
 ;; IO helper functions
 
@@ -2082,9 +2079,9 @@ Return a cons cell like (RETURNCODE . OUTPUT)."
     (let ((rc (apply #'call-process path file (current-buffer) nil args)))
       (cons rc (buffer-string)))))
 
-;;; fmeta -> fstate
+;;; hashpathpair -> fstate
 
-(defun org-sql--fmeta-get-fstate (file-hash file-paths)
+(defun org-sql--hashpathpair-get-fstate (file-hash file-paths)
   (let ((paths-with-attributes (--map (cons it (file-attributes it)) file-paths)))
     ;; just pick the first file path to open
     (with-current-buffer (find-file-noselect (car file-paths) t)
@@ -2097,11 +2094,11 @@ Return a cons cell like (RETURNCODE . OUTPUT)."
                             org-log-note-headings todo-keywords lb-config
                             tree)))))
 
-;;; reading fmeta from external state
+;;; reading hashpathpair from external state
 
-(defun org-sql--disk-get-fmeta ()
-  "Get a list of fmeta for org files on disk.
-Each fmeta will have it's :db-path set to nil. Only files in
+(defun org-sql--disk-get-hashpathpairs ()
+  "Get a list of hashpathpair for org files on disk.
+Each hashpathpair will have it's :db-path set to nil. Only files in
 `org-sql-files' will be considered."
   (cl-flet
       ((get-md5
@@ -2119,11 +2116,12 @@ Each fmeta will have it's :db-path set to nil. Only files in
            (-map #'expand-file-name)
            (-filter #'file-exists-p)
            (-uniq)
-           (--map (org-sql--to-fmeta it (get-md5 it)))))))
+           ;; (--map (org-sql--to-hashpathpair it (get-md5 it)))))))
+           (--map (cons (get-md5 it) it))))))
 
-(defun org-sql--db-get-fmeta ()
-  "Get a list of fmeta for the database.
-Each fmeta will have it's :disk-path set to nil."
+(defun org-sql--db-get-hashpathpairs ()
+  "Get a list of hashpathpair for the database.
+Each hashpathpair will have it's :disk-path set to nil."
   (-let* ((columns '(:file_path :file_hash))
           ;; TODO add compile check for this
           (sql-select (org-sql--format-mql-select org-sql-db-config nil `(file_metadata (columns ,@columns)))))
@@ -2131,14 +2129,15 @@ Each fmeta will have it's :disk-path set to nil."
       (->> (s-trim it-out)
            (org-sql--parse-output-to-plist org-sql-db-config columns)
            (--map (-let (((&plist :file_hash h :file_path p) it))
-                    (org-sql--to-fmeta p h)))))))
+                    (cons h p)))))))
+                    ;; (org-sql--to-hashpathpair p h)))))))
 
 (defun org-sql--get-transactions ()
   "Return SQL string of the update transaction.
 This transaction will bring the database to represent the same
 state as the orgfiles on disk."
-  (-let* ((disk-fmeta (org-sql--disk-get-fmeta))
-          (db-fmeta (org-sql--db-get-fmeta))
+  (-let* ((disk-hashpathpairs (org-sql--disk-get-hashpathpairs))
+          (db-hashpathpairs (org-sql--db-get-hashpathpairs))
           (mode (car org-sql-db-config))
           (formatter-alist
            (->> org-sql--mql-tables
@@ -2147,28 +2146,28 @@ state as the orgfiles on disk."
                    'files-to-delete
                    'paths-to-insert
                    'paths-to-delete)
-           (org-sql--partition-fmeta disk-fmeta db-fmeta)))
+           (org-sql--partition-hashpathpairs disk-hashpathpairs db-hashpathpairs)))
     (cl-flet
         ((file-inserts-to-sql
-          (fmeta)
-          (->> (org-sql--group-fmetas-by-hash fmeta)
-               (--mapcat (->> (org-sql--fmeta-get-fstate (car it) (cdr it))
+          (hashpathpairs)
+          (->> (org-sql--group-hashpathpairs-by-hash hashpathpairs)
+               (--mapcat (->> (org-sql--hashpathpair-get-fstate (car it) (cdr it))
                               (org-sql--fstate-to-mql-insert)))
                (--map (org-sql--format-mql-insert formatter-alist it))))
          (file-deletes-to-sql
-          (fmeta)
-          (->> (org-sql--fmeta-to-hashes fmeta)
-               (--map (->> (org-sql--fmeta-to-mql-delete it)
+          (hashpathpairs)
+          (->> (org-sql--hashpathpairs-to-hashes hashpathpairs)
+               (--map (->> (org-sql--hashpathpair-to-mql-delete it)
                            (org-sql--format-mql-delete formatter-alist)))))
          (path-inserts-to-sql
-          (fmeta)
-          (->> (org-sql--group-fmetas-by-hash fmeta)
-               (--mapcat (org-sql--fmeta-to-mql-path-insert (car it) (cdr it)))
+          (hashpathpairs)
+          (->> (org-sql--group-hashpathpairs-by-hash hashpathpairs)
+               (--mapcat (org-sql--hashpathpair-to-mql-path-insert (car it) (cdr it)))
                (--map (org-sql--format-mql-insert formatter-alist it))))
          (path-deletes-to-sql
-          (fmeta)
-          (->> (org-sql--group-fmetas-by-hash fmeta)
-               (--mapcat (org-sql--fmeta-to-mql-path-delete (car it) (cdr it)))
+          (hashpathpairs)
+          (->> (org-sql--group-hashpathpairs-by-hash hashpathpairs)
+               (--mapcat (org-sql--hashpathpair-to-mql-path-delete (car it) (cdr it)))
                (--map (org-sql--format-mql-delete formatter-alist it)))))
       (->> (append (path-inserts-to-sql paths-to-insert)
                    (path-deletes-to-sql paths-to-delete)
@@ -2503,11 +2502,15 @@ The database connection will be handled transparently."
 
 (defun org-sql-clear-db ()
   ;; only delete from files as we assume actions here cascade down
-  (->> (org-sql--mql-delete file_hashes nil)
-       (org-sql--format-mql-delete org-sql-db-config nil)
-       (list)
-       (org-sql--format-sql-transaction org-sql-db-config)
-       (org-sql--send-sql)))
+  ;; TODO this is stupid
+  (let ((formatter-alist (--map (org-sql--compile-mql-schema-formatter-alist 
+                                 org-sql-db-config it)
+                                org-sql--mql-tables)))
+    (->> (org-sql--mql-delete file_hashes nil)
+         (org-sql--format-mql-delete formatter-alist)
+         (list)
+         (org-sql--format-sql-transaction org-sql-db-config)
+         (org-sql--send-sql))))
 
 (defun org-sql-reset-db ()
   (org-sql--case-mode org-sql-db-config

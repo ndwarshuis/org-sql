@@ -1807,22 +1807,18 @@ list then join the cdr of IN with newlines."
 
 (describe "file metadata spec"
   (it "classify file metadata"
-    (let ((on-disk (list (org-sql--to-fmeta "/bar.org" "123")
-                         (org-sql--to-fmeta "/bam.org" "654")
-                         (org-sql--to-fmeta "/foo.org" "456")))
-          (in-db (list (org-sql--to-fmeta "/bar.org" "123")
-                       (org-sql--to-fmeta "/bam0.org" "654")
-                       (org-sql--to-fmeta "/foo0.org" "789"))))
-      (expect (org-sql--partition-fmeta on-disk in-db)
+    (let ((on-disk '(("123" . "/bar.org")
+                     ("654" . "/bam.org")
+                     ("456" . "/foo.org")))
+          (in-db '(("123" . "/bar.org")
+                   ("654" . "/bam0.org")
+                   ("789" . "/foo0.org"))))
+      (expect (org-sql--partition-hashpathpairs on-disk in-db)
               :to-equal
-              `((files-to-insert
-                 ,(org-sql--to-fmeta "/foo.org" "456"))
-                (paths-to-insert
-                 ,(org-sql--to-fmeta "/bam.org" "654"))
-                (paths-to-delete
-                 ,(org-sql--to-fmeta "/bam0.org" "654"))
-                (files-to-delete
-                 ,(org-sql--to-fmeta "/foo0.org" "789")))))))
+              '((files-to-insert ("456" . "/foo.org"))
+                (paths-to-insert ("654" . "/bam.org"))
+                (paths-to-delete ("654" . "/bam0.org"))
+                (files-to-delete ("789" . "/foo0.org")))))))
 
 ;;; org-sql-test-stateless.el ends here
 
