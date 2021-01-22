@@ -189,28 +189,17 @@ Each row stores one timestamp
 | start_is_long |  |  |  | INTEGER / BOOLEAN | true if the start time is in long format |
 | end_is_long |  |  | x | INTEGER / BOOLEAN | true if the end time is in long format |
 
-### timestamp_modifiers
-
-Each row stores one timestamp modifier (repeater, warning, etc)
-
-| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
-|  -  |  -  |  -  |  -  |  -  |  -  |
-| file_hash | x | file_hash - timestamps |  | TEXT / TEXT | hash (MD5) of the org-tree with this timestamp modifier |
-| timestamp_offset | x | timestamp_offset - timestamps |  | INTEGER / INTEGER | offset of the timestamp with this modifier |
-| modifier_type | x |  |  | TEXT / timestamp_modifier_type | type of this modifier (`warning`, or `repeater`) |
-| modifier_value |  |  | x | INTEGER / INTEGER | shift of this modifier |
-| modifier_unit |  |  | x | TEXT / ENUM | unit of this modifier (`hour`, `day`, `week`, `month`, or `year`) |
-
 ### timestamp_warnings
 
 Each row stores specific information for a timestamp warning
 
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_hash | x | file_hash - timestamp_modifiers |  | TEXT / TEXT | hash (MD5) of the org-tree with this warning modifier |
-| timestamp_offset | x | timestamp_offset - timestamp_modifiers |  | INTEGER / INTEGER | offset of the timestamp with this warning modifier |
-| modifier_type | x | modifier_type - timestamp_modifiers |  | TEXT / timestamp_modifier_type | type of this modifier (`warning`, or `repeater`) |
-| warning_type |  |  | x | TEXT / ENUM | warning type of this timestamp (`all`, or `first`) |
+| file_hash | x | file_hash - timestamps |  | TEXT / TEXT | hash (MD5) of the org-tree with this warning |
+| timestamp_offset | x | timestamp_offset - timestamps |  | INTEGER / INTEGER | offset of the timestamp with this warning |
+| warning_value |  |  | x | INTEGER / INTEGER | shift of this warning |
+| warning_unit |  |  | x | TEXT / ENUM | unit of this warning (`hour`, `day`, `week`, `month`, or `year`) |
+| warning_type |  |  | x | TEXT / ENUM | type of this warning (`all`, or `first`) |
 
 ### timestamp_repeaters
 
@@ -218,10 +207,11 @@ Each row stores specific information for a timestamp repeater
 
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_hash | x | file_hash - timestamp_modifiers |  | TEXT / TEXT | hash (MD5) of the org-tree with this timestamp repeater |
-| timestamp_offset | x | timestamp_offset - timestamp_modifiers |  | INTEGER / INTEGER | offset of the timestamp with this repeater modifier |
-| modifier_type | x | modifier_type - timestamp_modifiers |  | TEXT / timestamp_modifier_type | type of this modifier (`warning`, or `repeater`) |
-| repeater_type |  |  | x | TEXT / ENUM | repeater type of this timestamp (`catch-up`, `restart`, or `cumulate`) |
+| file_hash | x | file_hash - timestamps |  | TEXT / TEXT | hash (MD5) of the org-tree with this repeater |
+| timestamp_offset | x | timestamp_offset - timestamps |  | INTEGER / INTEGER | offset of the timestamp with this repeater |
+| repeater_value |  |  | x | INTEGER / INTEGER | shift of this repeater |
+| repeater_unit |  |  | x | TEXT / ENUM | unit of this repeater (`hour`, `day`, `week`, `month`, or `year`) |
+| repeater_type |  |  | x | TEXT / ENUM | type of this repeater (`catch-up`, `restart`, or `cumulate`) |
 
 ### planning_entries
 
@@ -318,7 +308,7 @@ Each row stores additional metadata for a state change logbook entry
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
 | file_hash | x | file_hash - logbook_entries |  | TEXT / TEXT | hash (MD5) of the org-tree with this state change |
-| entry_offset | x | entry_offset - logbook_entries |  | INTEGER / INTEGER | offset of the logbook entry for this state change |
+| entry_offset | x | entry_offset - logbook_entries |  | INTEGER / INTEGER | offset of the entry with this logbook state change |
 | state_old |  |  |  | TEXT / TEXT | former todo state keyword |
 | state_new |  |  |  | TEXT / TEXT | updated todo state keyword |
 
@@ -329,7 +319,7 @@ Each row stores additional metadata for a planning change logbook entry
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
 | file_hash | x | file_hash - timestamps, file_hash - logbook_entries |  | TEXT / TEXT | hash (MD5) of the org-tree with this planning change |
-| entry_offset | x | entry_offset - logbook_entries |  | INTEGER / INTEGER | offset of the logbook entry for this planning change |
+| entry_offset | x | entry_offset - logbook_entries |  | INTEGER / INTEGER | offset of the entry with this logbook planning change |
 | timestamp_offset |  | timestamp_offset - timestamps |  | INTEGER / INTEGER | offset of the former timestamp |
 
 ### links
