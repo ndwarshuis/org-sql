@@ -1610,17 +1610,17 @@ list then join the cdr of IN with newlines."
                       :time_end ,(org-ts-to-unixtime ts1)
                       :clock_note "clock out note"))))))))
 
-(defun format-with (mode type value)
-  (funcall (org-sql--compile-mql-format-function mode type) value))
+(defun format-with (config type value)
+  (funcall (org-sql--compile-mql-format-function config type) value))
 
 (defun format-with-sqlite (type value)
-  (format-with 'sqlite type value))
+  (format-with '(sqlite) type value))
 
 (defun expect-formatter (type input &rest value-plist)
   (declare (indent 2))
   (-let (((&plist :sqlite :postgres) value-plist))
-    (expect (format-with 'sqlite type input) :to-equal sqlite)
-    (expect (format-with 'postgres type input) :to-equal postgres)))
+    (expect (format-with '(sqlite) type input) :to-equal sqlite)
+    (expect (format-with '(postgres) type input) :to-equal postgres)))
 
 (describe "meta-query language type formatting spec"
   (it "boolean (NULL)"
@@ -1679,84 +1679,94 @@ list then join the cdr of IN with newlines."
                        :keys (:inttwo)
                        :parent-keys (:int)
                        ;; :on_update cascade
-                       :on_delete cascade)))))
-    (setq formatter-alist
-          (->> test-schema
-               (--map (org-sql--compile-mql-schema-formatter-alist 'sqlite it)))))
+                       :on_delete cascade))))))
 
   ;; TODO use function to make this list, but the one now has hardcoded
   ;; schema checking
   (it "insert (no namespace)"
-    (let ((mql-insert '(table-foo :bool 0
+    (let* ((mql-insert '(table-foo :bool 0
                                   :enum bim
                                   :int 666
                                   :text "hello"))
-          (config '(sqlite)))
-      (expect (org-sql--format-mql-insert config formatter-alist mql-insert)
+          (config '(sqlite))
+          (formatter-alist
+           (->> test-schema
+                (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
+      (expect (org-sql--format-mql-insert formatter-alist mql-insert)
               :to-equal "INSERT INTO table-foo (bool,enum,int,text) VALUES (0,'bim',666,'hello');")))
 
   (it "insert (postgres namespace)"
-    (let ((mql-insert '(table-foo :bool 0
-                                  :enum bim
-                                  :int 666
-                                  :text "hello"))
-          (config '(postgres :schema "notpublic")))
-      (expect (org-sql--format-mql-insert config formatter-alist mql-insert)
-              :to-equal "INSERT INTO notpublic.table-foo (bool,enum,int,text) VALUES (0,'bim',666,'hello');")))
-
-  ;; (it "update (no namespace)"
-  ;;   (let ((mql-insert '(table-foo (set :bool 0)
-  ;;                                 (where :enum bim)))
-  ;;         (config '(sqlite)))
-  ;;     (expect (org-sql--format-mql-update config formatter-alist mql-insert)
-  ;;             :to-equal "UPDATE table-foo SET bool=0 WHERE enum='bim';")))
-
-  ;; (it "update (postgres namespace)"
-  ;;   (let ((mql-insert '(table-foo (set :bool 0)
-  ;;                                 (where :enum bim)))
-  ;;         (config '(postgres :schema "notpublic")))
-  ;;     (expect (org-sql--format-mql-update config formatter-alist mql-insert)
-  ;;             :to-equal "UPDATE notpublic.table-foo SET bool=0 WHERE enum='bim';")))
+    (let* ((mql-insert '(table-foo :bool 0
+                                   :enum bim
+                                   :int 666
+                                   :text "hello"))
+          (config '(postgres :schema "notpublic"))
+          (formatter-alist
+           (->> test-schema
+                (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
+      (expect (org-sql--format-mql-insert formatter-alist mql-insert)
+              :to-equal "INSERT INTO notpublic.table-foo (bool,enum,int,text) VALUES (FALSE,'bim',666,'hello');")))
 
   (it "delete (no namespace)"
-    (let ((mql-delete '(table-foo))
-          (config '(sqlite)))
-      (expect (org-sql--format-mql-delete config formatter-alist mql-delete)
+    (let* ((mql-delete '(table-foo))
+           (config '(sqlite))
+           (formatter-alist
+            (->> test-schema
+                 (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
+      (expect (org-sql--format-mql-delete formatter-alist mql-delete)
               :to-equal "DELETE FROM table-foo;")))
 
   (it "delete (no namespace; where)"
-    (let ((mql-delete '(table-foo (where :enum bim)))
-          (config '(sqlite)))
-      (expect (org-sql--format-mql-delete config formatter-alist mql-delete)
+    (let* ((mql-delete '(table-foo (where :enum bim)))
+           (config '(sqlite))
+           (formatter-alist
+            (->> test-schema
+                 (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
+      (expect (org-sql--format-mql-delete formatter-alist mql-delete)
               :to-equal "DELETE FROM table-foo WHERE enum='bim';")))
 
   (it "delete (postgres namespace)"
-    (let ((mql-delete '(table-foo))
-          (config '(postgres :schema "notpublic")))
-      (expect (org-sql--format-mql-delete config formatter-alist mql-delete)
+    (let* ((mql-delete '(table-foo))
+           (config '(postgres :schema "notpublic"))
+           (formatter-alist
+            (->> test-schema
+                 (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
+      (expect (org-sql--format-mql-delete formatter-alist mql-delete)
               :to-equal "DELETE FROM notpublic.table-foo;")))
 
   (it "delete (postgres namespace; where)"
-    (let ((mql-delete '(table-foo (where :enum bim)))
-          (config '(postgres :schema "notpublic")))
-      (expect (org-sql--format-mql-delete config formatter-alist mql-delete)
+    (let* ((mql-delete '(table-foo (where :enum bim)))
+           (config '(postgres :schema "notpublic"))
+           (formatter-alist
+            (->> test-schema
+                 (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
+      (expect (org-sql--format-mql-delete formatter-alist mql-delete)
               :to-equal "DELETE FROM notpublic.table-foo WHERE enum='bim';")))
 
   (it "select"
-    (let ((mql-select '(table-foo (columns :bool)))
-          (config '(sqlite)))
+    (let* ((mql-select '(table-foo (columns :bool)))
+           (config '(sqlite))
+           (formatter-alist
+            (->> test-schema
+                 (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
       (expect (org-sql--format-mql-select config formatter-alist mql-select)
               :to-equal "SELECT bool FROM table-foo;")))
 
   (it "select (all columns)"
-    (let ((mql-select '(table-foo))
-          (config '(sqlite)))
+    (let* ((mql-select '(table-foo))
+           (config '(sqlite))
+           (formatter-alist
+            (->> test-schema
+                 (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
       (expect (org-sql--format-mql-select config formatter-alist mql-select)
               :to-equal "SELECT * FROM table-foo;")))
 
   (it "select (where)"
-    (let ((mql-select '(table-foo (columns :bool) (where :enum bim)))
-          (config '(sqlite)))
+    (let* ((mql-select '(table-foo (columns :bool) (where :enum bim)))
+           (config '(sqlite))
+           (formatter-alist
+            (->> test-schema
+                 (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
       (expect (org-sql--format-mql-select config formatter-alist mql-select)
               :to-equal "SELECT bool FROM table-foo WHERE enum='bim';")))
 
@@ -1783,7 +1793,7 @@ list then join the cdr of IN with newlines."
     (let ((mode 'sqlite)
           (statements (list "INSERT INTO foo (bar) values (1);")))
       (expect
-       (org-sql--format-sql-transaction mode statements)
+       (org-sql--format-sql-transaction '(sqlite) statements)
        :to-equal
        "PRAGMA foreign_keys = ON;BEGIN;INSERT INTO foo (bar) values (1);COMMIT;")))
 
@@ -1791,7 +1801,7 @@ list then join the cdr of IN with newlines."
     (let ((mode 'postgres)
           (statements (list "INSERT INTO foo (bar) values (1);")))
       (expect
-       (org-sql--format-sql-transaction mode statements)
+       (org-sql--format-sql-transaction '(postgres) statements)
        :to-equal
        "BEGIN;INSERT INTO foo (bar) values (1);COMMIT;"))))
 

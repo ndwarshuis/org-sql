@@ -1035,7 +1035,7 @@ The returned function will depend on the MODE and TYPE."
                     (format "'%s'")))))))
     `(lambda (it) (if it ,formatter-form "NULL"))))
 
-(defun org-sql--compile-mql-schema-formatter-alist (config mql-tables)
+(defun org-sql--compile-mql-schema-formatter-alist (config mql-table)
   "Return an alist of formatting functions for MQL-TABLES.
 MODE is the SQL mode. The alist will mirror MSL schema except that the
 car for each column will be a formatting function."
@@ -1044,12 +1044,14 @@ car for each column will be a formatting function."
         (mql-column)
         (-let* (((name . (&plist :type)) mql-column))
           (cons name (org-sql--compile-mql-format-function config type)))))
-    (-let* (((tbl-name . (&alist 'columns)) mql-tables))
-      (cons tbl-name (-map #'get-type-function columns)))))
+    (-let* (((tbl-name . (&alist 'columns)) mql-table)
+            (tbl-name* (org-sql--format-mql-table-name config tbl-name)))
+      (cons tbl-name (list :table-name tbl-name*
+                           :column-formatters (-map #'get-type-function columns))))))
 
 ;; helper functions
 
-(defun org-sql--format-mql-plist (formatter-alist sep plist)
+(defun org-sql--format-mql-plist (formatter-list sep plist)
   "Format a PLIST to a SQL-compliant string.
 FORMATTER-ALIST is an alist of formatting functions matching the keys
 in PLIST (whose keys in turn should match columns in the schema).
@@ -1058,7 +1060,10 @@ separated by SEP."
   (let ((keys (->> (-slice plist 0 nil 2)
                    (-map #'org-sql--format-mql-column-name)))
         (vals (->> (-partition 2 plist)
-                   (--map (funcall (alist-get (car it) formatter-alist) (cadr it))))))
+                   (--map (funcall
+                           (->> (plist-get formatter-list :column-formatters)
+                                (alist-get (car it)))
+                           (cadr it))))))
     (-some->> (--zip-with (format "%s=%s" it other) keys vals)
       (s-join sep))))
 
@@ -1256,19 +1261,22 @@ CONFIG is the `org-sql-db-config' list."
 
 ;; insert
 
-(defun org-sql--format-mql-insert (config formatter-alist mql-insert)
+(defun org-sql--format-mql-insert (formatter-alist mql-insert)
   "Return SQL string for MQL-INSERT.
 FORMATTER-ALIST is an alist of functions given by
-`org-sql--compile-mql-format-function'. CONFIG is the
-`org-sql-db-config' list."
+`org-sql--compile-mql-format-function'."
   (-let* (((tbl-name . keyvals) mql-insert)
-          (tbl-name* (org-sql--format-mql-table-name config tbl-name))
           (formatter-list (alist-get tbl-name formatter-alist))
+          (tbl-name* (plist-get formatter-list :table-name))
           (columns (->> (-slice keyvals 0 nil 2)
                         (-map #'org-sql--format-mql-column-name)
                         (s-join ",")))
           (values (->> (-partition 2 keyvals)
-                       (--map (funcall (alist-get (car it) formatter-list) (cadr it)))
+                       (--map (funcall
+                               (->> (plist-get formatter-list :column-formatters)
+                                    (alist-get (car it)))
+                               (cadr it)))
+                       ;; (--map (funcall (plist-get (alist-get (car it) formatter-list) :column-formatters)))
                        (s-join ","))))
     (format "INSERT INTO %s (%s) VALUES (%s);" tbl-name* columns values)))
 
@@ -1288,14 +1296,14 @@ FORMATTER-ALIST is an alist of functions given by
 
 ;; delete
 
-(defun org-sql--format-mql-delete (config formatter-alist mql-delete)
+(defun org-sql--format-mql-delete (formatter-alist mql-delete)
   "Return SQL string for MQL-DELETE.
 FORMATTER-ALIST is an alist of functions given by
 `org-sql--compile-mql-format-function'. CONFIG is the
 `org-sql-db-config' list."
   (-let* (((tbl-name . (&alist 'where)) mql-delete)
-          (tbl-name* (org-sql--format-mql-table-name config tbl-name))
-          (formatter-list (alist-get tbl-name formatter-alist)))
+          (formatter-list (alist-get tbl-name formatter-alist))
+          (tbl-name* (plist-get formatter-list :table-name)))
     (if (not where) (format "DELETE FROM %s;" tbl-name*)
       (->> (org-sql--format-mql-plist formatter-list " and " where)
            (format "DELETE FROM %s WHERE %s;" tbl-name*)))))
@@ -1308,6 +1316,8 @@ FORMATTER-ALIST is an alist of functions given by
 `org-sql--compile-mql-format-function'. CONFIG is the
 `org-sql-db-config' list."
   (-let* (((tbl-name . (&alist 'columns 'where)) mql-select)
+          ;; TODO this breaks the pattern where the formatter alist has all the
+          ;; formatting information
           (tbl-name* (org-sql--format-mql-table-name config tbl-name))
           (formatter-list (alist-get tbl-name formatter-alist))
           (columns* (or (-some->> (-map #'org-sql--format-mql-column-name columns)
@@ -2144,22 +2154,22 @@ state as the orgfiles on disk."
           (->> (org-sql--group-fmetas-by-hash fmeta)
                (--mapcat (->> (org-sql--fmeta-get-fstate (car it) (cdr it))
                               (org-sql--fstate-to-mql-insert)))
-               (--map (org-sql--format-mql-insert org-sql-db-config formatter-alist it))))
+               (--map (org-sql--format-mql-insert formatter-alist it))))
          (file-deletes-to-sql
           (fmeta)
           (->> (org-sql--fmeta-to-hashes fmeta)
                (--map (->> (org-sql--fmeta-to-mql-delete it)
-                           (org-sql--format-mql-delete org-sql-db-config formatter-alist)))))
+                           (org-sql--format-mql-delete formatter-alist)))))
          (path-inserts-to-sql
           (fmeta)
           (->> (org-sql--group-fmetas-by-hash fmeta)
                (--mapcat (org-sql--fmeta-to-mql-path-insert (car it) (cdr it)))
-               (--map (org-sql--format-mql-insert org-sql-db-config formatter-alist it))))
+               (--map (org-sql--format-mql-insert formatter-alist it))))
          (path-deletes-to-sql
           (fmeta)
           (->> (org-sql--group-fmetas-by-hash fmeta)
                (--mapcat (org-sql--fmeta-to-mql-path-delete (car it) (cdr it)))
-               (--map (org-sql--format-mql-delete org-sql-db-config formatter-alist it)))))
+               (--map (org-sql--format-mql-delete formatter-alist it)))))
       (->> (append (path-inserts-to-sql paths-to-insert)
                    (path-deletes-to-sql paths-to-delete)
                    (file-deletes-to-sql files-to-delete)
