@@ -99,454 +99,390 @@ to store them. This is in addition to any properties specifified by
   '(active active-range inactive inactive-range)
   "Types of timestamps to include in the database.")
 
-;; file_path and tags columns need to have fixed length for certain DBMSs when
-;; used as primary keys. file_path is set to 255 since this is the max length
-;; of the filepath string for pretty much all filesystems (including the fancy
-;; sci-fi ones like ZFS). tags is set to 32 because...well, who would make a tag
-;; in org-mode greater than 32 chars (or even 16)?
-(defconst org-sql--file-path-varchar-length 255
-  "Length of the file_path column varchar type.")
-
-(defconst org-sql--tag-varchar-length 32
-  "Length of the tag column varchar type.")
-
-(defconst org-sql--file_hash-char-length 32
-  "Length of the file_hash column char type.")
-
 (eval-and-compile
   ;; TODO use UUID type where possible for the hash column
-  (defconst org-sql--mql-tables
-    `((file_hashes
-       (desc . "Each row describes one org file (which may have multiple filepaths)")
-       (columns
-        (:file_hash :desc "hash (MD5) of the org file"
-                    :type char
-                    :size ,org-sql--file_hash-char-length)
-        (:size :desc "size of the org file in bytes"
-               :type integer
-               :constraints (notnull)))
-        ;; (:lines :desc "number of lines in the org file"
-        ;;         :type integer))
-       (constraints
-        (primary :keys (:file_hash))))
+  (let ((file_hash-char-length 32)
+        ;; ASSUME all filesystems we would ever want to use have a path limit of
+        ;; 255 chars (which is almost always true)
+        (file_path-varchar-length 255)
+        (tag-varchar-length 32)
+        (tag-col
+         '(:tag :desc "the text value of this tag"
+                :type varchar
+                :length 32))
+        (property-offset-col
+         '(:property_offset :desc "offset of this property"
+                            :type integer))
+        (modifier-allowed-units '(hour day week month year)))
+    (cl-flet*
+        ((mql-col
+          (default-desc fmt name other object notnull)
+          (let* ((d (if object (format fmt object) default-desc))
+                 (k `(,name :desc ,d ,@other)))
+            (if notnull `(,@k :constraints (notnull)) k)))
+         (file-hash-col
+          (&optional object notnull)
+          (mql-col "hash (MD5) of this org-tree"
+                   "hash (MD5) of the org-tree with this %s"
+                   :file_hash `(:type char :length ,file_hash-char-length)
+                   object notnull))
+         (headline-offset-col
+          (&optional object notnull)
+          (mql-col "offset of this headline"
+                   "offset of the headline with this %s"
+                   :headline_offset '(:type integer) object notnull))
+         (timestamp-offset-col
+          (&optional object notnull)
+          (mql-col "offset of this timestamp"
+                   "offset of the timestamp with this %s"
+                   :timestamp_offset '(:type integer) object notnull))
+         (entry-offset-col
+          (&optional object)
+          (mql-col "offset of this logbook entry"
+                   "offset of the entry with this logbook %s"
+                   :entry_offset '(:type integer) object nil)))
+      (defconst org-sql--mql-tables
+        `((file_hashes
+           (desc . "Each row describes one org file (which may have multiple filepaths)")
+           (columns
+            ,(file-hash-col)
+            (:size :desc "size of the org file in bytes"
+                   :type integer
+                   :constraints (notnull)))
+           ;; (:lines :desc "number of lines in the org file"
+           ;;         :type integer))
+           (constraints
+            (primary :keys (:file_hash))))
 
-      (file_metadata
-       (desc . "Each row stores filesystem metadata for one tracked org file")
-       (columns
-        (:file_path :desc "path to the org file"
-                    :type varchar
-                    :length ,org-sql--file-path-varchar-length)
-        (:file_hash :desc "hash (MD5) of the org file"
-                    :type char
-                    :size ,org-sql--file_hash-char-length
-                    :constraints (notnull)))
-       (constraints
-        (primary :keys (:file_path))
-        (foreign :ref file_hashes
-                 :keys (:file_hash)
-                 :parent-keys (:file_hash)
-                 ;; TODO this 'on_delete' is not lispy because it has a '_'
-                 :on_delete cascade)))
+          (file_metadata
+           (desc . "Each row stores filesystem metadata for one tracked org file")
+           (columns
+            (:file_path :desc "path to org file"
+                        :type varchar
+                        :length ,file_path-varchar-length)
+            ,(file-hash-col "path" t))
+           (constraints
+            (primary :keys (:file_path))
+            (foreign :ref file_hashes
+                     :keys (:file_hash)
+                     :parent-keys (:file_hash)
+                     ;; TODO this 'on_delete' is not lispy because it has a '_'
+                     :on_delete cascade)))
 
-      (headlines
-       (desc . "Each row stores one headline in a given org file and its metadata")
-       (columns
-        (:file_hash :desc "hash (MD5) of the org file"
-                    :type char
-                    :size ,org-sql--file_hash-char-length)
-        (:headline_offset :desc "file offset of the headline's first character"
-                          :type integer)
-        (:headline_text :desc "raw text of the headline"
+          (headlines
+           (desc . "Each row stores one headline in a given org file and its metadata")
+           (columns
+            ,(file-hash-col "headline")
+            ,(headline-offset-col)
+            (:headline_text :desc "raw text of the headline"
+                            :type text
+                            :constraints (notnull))
+            (:keyword :desc "the TODO state keyword"
+                      :type text)
+            (:effort :desc "the value of the Effort property in minutes"
+                     :type integer)
+            (:priority :desc "character value of the priority"
+                       :type text)
+            (:is_archived :desc "true if the headline has an archive tag"
+                          :type boolean
+                          :constraints (notnull))
+            (:is_commented :desc "true if the headline has a comment keyword"
+                           :type boolean
+                           :constraints (notnull))
+            (:content :desc "the headline contents"
+                      :type text))
+           (constraints
+            (primary :keys (:file_hash :headline_offset))
+            (foreign :ref file_hashes
+                     :keys (:file_hash)
+                     :parent-keys (:file_hash)
+                     :on_delete cascade)))
+
+          (headline_closures
+           (desc . "Each row stores the ancestor and depth of a headline relationship (eg closure table)")
+           (columns
+            ,(file-hash-col "headline")
+            ,(headline-offset-col)
+            (:parent_offset :desc "offset of this headline's parent"
+                            :type integer)
+            (:depth :desc "levels between this headline and the referred parent"
+                    :type integer))
+           (constraints
+            (primary :keys (:file_hash :headline_offset :parent_offset))
+            (foreign :ref headlines
+                     :keys (:file_hash :headline_offset)
+                     :parent-keys (:file_hash :headline_offset)
+                     :on_delete cascade)
+            (foreign :ref headlines
+                     :keys (:file_hash :parent_offset)
+                     :parent-keys (:file_hash :headline_offset))))
+
+          (timestamps
+           (desc . "Each row stores one timestamp")
+           (columns
+            ,(file-hash-col "timestamp")
+            ,(headline-offset-col "timestamp" t)
+            ,(timestamp-offset-col)
+            (:raw_value :desc "text representation of this timestamp"
                         :type text
                         :constraints (notnull))
-        (:keyword :desc "the TODO state keyword"
-                  :type text)
-        (:effort :desc "the value of the Effort property in minutes"
-                 :type integer)
-        (:priority :desc "character value of the priority"
-                   :type text)
-        (:is_archived :desc "true if the headline has an archive tag"
-                      :type boolean
-                      :constraints (notnull))
-        (:is_commented :desc "true if the headline has a comment keyword"
-                       :type boolean
-                       :constraints (notnull))
-        (:content :desc "the headline contents"
-                  :type text))
-       (constraints
-        (primary :keys (:file_hash :headline_offset))
-        (foreign :ref file_hashes
-                 :keys (:file_hash)
-                 :parent-keys (:file_hash)
-                 :on_delete cascade)))
-
-      (headline_closures
-       (desc . "Each row stores the ancestor and depth of a headline relationship (eg closure table)")
-       (columns
-        (:file_hash :desc "hash (MD5) of the org file"
-                    :type char
-                    :size ,org-sql--file_hash-char-length)
-        (:headline_offset :desc "offset of this headline"
-                          :type integer)
-        (:parent_offset :desc "offset of this headline's parent"
-                        :type integer)
-        (:depth :desc "levels between this headline and the referred parent"
-                :type integer))
-       (constraints
-        (primary :keys (:file_hash :headline_offset :parent_offset))
-        (foreign :ref headlines
-                 :keys (:file_hash :headline_offset)
-                 :parent-keys (:file_hash :headline_offset)
-                 :on_delete cascade)
-        (foreign :ref headlines
-                 :keys (:file_hash :parent_offset)
-                 :parent-keys (:file_hash :headline_offset))))
-                 ;; :on_delete no-action)))
-                 ;; :on_delete cascade)))
-
-      (timestamps
-       (desc . "Each row stores one timestamp")
-       (columns
-        (:file_hash :desc "hash (MD5) of the org file"
-                    :type char
-                    :size ,org-sql--file_hash-char-length)
-        (:headline_offset :desc "offset of the headline containing this timestamp"
-                          :type integer
-                          :constraints (notnull))
-        (:timestamp_offset :desc "offset of this timestamp"
-                           :type integer)
-        (:raw_value :desc "text representation of this timestamp"
-                    :type text
-                    :constraints (notnull))
-        (:is_active :desc "true if the timestamp is active"
-                    :type boolean
-                    :constraints (notnull))
-        (:time_start :desc "the start time (or only time) of this timestamp"
-                     :type integer
-                     :constraints (notnull))
-        (:time_end :desc "the end time of this timestamp"
-                   :type integer)
-        (:start_is_long :desc "true if the start time is in long format"
+            (:is_active :desc "true if the timestamp is active"
                         :type boolean
                         :constraints (notnull))
-        (:end_is_long :desc "true if the end time is in long format"
-                      :type boolean))
-       (constraints
-        (primary :keys (:file_hash :timestamp_offset))
-        (foreign :ref headlines
-                 :keys (:file_hash :headline_offset)
-                 :parent-keys (:file_hash :headline_offset)
-                 :on_delete cascade)))
+            (:time_start :desc "the start time (or only time) of this timestamp"
+                         :type integer
+                         :constraints (notnull))
+            (:time_end :desc "the end time of this timestamp"
+                       :type integer)
+            (:start_is_long :desc "true if the start time is in long format"
+                            :type boolean
+                            :constraints (notnull))
+            (:end_is_long :desc "true if the end time is in long format"
+                          :type boolean))
+           (constraints
+            (primary :keys (:file_hash :timestamp_offset))
+            (foreign :ref headlines
+                     :keys (:file_hash :headline_offset)
+                     :parent-keys (:file_hash :headline_offset)
+                     :on_delete cascade)))
 
-      (timestamp_modifiers
-       (desc . "Each row stores one timestamp modifier (repeater, warning, etc)")
-       (columns
-        (:file_hash :desc "hash (MD5) of the org file"
-                    :type char
-                    :size ,org-sql--file_hash-char-length)
-        (:timestamp_offset :desc "offset of this timestamp"
-                           :type integer)
-        (:modifier_type :desc "type of this modifier"
-                        :type enum
-                        :type-id "timestamp_modifier_type"
-                        :allowed (warning repeater))
-        (:modifier_value :desc "shift of this modifier"
-                         :type integer)
-        (:modifier_unit :desc "unit of this modifier"
-                        :type enum
-                        :allowed (hour day week month year)))
-       (constraints
-        (primary :keys (:file_hash :timestamp_offset :modifier_type))
-        (foreign :ref timestamps
-                 :keys (:file_hash :timestamp_offset)
-                 :parent-keys (:file_hash :timestamp_offset)
-                 :on_delete cascade)))
+          (timestamp_warnings
+           (desc . "Each row stores specific information for a timestamp warning")
+           (columns
+            ,(file-hash-col "warning")
+            ,(timestamp-offset-col "warning")
+            (:warning_value :desc "shift of this warning"
+                             :type integer)
+            (:warning_unit :desc "unit of this warning"
+                            :type enum
+                            :allowed ,modifier-allowed-units)
+            (:warning_type :desc "type of this warning"
+                           :type enum
+                           :allowed (all first)))
+           (constraints
+            (primary :keys (:file_hash :timestamp_offset))
+            (foreign :ref timestamps
+                     :keys (:file_hash :timestamp_offset)
+                     :parent-keys (:file_hash :timestamp_offset)
+                     :on_delete cascade)))
+          
+          (timestamp_repeaters
+           (desc . "Each row stores specific information for a timestamp repeater")
+           (columns
+            ,(file-hash-col "repeater")
+            ,(timestamp-offset-col "repeater")
+            (:repeater_value :desc "shift of this repeater"
+                             :type integer)
+            (:repeater_unit :desc "unit of this repeater"
+                            :type enum
+                            :allowed ,modifier-allowed-units)
+            (:repeater_type :desc "type of this repeater"
+                           :type enum
+                           :allowed (catch-up restart cumulate)))
+           (constraints
+            (primary :keys (:file_hash :timestamp_offset))
+            (foreign :ref timestamps
+                     :keys (:file_hash :timestamp_offset)
+                     :parent-keys (:file_hash :timestamp_offset)
+                     :on_delete cascade)))
 
-      (timestamp_warnings
-       (desc . "Each row stores specific information for a timestamp warning")
-       (columns
-        (:file_hash :desc "hash (MD5) of the org file"
-                    :type char
-                    :size ,org-sql--file_hash-char-length)
-        (:timestamp_offset :desc "offset of this timestamp"
-                           :type integer)
-        (:modifier_type :desc "type of this modifier"
-                        :type enum
-                        :type-id "timestamp_modifier_type"
-                        :allowed (warning repeater))
-        (:warning_type :desc "warning type of this timestamp"
-                       :type enum
-                       :allowed (all first)))
-       (constraints
-        (primary :keys (:file_hash :timestamp_offset :modifier_type))
-        (foreign :ref timestamp_modifiers
-                 :keys (:file_hash :timestamp_offset :modifier_type)
-                 :parent-keys (:file_hash :timestamp_offset :modifier_type)
-                 :on_delete cascade)))
+          (planning_entries
+           (desc . "Each row stores the metadata for headline planning timestamps.")
+           (columns
+            ,(file-hash-col "planning entry")
+            ,(headline-offset-col "planning entry")
+            (:planning_type :desc "the type of this planning entry"
+                            :type enum
+                            :length 9
+                            :allowed (closed scheduled deadline))
+            ,(timestamp-offset-col "planning entry" t))
+           (constraints
+            (primary :keys (:file_hash :headline_offset :planning_type))
+            (foreign :ref timestamps
+                     :keys (:file_hash :timestamp_offset)
+                     :parent-keys (:file_hash :timestamp_offset)
+                     :on_delete cascade)))
 
-      (timestamp_repeaters
-       (desc . "Each row stores specific information for a timestamp repeater")
-       (columns
-        (:file_hash :desc "hash (MD5) of the org file"
-                    :type char
-                    :size ,org-sql--file_hash-char-length)
-        (:timestamp_offset :desc "offset of this timestamp"
-                           :type integer)
-        (:modifier_type :desc "type of this modifier"
-                        :type enum
-                        :type-id "timestamp_modifier_type"
-                        :allowed (warning repeater))
-        (:repeater_type :desc "repeater type of this timestamp"
-                        :type enum
-                        :allowed (catch-up restart cumulate)))
-       (constraints
-        (primary :keys (:file_hash :timestamp_offset :modifier_type))
-        (foreign :ref timestamp_modifiers
-                 :keys (:file_hash :timestamp_offset :modifier_type)
-                 :parent-keys (:file_hash :timestamp_offset :modifier_type)
-                 :on_delete cascade)))
+          (file_tags
+           (desc . "Each row stores one tag at the file level")
+           (columns
+            ,(file-hash-col "tag")
+            ,tag-col)
+           (constraints
+            (primary :keys (:file_hash :tag))
+            (foreign :ref file_hashes
+                     :keys (:file_hash)
+                     :parent-keys (:file_hash)
+                     :on_delete cascade)))
 
-      (planning_entries
-       (desc . "Each row stores the metadata for headline planning timestamps.")
-       (columns
-        (:file_hash :desc "hash (MD5) of the org file"
-                    :type char
-                    :size ,org-sql--file_hash-char-length)
-        (:headline_offset :desc "file offset of the headline with this tag"
-                          :type integer)
-        (:planning_type :desc "the type of this planning entry"
-                        :type enum
-                        :length 9
-                        :allowed (closed scheduled deadline))
-        (:timestamp_offset :desc "file offset of this entries timestamp"
-                           :type integer
+          (headline_tags
+           (desc . "Each row stores one tag")
+           (columns
+            ,(file-hash-col "tag")
+            ,(headline-offset-col "tag")
+            ,tag-col
+            (:is_inherited :desc "true if this tag is from the ITAGS property"
+                           :type boolean
                            :constraints (notnull)))
-       (constraints
-        (primary :keys (:file_hash :headline_offset :planning_type))
-        (foreign :ref timestamps
-                 :keys (:file_hash :timestamp_offset)
-                 :parent-keys (:file_hash :timestamp_offset)
-                 :on_delete cascade)))
+           (constraints
+            (primary :keys (:file_hash :headline_offset :tag :is_inherited))
+            (foreign :ref headlines
+                     :keys (:file_hash :headline_offset)
+                     :parent-keys (:file_hash :headline_offset)
+                     :on_delete cascade)))
 
-      (file_tags
-       (desc . "Each row stores one tag at the file level")
-       (columns
-        (:file_hash :desc "hash (MD5) of the org file"
-                    :type char
-                    :size ,org-sql--file_hash-char-length)
-        (:tag :desc "the text value of this tag"
-              :type varchar
-              :length ,org-sql--tag-varchar-length))
-       (constraints
-        (primary :keys (:file_hash :tag))
-        (foreign :ref file_hashes
-                 :keys (:file_hash)
-                 :parent-keys (:file_hash)
-                 :on_delete cascade)))
-
-      (headline_tags
-       (desc . "Each row stores one tag")
-       (columns
-        (:file_hash :desc "hash (MD5) of the org file"
-                    :type char
-                    :size ,org-sql--file_hash-char-length)
-        (:headline_offset :desc "file offset of the headline with this tag"
-                          :type integer)
-        (:tag :desc "the text value of this tag"
-              :type varchar
-              :length ,org-sql--tag-varchar-length)
-        (:is_inherited :desc "true if this tag is from the ITAGS property"
-                       :type boolean
+          (properties
+           (desc . "Each row stores one property")
+           (columns
+            ,(file-hash-col "property")
+            ,property-offset-col
+            (:key_text :desc "this property's key"
+                       :type text
+                       :constraints (notnull))
+            (:val_text :desc "this property's value"
+                       :type text
                        :constraints (notnull)))
-       (constraints
-        (primary :keys (:file_hash :headline_offset :tag :is_inherited))
-        (foreign :ref headlines
-                 :keys (:file_hash :headline_offset)
-                 :parent-keys (:file_hash :headline_offset)
-                 :on_delete cascade)))
+           (constraints
+            (primary :keys (:file_hash :property_offset))
+            (foreign :ref file_hashes
+                     :keys (:file_hash)
+                     :parent-keys (:file_hash)
+                     :on_delete cascade)))
 
-      (properties
-       (desc . "Each row stores one property")
-       (columns
-        (:file_hash :desc "hash (MD5) of the org file"
-                    :type char
-                    :size ,org-sql--file_hash-char-length)
-        (:property_offset :desc "file offset of this property in the org file"
-                          :type integer)
-        (:key_text :desc "this property's key"
-                   :type text
-                   :constraints (notnull))
-        (:val_text :desc "this property's value"
-                   :type text
-                   :constraints (notnull)))
-       (constraints
-        (primary :keys (:file_hash :property_offset))
-        (foreign :ref file_hashes
-                 :keys (:file_hash)
-                 :parent-keys (:file_hash)
-                 :on_delete cascade)))
+          (file_properties
+           (desc . "Each row stores a property at the file level")
+           (columns
+            ,(file-hash-col "property")
+            ,property-offset-col)
+           (constraints
+            (primary :keys (:file_hash :property_offset))
+            (foreign :ref file_hashes
+                     :keys (:file_hash)
+                     :parent-keys (:file_hash)
+                     :on_delete cascade)
+            (foreign :ref properties
+                     :keys (:file_hash :property_offset)
+                     :parent-keys (:file_hash :property_offset)
+                     :on_delete cascade)))
 
-      (file_properties
-       (desc . "Each row stores a property at the file level")
-       (columns
-        (:file_hash :desc "hash (MD5) of the org file"
-                    :type char
-                    :size ,org-sql--file_hash-char-length)
-        (:property_offset :desc "file offset of this property in the org file"
-                          :type integer))
-       (constraints
-        (primary :keys (:file_hash :property_offset))
-        (foreign :ref file_hashes
-                 :keys (:file_hash)
-                 :parent-keys (:file_hash)
-                 :on_delete cascade)
-        (foreign :ref properties
-                 :keys (:file_hash :property_offset)
-                 :parent-keys (:file_hash :property_offset)
-                 :on_delete cascade)))
-
-      (headline_properties
-       (desc . "Each row stores a property at the headline level")
-       (columns
-        (:file_hash :desc "hash (MD5) of the org file"
-                    :type char
-                    :size ,org-sql--file_hash-char-length)
-        (:property_offset :desc "file offset of this property in the org file"
-                          :type integer)
-        (:headline_offset :desc "file offset of the headline with this property"
-                          :type integer
-                          :constraints (notnull)))
-       (constraints
-        (primary :keys (:file_hash :property_offset))
-        (foreign :ref properties
-                 :keys (:file_hash :property_offset)
-                 :parent-keys (:file_hash :property_offset)
-                 :on_delete cascade)
-        (foreign :ref headlines
-                 :keys (:file_hash :headline_offset)
-                 :parent-keys (:file_hash :headline_offset)
-                 :on_delete cascade)))
-      
-      (clocks
-       (desc . "Each row stores one clock entry")
-       (columns
-        (:file_hash :desc "hash (MD5) of the org file"
-                    :type char
-                    :size ,org-sql--file_hash-char-length)
-        (:headline_offset :desc "offset of the headline with this clock"
-                          :type integer
-                          :constraints (notnull))
-        (:clock_offset :desc "file offset of this clock"
+          (headline_properties
+           (desc . "Each row stores a property at the headline level")
+           (columns
+            ,(file-hash-col "property")
+            ,property-offset-col
+            ,(headline-offset-col "property" t))
+           (constraints
+            (primary :keys (:file_hash :property_offset))
+            (foreign :ref properties
+                     :keys (:file_hash :property_offset)
+                     :parent-keys (:file_hash :property_offset)
+                     :on_delete cascade)
+            (foreign :ref headlines
+                     :keys (:file_hash :headline_offset)
+                     :parent-keys (:file_hash :headline_offset)
+                     :on_delete cascade)))
+          
+          (clocks
+           (desc . "Each row stores one clock entry")
+           (columns
+            ,(file-hash-col "clock")
+            (:clock_offset :desc "offset of this clock"
+                           :type integer)
+            ,(headline-offset-col "clock" t)
+            (:time_start :desc "timestamp for the start of this clock"
+                         :type integer)
+            (:time_end :desc "timestamp for the end of this clock"
                        :type integer)
-        (:time_start :desc "timestamp for the start of this clock"
-                     :type integer)
-        (:time_end :desc "timestamp for the end of this clock"
-                   :type integer)
-        (:clock_note :desc "the note entry beneath this clock"
-                     :type text))
-       (constraints
-        (primary :keys (:file_hash :clock_offset))
-        (foreign :ref headlines
-                 :keys (:file_hash :headline_offset)
-                 :parent-keys (:file_hash :headline_offset)
-                 :on_delete cascade)))
+            (:clock_note :desc "the note entry beneath this clock"
+                         :type text))
+           (constraints
+            (primary :keys (:file_hash :clock_offset))
+            (foreign :ref headlines
+                     :keys (:file_hash :headline_offset)
+                     :parent-keys (:file_hash :headline_offset)
+                     :on_delete cascade)))
 
-      (logbook_entries
-       (desc . "Each row stores one logbook entry (except for clocks)")
-       (columns
-        (:file_hash :desc "hash (MD5) of the org file"
-                    :type char
-                    :size ,org-sql--file_hash-char-length)
-        (:headline_offset :desc "offset of the headline with this entry"
-                          :type integer
-                          :constraints (notnull))
-        (:entry_offset :desc "offset of this logbook entry"
-                       :type integer)
-        (:entry_type :desc "type of this entry (see `org-log-note-headlines')"
+          (logbook_entries
+           (desc . "Each row stores one logbook entry (except for clocks)")
+           (columns
+            ,(file-hash-col "logbook entry")
+            ,(entry-offset-col)
+            ,(headline-offset-col "logbook entry" t)
+            (:entry_type :desc "type of this entry (see `org-log-note-headlines')"
+                         :type text)
+            (:time_logged :desc "timestamp for when this entry was taken"
+                          :type integer)
+            (:header :desc "the first line of this entry (usually standardized)"
                      :type text)
-        (:time_logged :desc "timestamp for when this entry was taken"
-                      :type integer)
-        (:header :desc "the first line of this entry (usually standardized)"
-                 :type text)
-        (:note :desc "the text of this entry underneath the header"
-               :type text))
-       (constraints
-        (primary :keys (:file_hash :entry_offset))
-        (foreign :ref headlines
-                 :keys (:file_hash :headline_offset)
-                 :parent-keys (:file_hash :headline_offset)
-                 :on_delete cascade)))
+            (:note :desc "the text of this entry underneath the header"
+                   :type text))
+           (constraints
+            (primary :keys (:file_hash :entry_offset))
+            (foreign :ref headlines
+                     :keys (:file_hash :headline_offset)
+                     :parent-keys (:file_hash :headline_offset)
+                     :on_delete cascade)))
 
-      (state_changes
-       (desc . "Each row stores additional metadata for a state change logbook entry")
-       (columns
-        (:file_hash :desc "hash (MD5) of the org file"
-                    :type char
-                    :size ,org-sql--file_hash-char-length)
-        (:entry_offset :desc "offset of the logbook entry for this state change"
-                       :type integer)
-        (:state_old :desc "former todo state keyword"
-                    :type text
-                    :constraints (notnull))
-        (:state_new :desc "updated todo state keyword"
-                    :type text
-                    :constraints (notnull)))
-       (constraints
-        (primary :keys (:file_hash :entry_offset))
-        (foreign :ref logbook_entries
-                 :keys (:file_hash :entry_offset)
-                 :parent-keys (:file_hash :entry_offset)
-                 :on_delete cascade)))
+          (state_changes
+           (desc . "Each row stores additional metadata for a state change logbook entry")
+           (columns
+            ,(file-hash-col "state change")
+            ,(entry-offset-col "state change")
+            (:state_old :desc "former todo state keyword"
+                        :type text
+                        :constraints (notnull))
+            (:state_new :desc "updated todo state keyword"
+                        :type text
+                        :constraints (notnull)))
+           (constraints
+            (primary :keys (:file_hash :entry_offset))
+            (foreign :ref logbook_entries
+                     :keys (:file_hash :entry_offset)
+                     :parent-keys (:file_hash :entry_offset)
+                     :on_delete cascade)))
 
-      (planning_changes
-       (desc . "Each row stores additional metadata for a planning change logbook entry")
-       (columns
-        (:file_hash :desc "hash (MD5) of the org file"
-                    :type char
-                    :size ,org-sql--file_hash-char-length)
-        (:entry_offset :desc "offset of the logbook entry for this planning change"
-                       :type integer)
-        (:timestamp_offset :desc "offset of the former timestamp"
-                           :type integer
-                           :constraints (notnull)))
-       (constraints
-        (primary :keys (:file_hash :entry_offset))
-        (foreign :ref timestamps
-                 :keys (:file_hash :timestamp_offset)
-                 :parent-keys (:file_hash :timestamp_offset)
-                 :on_delete cascade)
-        (foreign :ref logbook_entries
-                 :keys (:file_hash :entry_offset)
-                 :parent-keys (:file_hash :entry_offset)
-                 :on_delete cascade)))
+          (planning_changes
+           (desc . "Each row stores additional metadata for a planning change logbook entry")
+           (columns
+            ,(file-hash-col "planning change")
+            ,(entry-offset-col "planning change")
+            (:timestamp_offset :desc "offset of the former timestamp"
+                               :type integer
+                               :constraints (notnull)))
+           (constraints
+            (primary :keys (:file_hash :entry_offset))
+            (foreign :ref timestamps
+                     :keys (:file_hash :timestamp_offset)
+                     :parent-keys (:file_hash :timestamp_offset)
+                     :on_delete cascade)
+            (foreign :ref logbook_entries
+                     :keys (:file_hash :entry_offset)
+                     :parent-keys (:file_hash :entry_offset)
+                     :on_delete cascade)))
 
-      (links
-       (desc . "Each row stores one link")
-       (columns
-        (:file_hash :desc "hash (MD5) of the org file"
-                    :type char
-                    :size ,org-sql--file_hash-char-length)
-        (:headline_offset :desc "offset of the headline with this link"
-                          :type integer
-                          :constraints (notnull))
-        (:link_offset :desc "file offset of this link"
-                      :type integer)
-        (:link_path :desc "target of this link (eg url, file path, etc)"
-                    :type text
-                    :constraints (notnull))
-        (:link_text :desc "text of this link"
-                    :type text)
-        (:link_type :desc "type of this link (eg http, mu4e, file, etc)"
-                    :type text
-                    :constraints (notnull)))
-       (constraints
-        (primary :keys (:file_hash :link_offset))
-        (foreign :ref headlines
-                 :keys (:file_hash :headline_offset)
-                 :parent-keys (:file_hash :headline_offset)
-                 :on_delete cascade))))
-    "Org-SQL database schema represented in internal meta query
-    language (MQL, basically a giant list)"))
+          (links
+           (desc . "Each row stores one link")
+           (columns
+            ,(file-hash-col "link")
+            ,(headline-offset-col "link" t)
+            (:link_offset :desc "file offset of this link"
+                          :type integer)
+            (:link_path :desc "target of this link (eg url, file path, etc)"
+                        :type text
+                        :constraints (notnull))
+            (:link_text :desc "text of this link"
+                        :type text)
+            (:link_type :desc "type of this link (eg http, mu4e, file, etc)"
+                        :type text
+                        :constraints (notnull)))
+           (constraints
+            (primary :keys (:file_hash :link_offset))
+            (foreign :ref headlines
+                     :keys (:file_hash :headline_offset)
+                     :parent-keys (:file_hash :headline_offset)
+                     :on_delete cascade))))
+      "Org-SQL database schema represented in internal meta query
+    language (MQL, basically a giant list)"))))
 
 (defconst org-sql-table-names (--map (symbol-name (car it)) org-sql--mql-tables)
   "The names of all required tables in org-sql.")
@@ -1841,33 +1777,30 @@ returned by `org-sql--to-hstate'."
 (defmacro org-sql--add-mql-insert-timestamp-mod (acc modifier-type file-hash
                                                      timestamp)
   (declare (indent 2))
-  (-let (((tbl-name type-column type-prop value-prop unit-prop)
+  (-let (((tbl-name value-col unit-col type-col type-prop value-prop unit-prop)
           (cl-case modifier-type
             (warning (list 'timestamp_warnings
+                           :warning_value
+                           :warning_unit
                            :warning_type
                            :warning-type
                            :warning-value
                            :warning-unit))
             (repeater (list 'timestamp_repeaters
+                            :repeater_value
+                            :repeater_unit
                             :repeater_type
                             :repeater-type
                             :repeater-value
                             :repeater-unit))
             (t (error "Unknown modifier type: %s" modifier-type)))))
     `(-if-let (type (org-ml-get-property ,type-prop ,timestamp))
-         (let ((timestamp-offset (org-ml-get-property :begin ,timestamp)))
-           (--> ,acc
-             (org-sql--add-mql-insert it timestamp_modifiers
-               :file_hash ,file-hash
-               :timestamp_offset timestamp-offset
-               :modifier_type ',modifier-type
-               :modifier_value (org-ml-get-property ,value-prop ,timestamp)
-               :modifier_unit (org-ml-get-property ,unit-prop ,timestamp))
-             (org-sql--add-mql-insert it ,tbl-name
-               :file_hash ,file-hash
-               :timestamp_offset timestamp-offset
-               :modifier_type ',modifier-type
-               ,type-column type)))
+         (org-sql--add-mql-insert ,acc ,tbl-name
+           :file_hash ,file-hash
+           :timestamp_offset (org-ml-get-property :begin ,timestamp)
+           ,value-col (org-ml-get-property ,value-prop ,timestamp)
+           ,unit-col (org-ml-get-property ,unit-prop ,timestamp)
+           ,type-col type)
        ,acc)))
 
 (defun org-sql--add-mql-insert-timestamp (acc hstate timestamp)
@@ -2407,6 +2340,7 @@ The database connection will be handled transparently."
     (let ((res (org-sql--send-sql sql-cmd)))
       res)))
 
+;; TODO add function to drop all tables?
 (defun org-sql-drop-tables ()
   (org-sql--case-mode org-sql-db-config
     (mysql
@@ -2464,6 +2398,8 @@ The database connection will be handled transparently."
                               (--map (cadr it)))))))))))
     (org-sql--on-success* (org-sql--send-sql sql-cmd)
       (funcall parse-fun it-out))))
+
+;; TODO postgres also has custom types, so add a types layer
 
 ;; namespace layer
 

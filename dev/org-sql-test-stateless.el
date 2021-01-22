@@ -798,14 +798,10 @@ list then join the cdr of IN with newlines."
                         :time_end nil
                         :end_is_long nil
                         :raw_value ,ts)
-            (timestamp_modifiers :file_hash ,testing-hash
-                                 :timestamp_offset 20
-                                 :modifier_type repeater
-                                 :modifier_value 2
-                                 :modifier_unit day)
             (timestamp_repeaters :file_hash ,testing-hash
                                  :timestamp_offset 20
-                                 :modifier_type repeater
+                                 :repeater_value 2
+                                 :repeater_unit day
                                  :repeater_type cumulate)))))
 
     (it "deadline (warning)"
@@ -823,14 +819,10 @@ list then join the cdr of IN with newlines."
                         :time_end nil
                         :end_is_long nil
                         :raw_value ,ts)
-            (timestamp_modifiers :file_hash ,testing-hash
-                                 :timestamp_offset 20
-                                 :modifier_type warning
-                                 :modifier_value 2
-                                 :modifier_unit day)
             (timestamp_warnings :file_hash ,testing-hash
                                 :timestamp_offset 20
-                                :modifier_type warning
+                                :warning_value 2
+                                :warning_unit day
                                 :warning_type all)))))
 
     (let* ((ts1 "<2112-01-01 Thu>")

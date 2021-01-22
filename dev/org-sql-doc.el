@@ -153,7 +153,7 @@
     (insert-file-contents-literally "./readme-template.md")
 
     (goto-and-remove "[[ schema-docs ]]")
-    (insert (->> org-sql--mql-schema
+    (insert (->> org-sql--mql-tables
                  (-map #'org-sql-doc-format-schema)
                  (s-join "\n\n")))
 

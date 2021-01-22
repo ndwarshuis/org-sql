@@ -233,7 +233,6 @@
          (headline_closures . 1)
          (planning_entries . 0)
          (timestamps . 0)
-         (timestamp_modifiers . 0)
          (timestamp_warnings . 0)
          (timestamp_repeaters . 0)
          (links . 0)
@@ -257,7 +256,6 @@
          (headline_closures . 2)
          (planning_entries . 0)
          (timestamps . 0)
-         (timestamp_modifiers . 0)
          (timestamp_warnings . 0)
          (timestamp_repeaters . 0)
          (links . 0)
@@ -281,7 +279,6 @@
          (headline_closures . 1)
          (planning_entries . 0)
          (timestamps . 0)
-         (timestamp_modifiers . 0)
          (timestamp_warnings . 0)
          (timestamp_repeaters . 0)
          (links . 0)
@@ -307,7 +304,6 @@
          (headline_closures . 7)
          (planning_entries . 3)
          (timestamps . 8)
-         (timestamp_modifiers . 2)
          (timestamp_warnings . 1)
          (timestamp_repeaters . 1)
          (links . 1)
@@ -414,7 +410,6 @@
          (file_metadata . 0)
          (headlines . 0)
          (timestamps . 0)
-         (timestamp_modifiers . 0)
          (timestamp_warnings . 0)
          (timestamp_repeaters . 0)
          (properties . 0)
@@ -430,39 +425,46 @@
 
 (defmacro describe-io-spec (unique-name config)
   (declare (indent 1))
-  (let ((title (format "SQL IO Spec (%s)" unique-name)))
-    `(describe ,title
-       (describe-sql-database-spec ,config)
-       (describe-sql-namespace-spec ,config)
-       (describe-sql-table-spec ,config)
-       (describe-sql-init-spec ,config)
-       (describe-sql-update-spec ,config)
-       (describe-sql-clear-spec ,config))))
+  `(describe ,unique-name
+     (describe-sql-database-spec ,config)
+     (describe-sql-namespace-spec ,config)
+     (describe-sql-table-spec ,config)
+     (describe-sql-init-spec ,config)
+     (describe-sql-update-spec ,config)
+     (describe-sql-clear-spec ,config)))
 
-(describe-io-spec "SQLite"
-  (sqlite :path "/tmp/org-sql-test.db"))
+(defmacro describe-io-specs (&rest specs)
+  (declare (indent 0))
+  (let ((forms (->> (-partition 2 specs)
+                    (--map `(describe-io-spec ,(car it) ,(cadr it))))))
+    `(describe "SQL IO Spec"
+       ,@forms)))
 
-(describe-io-spec "Postgres"
+(describe-io-specs
+  "SQLite"
+  (sqlite :path "/tmp/org-sql-test.db")
+
+  "Postgres"
   (postgres :database "org_sql"
             :port "60001"
             :hostname "localhost"
             :username "org_sql"
-            :password "org_sql"))
+            :password "org_sql")
 
-(describe-io-spec "Postgres: non-default schema"
+  "Postgres: non-default schema"
   (postgres :database "org_sql"
             :port "60001"
             :schema "nonpublic"
             :hostname "localhost"
             :username "org_sql"
-            :password "org_sql"))
+            :password "org_sql")
 
-;; ;; (describe-sql-io-spec "SQL IO spec (MariaDB)"
-;; ;;   '(mysql :database "org_sql"
-;; ;;           :port "60002"
-;; ;;           :hostname "localhost"
-;; ;;           :username "org_sql"
-;; ;;           :password "org_sql"))
+  "MariaDB"
+  (mysql :database "org_sql"
+         :port "60002"
+         :hostname "localhost"
+         :username "org_sql"
+         :password "org_sql"))
 
 ;; (describe-sql-io-spec "SQL IO spec (SQL Server)"
 ;;   '(sqlserver :database "org_sql"
