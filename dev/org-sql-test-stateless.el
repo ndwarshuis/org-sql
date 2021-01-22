@@ -615,12 +615,6 @@ list then join the cdr of IN with newlines."
                       :headline_offset 1
                       :timestamp_offset 75
                       :is_active 0
-                      :warning_type nil
-                      :warning_value nil
-                      :warning_unit nil
-                      :repeat_type nil
-                      :repeat_value nil
-                      :repeat_unit nil
                       :time_start ,(org-ts-to-unixtime ts2)
                       :start_is_long 0
                       :time_end nil
@@ -634,12 +628,6 @@ list then join the cdr of IN with newlines."
                       :headline_offset 1
                       :timestamp_offset 50
                       :is_active 1
-                      :warning_type nil
-                      :warning_value nil
-                      :warning_unit nil
-                      :repeat_type nil
-                      :repeat_value nil
-                      :repeat_unit nil
                       :time_start ,(org-ts-to-unixtime ts1)
                       :start_is_long 0
                       :time_end nil
@@ -653,12 +641,6 @@ list then join the cdr of IN with newlines."
                       :headline_offset 1
                       :timestamp_offset 23
                       :is_active 1
-                      :warning_type nil
-                      :warning_value nil
-                      :warning_unit nil
-                      :repeat_type nil
-                      :repeat_value nil
-                      :repeat_unit nil
                       :time_start ,(org-ts-to-unixtime ts0)
                       :start_is_long 0
                       :time_end nil
@@ -675,12 +657,6 @@ list then join the cdr of IN with newlines."
                       :headline_offset 1
                       :timestamp_offset 50
                       :is_active 1
-                      :warning_type nil
-                      :warning_value nil
-                      :warning_unit nil
-                      :repeat_type nil
-                      :repeat_value nil
-                      :repeat_unit nil
                       :time_start ,(org-ts-to-unixtime ts1)
                       :start_is_long 0
                       :time_end nil
@@ -694,12 +670,6 @@ list then join the cdr of IN with newlines."
                       :headline_offset 1
                       :timestamp_offset 23
                       :is_active 1
-                      :warning_type nil
-                      :warning_value nil
-                      :warning_unit nil
-                      :repeat_type nil
-                      :repeat_value nil
-                      :repeat_unit nil
                       :time_start ,(org-ts-to-unixtime ts0)
                       :start_is_long 0
                       :time_end nil
@@ -792,12 +762,6 @@ list then join the cdr of IN with newlines."
                         :headline_offset 1
                         :timestamp_offset 18
                         :is_active 1
-                        :warning_type nil
-                        :warning_value nil
-                        :warning_unit nil
-                        :repeat_type nil
-                        :repeat_value nil
-                        :repeat_unit nil
                         :time_start ,(org-ts-to-unixtime ts)
                         :start_is_long 0
                         :time_end nil
@@ -813,12 +777,6 @@ list then join the cdr of IN with newlines."
                         :headline_offset 1
                         :timestamp_offset 18
                         :is_active 1
-                        :warning_type nil
-                        :warning_value nil
-                        :warning_unit nil
-                        :repeat_type nil
-                        :repeat_value nil
-                        :repeat_unit nil
                         :time_start ,(org-ts-to-unixtime ts)
                         :start_is_long 1
                         :time_end nil
@@ -828,44 +786,52 @@ list then join the cdr of IN with newlines."
     (it "deadline (repeater)"
       (let* ((ts "<2112-01-01 Thu +2d>")
              (planning (format "DEADLINE: %s" ts)))
-        (expect-sql-tbls (timestamps) (list "* parent"
-                                            planning)
+        (expect-sql-tbls (timestamps timestamp_modifiers timestamp_repeaters)
+                         (list "* parent"
+                               planning)
           `((timestamps :file_hash ,testing-hash
                         :headline_offset 1
                         :timestamp_offset 20
                         :is_active 1
-                        :warning_type nil
-                        :warning_value nil
-                        :warning_unit nil
-                        :repeat_type cumulate
-                        :repeat_value 2
-                        :repeat_unit day
                         :time_start ,(org-ts-to-unixtime ts)
                         :start_is_long 0
                         :time_end nil
                         :end_is_long nil
-                        :raw_value ,ts)))))
+                        :raw_value ,ts)
+            (timestamp_modifiers :file_hash ,testing-hash
+                                 :timestamp_offset 20
+                                 :modifier_type repeater
+                                 :modifier_value 2
+                                 :modifier_unit day)
+            (timestamp_repeaters :file_hash ,testing-hash
+                                 :timestamp_offset 20
+                                 :modifier_type repeater
+                                 :repeater_type cumulate)))))
 
     (it "deadline (warning)"
       (let* ((ts "<2112-01-01 Thu -2d>")
              (planning (format "DEADLINE: %s" ts)))
-        (expect-sql-tbls (timestamps) (list "* parent"
-                                            planning)
+        (expect-sql-tbls (timestamps timestamp_modifiers timestamp_warnings)
+                         (list "* parent"
+                               planning)
           `((timestamps :file_hash ,testing-hash
                         :headline_offset 1
                         :timestamp_offset 20
                         :is_active 1
-                        :warning_type all
-                        :warning_value 2
-                        :warning_unit day
-                        :repeat_type nil
-                        :repeat_value nil
-                        :repeat_unit nil
                         :time_start ,(org-ts-to-unixtime ts)
                         :start_is_long 0
                         :time_end nil
                         :end_is_long nil
-                        :raw_value ,ts)))))
+                        :raw_value ,ts)
+            (timestamp_modifiers :file_hash ,testing-hash
+                                 :timestamp_offset 20
+                                 :modifier_type warning
+                                 :modifier_value 2
+                                 :modifier_unit day)
+            (timestamp_warnings :file_hash ,testing-hash
+                                :timestamp_offset 20
+                                :modifier_type warning
+                                :warning_type all)))))
 
     (let* ((ts1 "<2112-01-01 Thu>")
            (ts2 "[2112-01-02 Fri]"))
@@ -878,12 +844,6 @@ list then join the cdr of IN with newlines."
                       :headline_offset 1
                       :timestamp_offset 10
                       :is_active 1
-                      :warning_type nil
-                      :warning_value nil
-                      :warning_unit nil
-                      :repeat_type nil
-                      :repeat_value nil
-                      :repeat_unit nil
                       :time_start ,(org-ts-to-unixtime ts1)
                       :start_is_long 0
                       :time_end nil
@@ -893,12 +853,6 @@ list then join the cdr of IN with newlines."
                       :headline_offset 1
                       :timestamp_offset 27
                       :is_active 0
-                      :warning_type nil
-                      :warning_value nil
-                      :warning_unit nil
-                      :repeat_type nil
-                      :repeat_value nil
-                      :repeat_unit nil
                       :time_start ,(org-ts-to-unixtime ts2)
                       :start_is_long 0
                       :time_end nil
@@ -911,12 +865,6 @@ list then join the cdr of IN with newlines."
                       :headline_offset 1
                       :timestamp_offset 10
                       :is_active 1
-                      :warning_type nil
-                      :warning_value nil
-                      :warning_unit nil
-                      :repeat_type nil
-                      :repeat_value nil
-                      :repeat_unit nil
                       :time_start ,(org-ts-to-unixtime ts1)
                       :start_is_long 0
                       :time_end nil
@@ -936,12 +884,6 @@ list then join the cdr of IN with newlines."
                         :headline_offset 10
                         :timestamp_offset 19
                         :is_active 1
-                        :warning_type nil
-                        :warning_value nil
-                        :warning_unit nil
-                        :repeat_type nil
-                        :repeat_value nil
-                        :repeat_unit nil
                         :time_start ,(org-ts-to-unixtime ts)
                         :start_is_long 0
                         :time_end nil
@@ -958,12 +900,6 @@ list then join the cdr of IN with newlines."
                         :headline_offset 1
                         :timestamp_offset 10
                         :is_active 1
-                        :warning_type nil
-                        :warning_value nil
-                        :warning_unit nil
-                        :repeat_type nil
-                        :repeat_value nil
-                        :repeat_unit nil
                         :time_start ,(org-ts-to-unixtime ts0)
                         :start_is_long 0
                         :time_end ,(org-ts-to-unixtime ts1)
@@ -1217,12 +1153,6 @@ list then join the cdr of IN with newlines."
                         :headline_offset 1
                         :timestamp_offset 30
                         :is_active 0
-                        :warning_type nil
-                        :warning_value nil
-                        :warning_unit nil
-                        :repeat_type nil
-                        :repeat_value nil
-                        :repeat_unit nil
                         :time_start ,(org-ts-to-unixtime ts0)
                         :start_is_long 1
                         :time_end nil
@@ -1255,12 +1185,6 @@ list then join the cdr of IN with newlines."
                         :headline_offset 1
                         :timestamp_offset 31
                         :is_active 0
-                        :warning_type nil
-                        :warning_value nil
-                        :warning_unit nil
-                        :repeat_type nil
-                        :repeat_value nil
-                        :repeat_unit nil
                         :time_start ,(org-ts-to-unixtime ts0)
                         :start_is_long 1
                         :time_end nil
@@ -1293,12 +1217,6 @@ list then join the cdr of IN with newlines."
                         :headline_offset 1
                         :timestamp_offset 32
                         :is_active 0
-                        :warning_type nil
-                        :warning_value nil
-                        :warning_unit nil
-                        :repeat_type nil
-                        :repeat_value nil
-                        :repeat_unit nil
                         :time_start ,(org-ts-to-unixtime ts0)
                         :start_is_long 1
                         :time_end nil
@@ -1331,12 +1249,6 @@ list then join the cdr of IN with newlines."
                         :headline_offset 1
                         :timestamp_offset 35
                         :is_active 0
-                        :warning_type nil
-                        :warning_value nil
-                        :warning_unit nil
-                        :repeat_type nil
-                        :repeat_value nil
-                        :repeat_unit nil
                         :time_start ,(org-ts-to-unixtime ts0)
                         :start_is_long 1
                         :time_end nil

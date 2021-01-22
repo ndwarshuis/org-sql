@@ -221,22 +221,6 @@ to store them. This is in addition to any properties specifified by
         (:is_active :desc "true if the timestamp is active"
                     :type boolean
                     :constraints (notnull))
-        (:warning_type :desc "warning type of this timestamp"
-                       :type enum
-                       :allowed (all first))
-        (:warning_value :desc "warning shift of this timestamp"
-                        :type integer)
-        (:warning_unit :desc "warning unit of this timestamp "
-                       :type enum
-                       :allowed (hour day week month year))
-        (:repeat_type :desc "repeater type of this timestamp"
-                      :type enum
-                      :allowed (catch-up restart cumulate))
-        (:repeat_value :desc "repeater shift of this timestamp"
-                       :type integer)
-        (:repeat_unit :desc "repeater unit of this timestamp"
-                      :type enum
-                      :allowed (hour day week month year))
         (:time_start :desc "the start time (or only time) of this timestamp"
                      :type integer
                      :constraints (notnull))
@@ -252,6 +236,74 @@ to store them. This is in addition to any properties specifified by
         (foreign :ref headlines
                  :keys (:file_hash :headline_offset)
                  :parent-keys (:file_hash :headline_offset)
+                 :on_delete cascade)))
+
+      (timestamp_modifiers
+       (desc . "Each row stores one timestamp modifier (repeater, warning, etc)")
+       (columns
+        (:file_hash :desc "hash (MD5) of the org file"
+                    :type char
+                    :size ,org-sql--file_hash-char-length)
+        (:timestamp_offset :desc "offset of this timestamp"
+                           :type integer)
+        (:modifier_type :desc "type of this modifier"
+                        :type enum
+                        :type-id "timestamp_modifier_type"
+                        :allowed (warning repeater))
+        (:modifier_value :desc "shift of this modifier"
+                         :type integer)
+        (:modifier_unit :desc "unit of this modifier"
+                        :type enum
+                        :allowed (hour day week month year)))
+       (constraints
+        (primary :keys (:file_hash :timestamp_offset :modifier_type))
+        (foreign :ref timestamps
+                 :keys (:file_hash :timestamp_offset)
+                 :parent-keys (:file_hash :timestamp_offset)
+                 :on_delete cascade)))
+
+      (timestamp_warnings
+       (desc . "Each row stores specific information for a timestamp warning")
+       (columns
+        (:file_hash :desc "hash (MD5) of the org file"
+                    :type char
+                    :size ,org-sql--file_hash-char-length)
+        (:timestamp_offset :desc "offset of this timestamp"
+                           :type integer)
+        (:modifier_type :desc "type of this modifier"
+                        :type enum
+                        :type-id "timestamp_modifier_type"
+                        :allowed (warning repeater))
+        (:warning_type :desc "warning type of this timestamp"
+                       :type enum
+                       :allowed (all first)))
+       (constraints
+        (primary :keys (:file_hash :timestamp_offset :modifier_type))
+        (foreign :ref timestamp_modifiers
+                 :keys (:file_hash :timestamp_offset :modifier_type)
+                 :parent-keys (:file_hash :timestamp_offset :modifier_type)
+                 :on_delete cascade)))
+
+      (timestamp_repeaters
+       (desc . "Each row stores specific information for a timestamp repeater")
+       (columns
+        (:file_hash :desc "hash (MD5) of the org file"
+                    :type char
+                    :size ,org-sql--file_hash-char-length)
+        (:timestamp_offset :desc "offset of this timestamp"
+                           :type integer)
+        (:modifier_type :desc "type of this modifier"
+                        :type enum
+                        :type-id "timestamp_modifier_type"
+                        :allowed (warning repeater))
+        (:repeater_type :desc "repeater type of this timestamp"
+                        :type enum
+                        :allowed (catch-up restart cumulate)))
+       (constraints
+        (primary :keys (:file_hash :timestamp_offset :modifier_type))
+        (foreign :ref timestamp_modifiers
+                 :keys (:file_hash :timestamp_offset :modifier_type)
+                 :parent-keys (:file_hash :timestamp_offset :modifier_type)
                  :on_delete cascade)))
 
       (planning_entries
@@ -1097,22 +1149,25 @@ separated by SEP."
 The SQL statements will create all enum types found in
 MQL-TABLES. CONFIG is the `org-sql-db-config'."
   ;; ASSUME only modes that support ENUM will call this
-  (-let* ((enum-name (org-sql--format-mql-enum-name config "enum_%s_%s"))
-          (fmt (format "CREATE TYPE %s AS ENUM (%%s);" enum-name)))
-    (cl-labels
-        ((format-column
-          (tbl-name mql-column)
-          (-let* (((column-name . (&plist :type :allowed)) mql-column)
-                  (column-name* (org-sql--format-mql-column-name column-name)))
-            (when (and (eq type 'enum) allowed)
+  (cl-labels
+      ((format-column
+        (tbl-name mql-column)
+        (-let* (((column-name . (&plist :type :type-id :allowed)) mql-column)
+                (column-name* (org-sql--format-mql-column-name column-name)))
+          (when (and (eq type 'enum) allowed)
+            (let ((type-name
+                   (->> (or type-id (format "enum_%s_%s" tbl-name column-name*))
+                        (org-sql--format-mql-enum-name config))))
               (->> (--map (format "'%s'" it) allowed)
                    (s-join ",")
-                   (format fmt tbl-name column-name*)))))
-         (format-table
-          (mql-table)
-          (-let (((table-name . (&alist 'columns)) mql-table))
-            (-non-nil (--map (format-column table-name it) columns)))))
-      (-mapcat #'format-table mql-tables))))
+                   (format "CREATE TYPE %s AS ENUM (%s);" type-name))))))
+       (format-table
+        (mql-table)
+        (-let (((table-name . (&alist 'columns)) mql-table))
+          (--map (format-column table-name it) columns))))
+    (->> (-mapcat #'format-table mql-tables)
+         (-non-nil)
+         (-uniq))))
 
 (defun org-sql--format-mql-schema-column-constraints (mql-column-constraints)
   "Return formatted column constraints for MQL-COLUMN-CONSTRAINTS."
@@ -1131,7 +1186,7 @@ MQL-TABLES. CONFIG is the `org-sql-db-config'."
   "Return SQL string for the type of MQL-COLUMN.
 CONFIG is the `org-sql-db-config' list and TBL-NAME is the name
 of the table."
-  (-let* (((column-name . (&plist :type)) mql-column)
+  (-let* (((column-name . (&plist :type :type-id)) mql-column)
           (column-name* (org-sql--format-mql-column-name column-name)))
     ;; TODO use ntext for sql server instead of text?
     (org-sql--case-type type
@@ -1155,8 +1210,9 @@ of the table."
                      (--map (format "'%s'" it))
                      (s-join ",")
                      (format "ENUM(%s)")))
-         (postgres (->> (format "enum_%s_%s" tbl-name column-name*)
-                        (org-sql--format-mql-enum-name config)))
+         (postgres (if type-id type-id
+                     (->> (format "enum_%s_%s" tbl-name column-name*)
+                          (org-sql--format-mql-enum-name config))))
          (sqlite "TEXT")
          (sqlserver (-if-let (length (plist-get (cdr mql-column) :length))
                         (format "VARCHAR(%s)" length)
@@ -1782,6 +1838,38 @@ returned by `org-sql--to-hstate'."
               :link_type (org-ml-get-property :type link))))
         (-reduce-from #'add-link acc links)))))
 
+(defmacro org-sql--add-mql-insert-timestamp-mod (acc modifier-type file-hash
+                                                     timestamp)
+  (declare (indent 2))
+  (-let (((tbl-name type-column type-prop value-prop unit-prop)
+          (cl-case modifier-type
+            (warning (list 'timestamp_warnings
+                           :warning_type
+                           :warning-type
+                           :warning-value
+                           :warning-unit))
+            (repeater (list 'timestamp_repeaters
+                            :repeater_type
+                            :repeater-type
+                            :repeater-value
+                            :repeater-unit))
+            (t (error "Unknown modifier type: %s" modifier-type)))))
+    `(-if-let (type (org-ml-get-property ,type-prop ,timestamp))
+         (let ((timestamp-offset (org-ml-get-property :begin ,timestamp)))
+           (--> ,acc
+             (org-sql--add-mql-insert it timestamp_modifiers
+               :file_hash ,file-hash
+               :timestamp_offset timestamp-offset
+               :modifier_type ',modifier-type
+               :modifier_value (org-ml-get-property ,value-prop ,timestamp)
+               :modifier_unit (org-ml-get-property ,unit-prop ,timestamp))
+             (org-sql--add-mql-insert it ,tbl-name
+               :file_hash ,file-hash
+               :timestamp_offset timestamp-offset
+               :modifier_type ',modifier-type
+               ,type-column type)))
+       ,acc)))
+
 (defun org-sql--add-mql-insert-timestamp (acc hstate timestamp)
   "Add MQL-insert for TIMESTAMP to ACC.
 HSTATE is a plist as returned by `org-sql--to-hstate'."
@@ -1793,22 +1881,19 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
             (end (org-ml-timestamp-get-end-time timestamp))
             ((&plist :headline :file-hash) hstate)
             (headline-offset (org-ml-get-property :begin headline)))
-      (org-sql--add-mql-insert acc timestamps
-        :file_hash file-hash
-        :headline_offset headline-offset
-        :timestamp_offset (org-ml-get-property :begin timestamp)
-        :is_active (if (org-ml-timestamp-is-active timestamp) 1 0)
-        :warning_type (org-ml-get-property :warning-type timestamp)
-        :warning_value (org-ml-get-property :warning-value timestamp)
-        :warning_unit (org-ml-get-property :warning-unit timestamp)
-        :repeat_type (org-ml-get-property :repeater-type timestamp)
-        :repeat_value (org-ml-get-property :repeater-value timestamp)
-        :repeat_unit (org-ml-get-property :repeater-unit timestamp)
-        :time_start (org-ml-time-to-unixtime start)
-        :start_is_long (get-resolution start)
-        :time_end (-some-> end (org-ml-time-to-unixtime))
-        :end_is_long (get-resolution end)
-        :raw_value (org-ml-get-property :raw-value timestamp)))))
+      (--> acc
+        (org-sql--add-mql-insert it timestamps
+          :file_hash file-hash
+          :headline_offset headline-offset
+          :timestamp_offset (org-ml-get-property :begin timestamp)
+          :is_active (if (org-ml-timestamp-is-active timestamp) 1 0)
+          :time_start (org-ml-time-to-unixtime start)
+          :start_is_long (get-resolution start)
+          :time_end (-some-> end (org-ml-time-to-unixtime))
+          :end_is_long (get-resolution end)
+          :raw_value (org-ml-get-property :raw-value timestamp))
+        (org-sql--add-mql-insert-timestamp-mod it warning file-hash timestamp)
+        (org-sql--add-mql-insert-timestamp-mod it repeater file-hash timestamp)))))
 
 (defun org-sql--add-mql-insert-headline-timestamps (acc hstate contents)
   "Add MQL-insert for each timestamp in the current headline to ACC.
