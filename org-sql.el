@@ -681,7 +681,10 @@ ARGS is a list of additional arguments to pass to `cl-subsetp'."
 TYPE must be one of 'boolean', 'text', 'enum', or 'integer'."
   (declare (indent 1))
   (-let (((keys &as &alist 'boolean 'char 'enum 'integer 'text 'varchar)
-          alist-forms))
+          (--splice (listp (car it))
+                    (-let (((keys . form) it))
+                      (--map (cons it form) keys))
+                    alist-forms)))
     (unless (-none? #'null keys)
       (error "Must provide form for all types"))
     `(cl-case ,type
@@ -1001,46 +1004,36 @@ CONFIG is the `org-sql-db-config' list."
 (defun org-sql--compile-mql-format-function (config type)
   "Return SQL value formatting function.
 The returned function will depend on the MODE and TYPE."
-  (cl-flet
-      ((quote-string
-        (s)
-        (format "'%s'" s))
-       (escape-string
-        (newline single-quote s)
-        (->> (s-replace-regexp "'" single-quote s)
-             (s-replace-regexp "\n" newline))))
-    ;; TODO this could be way more elegant (build the lambda with forms)
-    (let* ((esc-newline
+  (let ((formatter-form
+         (org-sql--case-type type
+           (boolean
             (org-sql--case-mode config
-              (mysql "\\\\n")
-              (postgres "'||chr(10)||'")
-              (sqlite "'||char(10)||'")
-              ;; TODO not sure if this also needs Char(13) in front of Char(10)
-              ;; for the carriage return (alas...newline war)
-              (sqlserver "+Char(10)+")))
-           (esc-single-quote
-            (org-sql--case-mode config
-              (mysql "\\\\'")
-              ((postgres sqlite sqlserver) "''")))
-           (formatter
-            (org-sql--case-type type
-              (boolean
-               (org-sql--case-mode config
-                 ((mysql postgres) (lambda (b) (if (= b 1) "TRUE" "FALSE")))
-                 ((sqlite sqlserver) (lambda (b) (if (= b 1) "1" "0")))))
-              ;; TODO refactor this nonsense...
-              (char
-               (lambda (s)
-                 (quote-string (escape-string esc-newline esc-single-quote s))))
-              (enum (lambda (e) (quote-string (symbol-name e))))
-              (integer #'number-to-string)
-              (text
-               (lambda (s)
-                 (quote-string (escape-string esc-newline esc-single-quote s))))
-              (varchar
-               (lambda (s)
-                 (quote-string (escape-string esc-newline esc-single-quote s)))))))
-      (lambda (s) (if s (funcall formatter s) "NULL")))))
+              ((mysql postgres)
+               '(if (= it 1) "TRUE" "FALSE"))
+              ((sqlite sqlserver)
+               '(if (= it 1) "1" "0"))))
+           (enum
+            '(format "'%s'" (symbol-name it)))
+           (integer
+            '(number-to-string it))
+           ((char text varchar)
+            (let ((esc-newline
+                   (org-sql--case-mode config
+                     (mysql "\\\\n")
+                     ;; TODO not sure if these also needs Char(13) in front of
+                     ;; Char(10) for the carriage return if using on windows
+                     ;; (alas...newline war)
+                     (postgres "'||chr(10)||'")
+                     (sqlite "'||char(10)||'")
+                     (sqlserver "+Char(10)+")))
+                  (esc-single-quote
+                   (org-sql--case-mode config
+                     (mysql "\\\\'")
+                     ((postgres sqlite sqlserver) "''"))))
+              `(->> (s-replace-regexp "'" ,esc-single-quote it)
+                    (s-replace-regexp "\n" ,esc-newline)
+                    (format "'%s'")))))))
+    `(lambda (it) (if it ,formatter-form "NULL"))))
 
 (defun org-sql--compile-mql-schema-formatter-alist (config mql-tables)
   "Return an alist of formatting functions for MQL-TABLES.
