@@ -356,10 +356,10 @@ to store them. This is in addition to any properties specifified by
             ,property-offset-col)
            (constraints
             (primary :keys (:file_hash :property_offset))
-            (foreign :ref file_hashes
-                     :keys (:file_hash)
-                     :parent-keys (:file_hash)
-                     :on_delete cascade)
+            ;; (foreign :ref file_hashes
+            ;;          :keys (:file_hash)
+            ;;          :parent-keys (:file_hash)
+            ;;          :on_delete cascade)
             (foreign :ref properties
                      :keys (:file_hash :property_offset)
                      :parent-keys (:file_hash :property_offset)
@@ -375,8 +375,8 @@ to store them. This is in addition to any properties specifified by
             (primary :keys (:file_hash :property_offset))
             (foreign :ref properties
                      :keys (:file_hash :property_offset)
-                     :parent-keys (:file_hash :property_offset)
-                     :on_delete cascade)
+                     :parent-keys (:file_hash :property_offset))
+                     ;; :on_delete cascade)
             (foreign :ref headlines
                      :keys (:file_hash :headline_offset)
                      :parent-keys (:file_hash :headline_offset)
@@ -453,8 +453,8 @@ to store them. This is in addition to any properties specifified by
             (primary :keys (:file_hash :entry_offset))
             (foreign :ref timestamps
                      :keys (:file_hash :timestamp_offset)
-                     :parent-keys (:file_hash :timestamp_offset)
-                     :on_delete cascade)
+                     :parent-keys (:file_hash :timestamp_offset))
+                     ;; :on_delete cascade)
             (foreign :ref logbook_entries
                      :keys (:file_hash :entry_offset)
                      :parent-keys (:file_hash :entry_offset)
@@ -982,7 +982,7 @@ CONFIG is the `org-sql-db-config' list."
                  ((postgres sqlite sqlserver) "|"))))
       (->> (s-trim out)
            (s-split "\n")
-           (--map (s-split sep it))
+           (--map (-map #'s-trim (s-split sep it)))
            (--map (-interleave cols it))))))
 
 ;;; MQL -> SQL string formatting functions
@@ -1326,16 +1326,14 @@ FORMATTER-ALIST is an alist of functions given by
 SQL-STATEMENTS is a list of SQL statements to be included in the
 
 transaction. MODE is the SQL mode."
-  (-let ((bare-transaction (-some->> sql-statements
-                             (s-join "")
-                             (format "BEGIN;%sCOMMIT;"))))
-    ;; TODO might want to add performance options here
-    (when bare-transaction
-      (org-sql--case-mode config
-        (sqlite (concat "PRAGMA foreign_keys = ON;" bare-transaction))
-        ;; TODO pretty sure that sql server actually needs the full "BEGIN
-        ;; TRANSACTION"
-        ((mysql postgres sqlserver) bare-transaction)))))
+  ;; TODO might want to add performance options here
+  (let ((fmt (org-sql--case-mode config
+               (sqlite "PRAGMA foreign_keys = ON;BEGIN;%sCOMMIT;")
+               ((mysql postgres) "BEGIN;%sCOMMIT;")
+               (sqlserver "BEGIN TRANSACTION;%sCOMMIT;"))))
+    (-some->> sql-statements
+      (s-join "")
+      (format fmt))))
 
 ;;; org-element/org-ml wrapper functions
 
@@ -2071,13 +2069,13 @@ be run otherwise. In either case, OUT will be bound to the symbol
     `(-let (((,r . it-out) ,first-form))
        (if (= 0 ,r) ,success-form ,error-form))))
 
-(defmacro org-sql--on-success* (first-form success-form)
+(defmacro org-sql--on-success* (first-form &rest success-forms)
   "Run form on successful exit code.
 This is like `org-sql--on-success' but with '(error it-out)'
 supplied for ERROR-FORM. FIRST-FORM and SUCCESS-FORM have the
 same meaning."
   (declare (indent 1))
-  `(org-sql--on-success ,first-form ,success-form (error it-out)))
+  `(org-sql--on-success ,first-form (progn ,@success-forms) (error it-out)))
 
 ;;;
 ;;; STATEFUL FUNCTIONS
@@ -2310,7 +2308,7 @@ The database connection will be handled transparently."
                (sqlserver
                 ;; I think ":r tmp-path" should work here to make this analogous
                 ;; with the others
-                (org-sql--exec-sqlserver-command "-i" tmp-path)))))
+                (org-sql--exec-sqlserver-command `("-i" ,tmp-path))))))
         (f-delete tmp-path)
         res))))
 
@@ -2362,7 +2360,18 @@ The database connection will be handled transparently."
           (format "PRAGMA foreign_keys = OFF;BEGIN;%sCOMMIT;")
           (org-sql--send-sql)))
     (sqlserver
-     (error "This hasn't been defined yet; go yell at the developer"))))
+     (org-sql--with-config-keys (:schema) org-sql-db-config
+       ;; NOTE this assumes the order of the table names is parent -> child
+       (let* ((tbl-names (if schema
+                             (--map (format "%s.%s" schema it) (reverse org-sql-table-names))
+                           (reverse org-sql-table-names)))
+              ;; TODO this will crap out if a table doesn't exist
+              (alter-cmds (--map (format "ALTER TABLE %s NOCHECK CONSTRAINT ALL;" it) tbl-names))
+              (drop-cmd (->> (s-join "," tbl-names)
+                             (format "DROP TABLE IF EXISTS %s;"))))
+         (->> (-snoc alter-cmds drop-cmd)
+              (org-sql--format-sql-transaction org-sql-db-config)
+              (org-sql--send-sql)))))))
 
 (defun org-sql-list-tables ()
   (-let (((sql-cmd parse-fun)
@@ -2391,11 +2400,13 @@ The database connection will be handled transparently."
                (let* ((schema* (or schema "dbo")))
                  (list (format "SELECT schema_name(schema_id), name FROM sys.tables;" schema*)
                        (lambda (s)
-                         (->> (s-trim s)
-                              (s-lines)
-                              (--map (s-split "|" it))
-                              (--filter (equal schema* (car it)))
-                              (--map (cadr it)))))))))))
+                         (let ((s* (s-trim s)))
+                           (unless (equal "" s*)
+                             (->> (s-lines s*)
+                                  (--map (-let (((s-name t-name) (s-split "|" it)))
+                                           (cons (s-trim s-name) (s-trim t-name))))
+                                  (--filter (equal schema* (car it)))
+                                  (--map (cdr it)))))))))))))
     (org-sql--on-success* (org-sql--send-sql sql-cmd)
       (funcall parse-fun it-out))))
 
@@ -2429,6 +2440,8 @@ The database connection will be handled transparently."
        (let ((cmd (format "DROP SCHEMA IF EXISTS %s CASCADE;" (or schema "public"))))
          (org-sql--send-sql cmd))))
     (sqlserver
+     ;; drop all tables manually first
+     (org-sql-drop-tables)
      (org-sql--with-config-keys (:schema) org-sql-db-config
        (when schema
          (let* ((select (format "SELECT * FROM sys.schemas WHERE name = N'%s'" schema))
@@ -2454,14 +2467,12 @@ The database connection will be handled transparently."
            (and it t)))))
     (sqlserver
      (org-sql--with-config-keys (:database :schema) org-sql-db-config
-       (let ((cmd "select name from [org_sql].sys.schemas;"))
+       (let ((cmd (format "select name from [%s].sys.schemas;" database)))
          (org-sql--on-success* (org-sql--send-sql cmd)
-           (--> (s-split "\n" it-out)
-             (--map (s-split "|" it) it)
-             ;; TODO get the default schema name and check that
-             (--find (and (equal (car it) (or schema "dbo"))
-                          (equal (cadr it) database))
-                     it)
+           (--> (s-trim it-out)
+             (s-split "\n" it)
+             (-map #'s-trim it)
+             (--find (equal it (or schema "dbo")) it)
              (and it t))))))))
 
 ;; database layer
@@ -2502,7 +2513,10 @@ The database connection will be handled transparently."
        (file-exists-p path)))
     (sqlserver
      (org-sql--with-config-keys (:database) org-sql-db-config
-       (error "This is not defined yet; go yell at the developer")))))
+       ;; TODO the 'set nocount on' bit should be common to all commands
+       (let ((cmd (format "SET NOCOUNT ON;SELECT 1 FROM sys.databases WHERE name = '%s';" database)))
+         (org-sql--on-success* (org-sql--exec-sqlserver-command-nodb `("-Q" ,cmd))
+           (equal "1" (s-trim it-out))))))))
 
 ;;; composite database functions
 

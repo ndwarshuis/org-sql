@@ -464,14 +464,14 @@
          :port "60002"
          :hostname "localhost"
          :username "org_sql"
-         :password "org_sql"))
+         :password "org_sql")
 
-;; (describe-sql-io-spec "SQL IO spec (SQL Server)"
-;;   '(sqlserver :database "org_sql"
-;;               :port "60003"
-;;               :schema "notdbo"
-;;               :hostname "localhost"
-;;               :username "org_sql"
-;;               :password "org_sql333###"))
+  "SQL Server: non-default schema"
+  (sqlserver :database "org_sql"
+              :port "60003"
+              :schema "notdbo"
+              :hostname "localhost"
+              :username "org_sql"
+              :password "org_sql333###"))
 
 ;;; org-sql-test-stateful ends here
