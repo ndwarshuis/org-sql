@@ -2064,19 +2064,25 @@ FSTATE is a list given by `org-sql--to-fstate'."
       ;; TODO this is wrong obviously
       :size 0)))
 
+(defun org-sql--add-mql-insert-file-metadata* (acc file-path file-hash)
+  (org-sql--add-mql-insert acc file_metadata
+    :file_hash file-hash
+    :file_path file-path))
+
 (defun org-sql--add-mql-insert-file-metadata (acc fstate)
   "Add MQL-insert for file in FSTATE to ACC.
 FSTATE is a list given by `org-sql--to-fstate'."
   (-let (((&plist :paths-with-attributes :file-hash) fstate))
-    (--reduce-from (org-sql--add-mql-insert acc file_metadata
-                     :file_hash file-hash
-                     :file_path (car it))
+    (--reduce-from (org-sql--add-mql-insert-file-metadata* acc (car it) file-hash)
+    ;; (--reduce-from (org-sql--add-mql-insert acc file_metadata
+    ;;                  :file_hash file-hash
+    ;;                  :file_path (car it))
                    acc paths-with-attributes)))
 
-(defun org-sql--fstate-to-mql-insert (fstate)
+(defun org-sql--fstate-to-mql-insert (acc fstate)
   "Return all MQL-inserts for FSTATE.
 FSTATE is a list given by `org-sql--to-fstate'."
-  (-> (-clone org-sql--empty-mql-bulk-insert)
+  (-> acc
       (org-sql--add-mql-insert-file-hash fstate)
       (org-sql--add-mql-insert-file-metadata fstate)
       (org-sql--add-mql-insert-file-properties fstate)
@@ -2239,11 +2245,11 @@ Each hashpathpair will have it's :disk-path set to nil."
           (file-path-fmtr file-hash-fmtr grouped)
           (-let* (((hash . paths) grouped)
                   (hash* (funcall file-hash-fmtr hash)))
-            (->> paths
-                 (--map (format "file_path = %s" (funcall file-path-fmtr it)))
-                 (s-join " OR ")
-                 (format "(%s)")
-                 (format "(file_hash = %s AND %s)" hash*)))))
+            (--> paths
+                 (--map (format "file_path = %s" (funcall file-path-fmtr it)) it)
+                 (if (< 1 (length it)) (format "(%s)" (s-join " OR " it))
+                   (car it))
+                 (format "(file_hash = %s AND %s)" hash* it)))))
       (-let* ((tbl-name* (org-sql--format-mql-table-name config 'file_metadata))
               (columns (->> org-sql--mql-tables
                             (alist-get 'file_metadata)
@@ -2279,42 +2285,52 @@ state as the orgfiles on disk."
   (-let* ((disk-hashpathpairs (org-sql--disk-get-hashpathpairs))
           (db-hashpathpairs (org-sql--db-get-hashpathpairs))
           (mode (car org-sql-db-config))
-          (formatter-alist
-           (->> org-sql--mql-tables
-                (--map (org-sql--compile-mql-schema-formatter-alist org-sql-db-config it))))
+          ;; (formatter-alist
+          ;;  (->> org-sql--mql-tables
+          ;;       (--map (org-sql--compile-mql-schema-formatter-alist org-sql-db-config it))))
           ((&alist 'files-to-insert
                    'files-to-delete
                    'paths-to-insert
                    'paths-to-delete)
            (org-sql--partition-hashpathpairs disk-hashpathpairs db-hashpathpairs)))
     (cl-flet
-        ((file-inserts-to-sql
-          (hashpathpairs)
-          (->> (org-sql--group-hashpathpairs-by-hash hashpathpairs)
-               (--mapcat (->> (org-sql--hashpathpair-get-fstate (car it) (cdr it))
-                              (org-sql--fstate-to-mql-insert)))
-               (org-sql--format-mql-bulk-inserts org-sql-db-config)))
+        ((inserts-to-sql
+          (files-to-insert paths-to-insert)
+          (let* ((acc (-clone org-sql--empty-mql-bulk-insert))
+                 (acc* (->> (org-sql--group-hashpathpairs-by-hash files-to-insert)
+                            (--map (org-sql--hashpathpair-get-fstate (car it) (cdr it)))
+                            (--reduce-from (org-sql--fstate-to-mql-insert acc it) acc))))
+            (->> paths-to-insert
+                 (--reduce-from (org-sql--add-mql-insert-file-metadata* acc (cdr it) (car it)) acc*)
+                 (org-sql--format-mql-bulk-inserts org-sql-db-config))))
+         ;; (file-inserts-to-sql
+         ;;  (hashpathpairs)
+         ;;  (let ((acc (-clone org-sql--empty-mql-bulk-insert)))
+         ;;    (->> (org-sql--group-hashpathpairs-by-hash hashpathpairs)
+         ;;         (--map (org-sql--hashpathpair-get-fstate (car it) (cdr it)))
+         ;;         (--reduce-from (org-sql--fstate-to-mql-insert acc it) acc)
+         ;;         (org-sql--format-mql-bulk-inserts org-sql-db-config))))
          (file-deletes-to-sql
           (hashpathpairs)
           (list (org-sql--format-file-delete-statement org-sql-db-config hashpathpairs)))
-          ;; (->> (org-sql--hashpathpairs-to-hashes hashpathpairs)
-          ;;      (--map (->> (org-sql--hashpathpair-to-mql-delete it)
-          ;;                  (org-sql--format-mql-delete formatter-alist)))))
-         (path-inserts-to-sql
-          (hashpathpairs)
-          (->> (org-sql--group-hashpathpairs-by-hash hashpathpairs)
-               (--mapcat (org-sql--hashpathpair-to-mql-path-insert (car it) (cdr it)))
-               (--map (org-sql--format-mql-insert formatter-alist it))))
+         ;; (->> (org-sql--hashpathpairs-to-hashes hashpathpairs)
+         ;;      (--map (->> (org-sql--hashpathpair-to-mql-delete it)
+         ;;                  (org-sql--format-mql-delete formatter-alist)))))
+         ;; (path-inserts-to-sql
+         ;;  (hashpathpairs)
+         ;;  (->> (org-sql--group-hashpathpairs-by-hash hashpathpairs)
+         ;;       (--mapcat (org-sql--hashpathpair-to-mql-path-insert (car it) (cdr it)))
+         ;;       (--map (org-sql--format-mql-insert formatter-alist it))))
          (path-deletes-to-sql
           (hashpathpairs)
           (list (org-sql--format-path-delete-statement org-sql-db-config hashpathpairs))))
-          ;; (->> (org-sql--group-hashpathpairs-by-hash hashpathpairs)
-          ;;      (--map (org-sql--hashpathpair-to-mql-path-delete (car it) (cdr it)))
-          ;;      (--map (org-sql--format-mql-bulk-delete org-sql-db-config it)))))
-      (->> (append (path-inserts-to-sql paths-to-insert)
-                   (path-deletes-to-sql paths-to-delete)
+      ;; (->> (append (path-inserts-to-sql paths-to-insert)
+      ;;              (path-deletes-to-sql paths-to-delete)
+      ;;              (file-deletes-to-sql files-to-delete)
+      ;;              (file-inserts-to-sql files-to-insert))
+      (->> (append (path-deletes-to-sql paths-to-delete)
                    (file-deletes-to-sql files-to-delete)
-                   (file-inserts-to-sql files-to-insert))
+                   (inserts-to-sql files-to-insert paths-to-insert))
            (org-sql--format-sql-transaction org-sql-db-config)))))
 
 (defun org-sql-dump-update-transactions ()

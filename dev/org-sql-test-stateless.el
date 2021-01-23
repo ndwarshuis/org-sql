@@ -69,11 +69,12 @@ list then join the cdr of IN with newlines."
   (let ((lb-config (list :log-into-drawer org-log-into-drawer
                          :clock-into-drawer org-clock-into-drawer
                          :clock-out-notes org-log-note-clock-out))
-        (paths-with-attributes (list (cons testing-filepath testing-attributes))))
+        (paths-with-attributes (list (cons testing-filepath testing-attributes)))
+        (acc (-clone org-sql--empty-mql-bulk-insert)))
     (->> (org-ml-parse-this-buffer)
          (org-sql--to-fstate testing-hash paths-with-attributes
                              org-log-note-headings '("TODO" "DONE") lb-config)
-         (org-sql--fstate-to-mql-insert)
+         (org-sql--fstate-to-mql-insert acc)
          (-filter #'cdr))))
 
 (defmacro expect-sql (in tbl)
