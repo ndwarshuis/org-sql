@@ -1284,24 +1284,6 @@ CONFIG is the `org-sql-db-config' list."
 
 ;; insert
 
-(defun org-sql--format-mql-insert (formatter-alist mql-insert)
-  "Return SQL string for MQL-INSERT.
-FORMATTER-ALIST is an alist of functions given by
-`org-sql--compile-mql-format-function'."
-  (-let* (((tbl-name . keyvals) mql-insert)
-          (formatter-list (alist-get tbl-name formatter-alist))
-          (tbl-name* (plist-get formatter-list :table-name))
-          (columns (->> (-slice keyvals 0 nil 2)
-                        (-map #'org-sql--format-mql-column-name)
-                        (s-join ",")))
-          (values (->> (-partition 2 keyvals)
-                       (--map (funcall
-                               (->> (plist-get formatter-list :column-formatters)
-                                    (alist-get (car it)))
-                               (cadr it)))
-                       (s-join ","))))
-    (format "INSERT INTO %s (%s) VALUES (%s);" tbl-name* columns values)))
-
 (defun org-sql--format-mql-bulk-insert (config mql-bulk-insert)
   (cl-flet
       ((format-row
@@ -1328,57 +1310,6 @@ FORMATTER-ALIST is an alist of functions given by
   (->> (-filter #'cdr mql-bulk-inserts)
        (--map (org-sql--format-mql-bulk-insert config it))))
 
-;; update
-
-;; (defun org-sql--format-mql-update (config formatter-alist mql-update)
-;;   "Return SQL string for MQL-UPDATE.
-;; FORMATTER-ALIST is an alist of functions given by
-;; `org-sql--compile-mql-format-function'. CONFIG is the
-;; `org-sql-db-config' list."
-;;   (-let* (((tbl-name . (&alist 'set 'where)) mql-update)
-;;           (tbl-name* (org-sql--format-mql-table-name config tbl-name))
-;;           (formatter-list (alist-get tbl-name formatter-alist))
-;;           (set* (org-sql--format-mql-plist formatter-list "," set))
-;;           (where* (org-sql--format-mql-plist formatter-list " and " where)))
-;;     (format "UPDATE %s SET %s WHERE %s;" tbl-name* set* where*)))
-
-;; delete
-
-;; (defun org-sql--format-mql-delete (formatter-alist mql-delete)
-;;   "Return SQL string for MQL-DELETE.
-;; FORMATTER-ALIST is an alist of functions given by
-;; `org-sql--compile-mql-format-function'. CONFIG is the
-;; `org-sql-db-config' list."
-;;   (-let* (((tbl-name . (&alist 'where)) mql-delete)
-;;           (formatter-list (alist-get tbl-name formatter-alist))
-;;           (tbl-name* (plist-get formatter-list :table-name)))
-;;     (if (not where) (format "DELETE FROM %s;" tbl-name*)
-;;       (->> (org-sql--format-mql-plist formatter-list " and " where)
-;;            (format "DELETE FROM %s WHERE %s;" tbl-name*)))))
-
-;; (defun org-sql--format-mql-bulk-delete (config mql-bulk-delete)
-;;   (cl-flet
-;;       ((format-tuple
-;;         (formatters tuple)
-;;         (->> (--zip-with (funcall other it) tuple formatters)
-;;              (s-join ",")
-;;              (format "(%s)"))))
-;;     (-let* (((tbl-name . (target-columns . tuples)) mql-bulk-delete)
-;;             (tbl-name* (org-sql--format-mql-table-name config tbl-name))
-;;             (mql-tbl (alist-get tbl-name org-sql--mql-tables))
-;;             (mql-columns (->> (alist-get 'columns mql-tbl)
-;;                               (--filter (memq (car it) target-columns))))
-;;             (columns* (->> mql-columns
-;;                            (--map (org-sql--format-mql-column-name (car it)))
-;;                            (s-join ",")))
-;;             ;; ASSUME these will be in the right order
-;;             (formatters (--map (->> (plist-get (cdr it) :type)
-;;                                     (org-sql--compile-mql-format-function config))
-;;                                mql-columns)))
-;;       (->> (--map (format-tuple formatters it) tuples)
-;;            (s-join ",")
-;;            (format "DELETE FROM %s WHERE (%s) IN (%s);" tbl-name* columns*)))))
-
 ;; select
 
 (defun org-sql--format-mql-select (config formatter-alist mql-select)
@@ -1387,8 +1318,6 @@ FORMATTER-ALIST is an alist of functions given by
 `org-sql--compile-mql-format-function'. CONFIG is the
 `org-sql-db-config' list."
   (-let* (((tbl-name . (&alist 'columns 'where)) mql-select)
-          ;; TODO this breaks the pattern where the formatter alist has all the
-          ;; formatting information
           (tbl-name* (org-sql--format-mql-table-name config tbl-name))
           (formatter-list (alist-get tbl-name formatter-alist))
           (columns* (or (-some->> (-map #'org-sql--format-mql-column-name columns)
@@ -1397,6 +1326,52 @@ FORMATTER-ALIST is an alist of functions given by
     (if (not where) (format "SELECT %s FROM %s;" columns* tbl-name*)
       (->> (org-sql--format-mql-plist formatter-list " AND " where)
            (format "SELECT %s FROM %s WHERE %s;" columns* tbl-name*)))))
+
+;; other formatting functions (I guess these go here)
+
+(defun org-sql--format-path-delete-statement (config hashpathpairs)
+  (when hashpathpairs
+    (cl-flet
+        ((get-formatter
+          (columns column-name)
+          (->> (plist-get (alist-get :file_hash columns) :type)
+               (org-sql--compile-mql-format-function config)))
+         (format-where-clause
+          (file-path-fmtr file-hash-fmtr grouped)
+          (-let* (((hash . paths) grouped)
+                  (hash* (funcall file-hash-fmtr hash)))
+            (--> paths
+                 (--map (format "file_path = %s" (funcall file-path-fmtr it)) it)
+                 (if (< 1 (length it)) (format "(%s)" (s-join " OR " it))
+                   (car it))
+                 (format "(file_hash = %s AND %s)" hash* it)))))
+      (-let* ((tbl-name* (org-sql--format-mql-table-name config 'file_metadata))
+              (columns (->> org-sql--mql-tables
+                            (alist-get 'file_metadata)
+                            (alist-get 'columns)))
+              (file-hash-fmtr (get-formatter columns :file_hash))
+              (file-path-fmtr (get-formatter columns :file_path)))
+        (->> (org-sql--group-hashpathpairs-by-hash hashpathpairs)
+             (--map (format-where-clause file-path-fmtr file-hash-fmtr it))
+             (s-join " OR ")
+             (format "DELETE FROM %s WHERE %s;" tbl-name*))))))
+
+(defun org-sql--format-file-delete-statement (config hashpathpairs)
+  (when hashpathpairs
+    (cl-flet
+        ((get-formatter
+          (columns column-name)
+          (->> (plist-get (alist-get :file_hash columns) :type)
+               (org-sql--compile-mql-format-function config))))
+      (-let* ((tbl-name* (org-sql--format-mql-table-name config 'file_hashes))
+              (columns (->> org-sql--mql-tables
+                            (alist-get 'file_hashes)
+                            (alist-get 'columns)))
+              (file-hash-fmtr (get-formatter columns :file_hash)))
+        (->> (org-sql--hashpathpairs-to-hashes hashpathpairs)
+             (--map (format "file_hash = %s" (funcall file-hash-fmtr it)))
+             (s-join " OR ")
+             (format "DELETE FROM %s WHERE %s;" tbl-name*))))))
 
 ;;; SQL string -> SQL string formatting functions
 
@@ -2218,7 +2193,6 @@ Each hashpathpair will have it's :db-path set to nil. Only files in
            (-map #'expand-file-name)
            (-filter #'file-exists-p)
            (-uniq)
-           ;; (--map (org-sql--to-hashpathpair it (get-md5 it)))))))
            (--map (cons (get-md5 it) it))))))
 
 (defun org-sql--db-get-hashpathpairs ()
@@ -2232,51 +2206,6 @@ Each hashpathpair will have it's :disk-path set to nil."
            (org-sql--parse-output-to-plist org-sql-db-config columns)
            (--map (-let (((&plist :file_hash h :file_path p) it))
                     (cons h p)))))))
-                    ;; (org-sql--to-hashpathpair p h)))))))
-
-(defun org-sql--format-path-delete-statement (config hashpathpairs)
-  (when hashpathpairs
-    (cl-flet
-        ((get-formatter
-          (columns column-name)
-          (->> (plist-get (alist-get :file_hash columns) :type)
-               (org-sql--compile-mql-format-function config)))
-         (format-where-clause
-          (file-path-fmtr file-hash-fmtr grouped)
-          (-let* (((hash . paths) grouped)
-                  (hash* (funcall file-hash-fmtr hash)))
-            (--> paths
-                 (--map (format "file_path = %s" (funcall file-path-fmtr it)) it)
-                 (if (< 1 (length it)) (format "(%s)" (s-join " OR " it))
-                   (car it))
-                 (format "(file_hash = %s AND %s)" hash* it)))))
-      (-let* ((tbl-name* (org-sql--format-mql-table-name config 'file_metadata))
-              (columns (->> org-sql--mql-tables
-                            (alist-get 'file_metadata)
-                            (alist-get 'columns)))
-              (file-hash-fmtr (get-formatter columns :file_hash))
-              (file-path-fmtr (get-formatter columns :file_path)))
-        (->> (org-sql--group-hashpathpairs-by-hash hashpathpairs)
-             (--map (format-where-clause file-path-fmtr file-hash-fmtr it))
-             (s-join " OR ")
-             (format "DELETE FROM %s WHERE %s;" tbl-name*))))))
-
-(defun org-sql--format-file-delete-statement (config hashpathpairs)
-  (when hashpathpairs
-    (cl-flet
-        ((get-formatter
-          (columns column-name)
-          (->> (plist-get (alist-get :file_hash columns) :type)
-               (org-sql--compile-mql-format-function config))))
-      (-let* ((tbl-name* (org-sql--format-mql-table-name config 'file_hashes))
-              (columns (->> org-sql--mql-tables
-                            (alist-get 'file_hashes)
-                            (alist-get 'columns)))
-              (file-hash-fmtr (get-formatter columns :file_hash)))
-        (->> (org-sql--hashpathpairs-to-hashes hashpathpairs)
-             (--map (format "file_hash = %s" (funcall file-hash-fmtr it)))
-             (s-join " OR ")
-             (format "DELETE FROM %s WHERE %s;" tbl-name*))))))
 
 (defun org-sql--get-transactions ()
   "Return SQL string of the update transaction.
@@ -2284,53 +2213,25 @@ This transaction will bring the database to represent the same
 state as the orgfiles on disk."
   (-let* ((disk-hashpathpairs (org-sql--disk-get-hashpathpairs))
           (db-hashpathpairs (org-sql--db-get-hashpathpairs))
-          (mode (car org-sql-db-config))
-          ;; (formatter-alist
-          ;;  (->> org-sql--mql-tables
-          ;;       (--map (org-sql--compile-mql-schema-formatter-alist org-sql-db-config it))))
           ((&alist 'files-to-insert
                    'files-to-delete
                    'paths-to-insert
                    'paths-to-delete)
-           (org-sql--partition-hashpathpairs disk-hashpathpairs db-hashpathpairs)))
+           (org-sql--partition-hashpathpairs disk-hashpathpairs db-hashpathpairs))
+          (insert-fstates (->> (org-sql--group-hashpathpairs-by-hash files-to-insert)
+                               (--map (org-sql--hashpathpair-get-fstate (car it) (cdr it))))))
     (cl-flet
+        ;; TODO this function is entirely stateless and can be moved out
         ((inserts-to-sql
-          (files-to-insert paths-to-insert)
+          (insert-fstates paths-to-insert)
           (let* ((acc (-clone org-sql--empty-mql-bulk-insert))
-                 (acc* (->> (org-sql--group-hashpathpairs-by-hash files-to-insert)
-                            (--map (org-sql--hashpathpair-get-fstate (car it) (cdr it)))
-                            (--reduce-from (org-sql--fstate-to-mql-insert acc it) acc))))
+                 (acc* (--reduce-from (org-sql--fstate-to-mql-insert acc it) acc insert-fstates)))
             (->> paths-to-insert
                  (--reduce-from (org-sql--add-mql-insert-file-metadata* acc (cdr it) (car it)) acc*)
-                 (org-sql--format-mql-bulk-inserts org-sql-db-config))))
-         ;; (file-inserts-to-sql
-         ;;  (hashpathpairs)
-         ;;  (let ((acc (-clone org-sql--empty-mql-bulk-insert)))
-         ;;    (->> (org-sql--group-hashpathpairs-by-hash hashpathpairs)
-         ;;         (--map (org-sql--hashpathpair-get-fstate (car it) (cdr it)))
-         ;;         (--reduce-from (org-sql--fstate-to-mql-insert acc it) acc)
-         ;;         (org-sql--format-mql-bulk-inserts org-sql-db-config))))
-         (file-deletes-to-sql
-          (hashpathpairs)
-          (list (org-sql--format-file-delete-statement org-sql-db-config hashpathpairs)))
-         ;; (->> (org-sql--hashpathpairs-to-hashes hashpathpairs)
-         ;;      (--map (->> (org-sql--hashpathpair-to-mql-delete it)
-         ;;                  (org-sql--format-mql-delete formatter-alist)))))
-         ;; (path-inserts-to-sql
-         ;;  (hashpathpairs)
-         ;;  (->> (org-sql--group-hashpathpairs-by-hash hashpathpairs)
-         ;;       (--mapcat (org-sql--hashpathpair-to-mql-path-insert (car it) (cdr it)))
-         ;;       (--map (org-sql--format-mql-insert formatter-alist it))))
-         (path-deletes-to-sql
-          (hashpathpairs)
-          (list (org-sql--format-path-delete-statement org-sql-db-config hashpathpairs))))
-      ;; (->> (append (path-inserts-to-sql paths-to-insert)
-      ;;              (path-deletes-to-sql paths-to-delete)
-      ;;              (file-deletes-to-sql files-to-delete)
-      ;;              (file-inserts-to-sql files-to-insert))
-      (->> (append (path-deletes-to-sql paths-to-delete)
-                   (file-deletes-to-sql files-to-delete)
-                   (inserts-to-sql files-to-insert paths-to-insert))
+                 (org-sql--format-mql-bulk-inserts org-sql-db-config)))))
+      (->> (append (list (org-sql--format-path-delete-statement org-sql-db-config paths-to-delete)
+                         (org-sql--format-file-delete-statement org-sql-db-config files-to-delete))
+                   (inserts-to-sql insert-fstates paths-to-insert))
            (org-sql--format-sql-transaction org-sql-db-config)))))
 
 (defun org-sql-dump-update-transactions ()
