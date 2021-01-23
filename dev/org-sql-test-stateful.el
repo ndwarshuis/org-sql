@@ -453,14 +453,14 @@
 
   "Postgres"
   (postgres :database "org_sql"
-            :port "60001"
+            :port "60000"
             :hostname "localhost"
             :username "org_sql"
             :password "org_sql")
 
   "Postgres: non-default schema"
   (postgres :database "org_sql"
-            :port "60001"
+            :port "60000"
             :schema "nonpublic"
             :hostname "localhost"
             :username "org_sql"
@@ -468,14 +468,21 @@
 
   "MariaDB"
   (mysql :database "org_sql"
-         :port "60002"
+         :port "60100"
+         :hostname "localhost"
+         :username "org_sql"
+         :password "org_sql")
+
+  "MySQL"
+  (mysql :database "org_sql"
+         :port "60200"
          :hostname "localhost"
          :username "org_sql"
          :password "org_sql")
 
   "SQL Server: non-default schema"
   (sqlserver :database "org_sql"
-              :port "60003"
+              :port "60300"
               :schema "schema_i_can_edit"
               :hostname "localhost"
               :username "org_sql"
