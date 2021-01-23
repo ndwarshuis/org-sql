@@ -54,12 +54,10 @@ list then join the cdr of IN with newlines."
 (defconst testing-hash "123456")
 
 (defconst testing-metadata-mql
-  `(file_metadata :file_hash ,testing-hash
-                  :file_path ,testing-filepath))
+  `(file_metadata (,testing-filepath ,testing-hash)))
 
 (defconst testing-hashes-mql
-  `(file_hashes :file_hash ,testing-hash
-                :size 0))
+  `(file_hashes (,testing-hash 0)))
 
 (defmacro expect-sql* (in tbl res-form)
   `(progn
@@ -75,7 +73,8 @@ list then join the cdr of IN with newlines."
     (->> (org-ml-parse-this-buffer)
          (org-sql--to-fstate testing-hash paths-with-attributes
                              org-log-note-headings '("TODO" "DONE") lb-config)
-         (org-sql--fstate-to-mql-insert))))
+         (org-sql--fstate-to-mql-insert)
+         (-filter #'cdr))))
 
 (defmacro expect-sql (in tbl)
   (declare (indent 1))
@@ -479,51 +478,18 @@ list then join the cdr of IN with newlines."
       (expect-sql "* headline"
         `(,testing-hashes-mql
           ,testing-metadata-mql
-          (headlines :file_hash ,testing-hash
-                     :headline_offset 1
-                     :headline_text "headline"
-                     :keyword nil
-                     :effort nil
-                     :priority nil
-                     :is_archived 0
-                     :is_commented 0
-                     :content nil)
-          (headline_closures :file_hash ,testing-hash
-                             :headline_offset 1
-                             :parent_offset 1
-                             :depth 0))))
+          (headlines (,testing-hash 1 "headline" nil nil nil 0 0 nil))
+          (headline_closures (,testing-hash 1 1 0)))))
 
     (it "two"
       (expect-sql (list "* headline"
                         "* another headline")
         `(,testing-hashes-mql
           ,testing-metadata-mql
-          (headlines :file_hash ,testing-hash
-                     :headline_offset 1
-                     :headline_text "headline"
-                     :keyword nil
-                     :effort nil
-                     :priority nil
-                     :is_archived 0
-                     :is_commented 0
-                     :content nil)
-          (headline_closures :file_hash ,testing-hash
-                             :headline_offset 1
-                             :parent_offset 1
-                             :depth 0)
-          (headlines :file_hash ,testing-hash
-                     :headline_offset 12
-                     :headline_text "another headline"
-                     :keyword nil
-                     :effort nil
-                     :priority nil
-                     :is_archived 0
-                     :is_commented 0
-                     :content nil)
-          (headline_closures :file_hash ,testing-hash
-                             :headline_offset 12
-                             :parent_offset 12
-                             :depth 0))))
+          (headlines (,testing-hash 12 "another headline" nil nil nil 0 0 nil)
+                     (,testing-hash 1 "headline" nil nil nil 0 0 nil))
+          (headline_closures (,testing-hash 12 12 0)
+                             (,testing-hash 1 1 0)))))
 
     (it "fancy"
       (expect-sql (list "* TODO [#A] COMMENT another headline"
@@ -533,74 +499,28 @@ list then join the cdr of IN with newlines."
                         "this /should/ appear")
         `(,testing-hashes-mql
           ,testing-metadata-mql
-          (headlines :file_hash ,testing-hash
-                     :headline_offset 1
-                     :headline_text "another headline"
-                     :keyword "TODO"
-                     :effort 30
-                     :priority "A"
-                     :is_archived 0
-                     :is_commented 1
-                     :content "this /should/ appear\n")
-          (headline_closures :file_hash ,testing-hash
-                             :headline_offset 1
-                             :parent_offset 1
-                             :depth 0))))
+          (headlines
+           (,testing-hash 1 "another headline" "TODO" 30 "A" 0 1 "this /should/ appear\n"))
+          (headline_closures
+           (,testing-hash 1 1 0)))))
 
     (it "nested"
       (expect-sql (list "* headline"
                         "** nested headline")
         `(,testing-hashes-mql
           ,testing-metadata-mql
-          (headlines :file_hash ,testing-hash
-                     :headline_offset 1
-                     :headline_text "headline"
-                     :keyword nil
-                     :effort nil
-                     :priority nil
-                     :is_archived 0
-                     :is_commented 0
-                     :content nil)
-          (headline_closures :file_hash ,testing-hash
-                             :headline_offset 1
-                             :parent_offset 1
-                             :depth 0)
-          (headlines :file_hash ,testing-hash
-                     :headline_offset 12
-                     :headline_text "nested headline"
-                     :keyword nil
-                     :effort nil
-                     :priority nil
-                     :is_archived 0
-                     :is_commented 0
-                     :content nil)
-          (headline_closures :file_hash ,testing-hash
-                             :headline_offset 12
-                             :parent_offset 1
-                             :depth 1)
-          (headline_closures :file_hash ,testing-hash
-                             :headline_offset 12
-                             :parent_offset 12
-                             :depth 0))))
-
+          (headlines (,testing-hash 12 "nested headline" nil nil nil 0 0 nil)
+                     (,testing-hash 1 "headline" nil nil nil 0 0 nil))
+          (headline_closures (,testing-hash 12 12 0)
+                             (,testing-hash 12 1 1)
+                             (,testing-hash 1 1 0)))))
 
     (it "archived"
       (expect-sql "* headline :ARCHIVE:"
         `(,testing-hashes-mql
           ,testing-metadata-mql
-          (headlines :file_hash ,testing-hash
-                     :headline_offset 1
-                     :headline_text "headline"
-                     :keyword nil
-                     :effort nil
-                     :priority nil
-                     :is_archived 1
-                     :is_commented 0
-                     :content nil)
-          (headline_closures :file_hash ,testing-hash
-                             :headline_offset 1
-                             :parent_offset 1
-                             :depth 0)))))
+          (headlines (,testing-hash 1 "headline" nil nil nil 1 0 nil))
+          (headline_closures (,testing-hash 1 1 0))))))
 
   (describe "planning entries"
     (let ((ts0 "<2112-01-01 Thu>")
@@ -611,74 +531,19 @@ list then join the cdr of IN with newlines."
                 (format "SCHEDULED: %s DEADLINE: %s CLOSED: %s" ts0 ts1 ts2))
         "multiple (included)"
         nil
-        `((timestamps :file_hash ,testing-hash
-                      :headline_offset 1
-                      :timestamp_offset 75
-                      :is_active 0
-                      :time_start ,(org-ts-to-unixtime ts2)
-                      :start_is_long 0
-                      :time_end nil
-                      :end_is_long nil
-                      :raw_value ,ts2)
-          (planning_entries :file_hash ,testing-hash
-                            :headline_offset 1
-                            :planning_type closed
-                            :timestamp_offset 75)
-          (timestamps :file_hash ,testing-hash
-                      :headline_offset 1
-                      :timestamp_offset 50
-                      :is_active 1
-                      :time_start ,(org-ts-to-unixtime ts1)
-                      :start_is_long 0
-                      :time_end nil
-                      :end_is_long nil
-                      :raw_value ,ts1)
-          (planning_entries :file_hash ,testing-hash
-                            :headline_offset 1
-                            :planning_type deadline
-                            :timestamp_offset 50)
-          (timestamps :file_hash ,testing-hash
-                      :headline_offset 1
-                      :timestamp_offset 23
-                      :is_active 1
-                      :time_start ,(org-ts-to-unixtime ts0)
-                      :start_is_long 0
-                      :time_end nil
-                      :end_is_long nil
-                      :raw_value ,ts0)
-          (planning_entries :file_hash ,testing-hash
-                            :headline_offset 1
-                            :planning_type scheduled
-                            :timestamp_offset 23))
+        `((timestamps (,testing-hash 1 23 ,ts0 1 ,(org-ts-to-unixtime ts0) nil 0 nil)
+                      (,testing-hash 1 50 ,ts1 1 ,(org-ts-to-unixtime ts1) nil 0 nil)
+                      (,testing-hash 1 75 ,ts2 0 ,(org-ts-to-unixtime ts2) nil 0 nil))
+          (planning_entries (,testing-hash 1 scheduled 23)
+                            (,testing-hash 1 deadline 50)
+                            (,testing-hash 1 closed 75)))
 
         "multiple (exclude some)"
         ((org-sql-excluded-headline-planning-types '(:closed)))
-        `((timestamps :file_hash ,testing-hash
-                      :headline_offset 1
-                      :timestamp_offset 50
-                      :is_active 1
-                      :time_start ,(org-ts-to-unixtime ts1)
-                      :start_is_long 0
-                      :time_end nil
-                      :end_is_long nil
-                      :raw_value ,ts1)
-          (planning_entries :file_hash ,testing-hash
-                            :headline_offset 1
-                            :planning_type deadline
-                            :timestamp_offset 50)
-          (timestamps :file_hash ,testing-hash
-                      :headline_offset 1
-                      :timestamp_offset 23
-                      :is_active 1
-                      :time_start ,(org-ts-to-unixtime ts0)
-                      :start_is_long 0
-                      :time_end nil
-                      :end_is_long nil
-                      :raw_value ,ts0)
-          (planning_entries :file_hash ,testing-hash
-                            :headline_offset 1
-                            :planning_type scheduled
-                            :timestamp_offset 23))
+        `((timestamps (,testing-hash 1 23 ,ts0 1 ,(org-ts-to-unixtime ts0) nil 0 nil)
+                      (,testing-hash 1 50 ,ts1 1 ,(org-ts-to-unixtime ts1) nil 0 nil))
+          (planning_entries (,testing-hash 1 scheduled 23)
+                            (,testing-hash 1 deadline 50)))
 
         "multiple (exclude all)"
         ((org-sql-excluded-headline-planning-types '(:closed :scheduled :deadline)))
@@ -689,21 +554,12 @@ list then join the cdr of IN with newlines."
                                                  "* headline :twotag:")
       "multiple (included)"
       nil
-      `((headline_tags :file_hash ,testing-hash
-                       :headline_offset 1
-                       :tag "onetag"
-                       :is_inherited 0)
-        (headline_tags :file_hash ,testing-hash
-                       :headline_offset 21
-                       :tag "twotag"
-                       :is_inherited 0))
+      `((headline_tags (,testing-hash 21 "twotag" 0)
+                       (,testing-hash 1 "onetag" 0)))
 
       "multiple (exclude one)"
       ((org-sql-excluded-tags '("onetag")))
-      `((headline_tags :file_hash ,testing-hash
-                       :headline_offset 21
-                       :tag "twotag"
-                       :is_inherited 0))
+      `((headline_tags (,testing-hash 21 "twotag" 0)))
 
       "multiple (exclude all)"
       ((org-sql-excluded-tags 'all))
@@ -713,10 +569,7 @@ list then join the cdr of IN with newlines."
       (setq org-sql-use-tag-inheritance t)
       (expect-sql-tbls (headline_tags) (list "* parent :onetag:"
                                              "** nested")
-        `((headline_tags :file_hash ,testing-hash
-                         :headline_offset 1
-                         :tag "onetag"
-                         :is_inherited 0))))
+        `((headline_tags (,testing-hash 1 "onetag" 0)))))
 
     (expect-sql-tbls-multi (headline_tags) (list "* parent"
                                                  ":PROPERTIES:"
@@ -724,10 +577,7 @@ list then join the cdr of IN with newlines."
                                                  ":END:")
       "inherited (included)"
       nil
-      `((headline_tags :file_hash ,testing-hash
-                       :headline_offset 1
-                       :tag "sometag"
-                       :is_inherited 1))
+      `((headline_tags (,testing-hash 1 "sometag" 1)))
 
       "inherited (excluded)"
       ((org-sql-exclude-inherited-tags t))
@@ -737,20 +587,16 @@ list then join the cdr of IN with newlines."
     (it "single"
       (expect-sql-tbls (file_tags) (list "#+FILETAGS: foo"
                                          "* headline")
-        `((file_tags :file_hash ,testing-hash
-                     :tag "foo"))))
+        `((file_tags (,testing-hash "foo")))))
 
     (it "multiple"
       (expect-sql-tbls (file_tags) (list "#+FILETAGS: foo bar"
                                          "#+FILETAGS: bang"
                                          "#+FILETAGS: bar"
                                          "* headline")
-        `((file_tags :file_hash ,testing-hash
-                     :tag "foo")
-          (file_tags :file_hash ,testing-hash
-                     :tag "bar")
-          (file_tags :file_hash ,testing-hash
-                     :tag "bang")))))
+        `((file_tags (,testing-hash "bang")
+                     (,testing-hash "bar")
+                     (,testing-hash "foo"))))))
 
   (describe "timestamp"
     (it "closed"
@@ -758,30 +604,14 @@ list then join the cdr of IN with newlines."
              (planning (format "CLOSED: %s" ts)))
         (expect-sql-tbls (timestamps) (list "* parent"
                                             planning)
-          `((timestamps :file_hash ,testing-hash
-                        :headline_offset 1
-                        :timestamp_offset 18
-                        :is_active 1
-                        :time_start ,(org-ts-to-unixtime ts)
-                        :start_is_long 0
-                        :time_end nil
-                        :end_is_long nil
-                        :raw_value ,ts)))))
+          `((timestamps (,testing-hash 1 18 ,ts 1 ,(org-ts-to-unixtime ts) nil 0 nil))))))
 
     (it "closed (long)"
       (let* ((ts "<2112-01-01 Thu 00:00>")
              (planning (format "CLOSED: %s" ts)))
         (expect-sql-tbls (timestamps) (list "* parent"
                                             planning)
-          `((timestamps :file_hash ,testing-hash
-                        :headline_offset 1
-                        :timestamp_offset 18
-                        :is_active 1
-                        :time_start ,(org-ts-to-unixtime ts)
-                        :start_is_long 1
-                        :time_end nil
-                        :end_is_long nil
-                        :raw_value ,ts)))))
+          `((timestamps (,testing-hash 1 18 ,ts 1 ,(org-ts-to-unixtime ts) nil 1 nil))))))
 
     (it "deadline (repeater)"
       (let* ((ts "<2112-01-01 Thu +2d>")
@@ -789,20 +619,8 @@ list then join the cdr of IN with newlines."
         (expect-sql-tbls (timestamps timestamp_modifiers timestamp_repeaters)
                          (list "* parent"
                                planning)
-          `((timestamps :file_hash ,testing-hash
-                        :headline_offset 1
-                        :timestamp_offset 20
-                        :is_active 1
-                        :time_start ,(org-ts-to-unixtime ts)
-                        :start_is_long 0
-                        :time_end nil
-                        :end_is_long nil
-                        :raw_value ,ts)
-            (timestamp_repeaters :file_hash ,testing-hash
-                                 :timestamp_offset 20
-                                 :repeater_value 2
-                                 :repeater_unit day
-                                 :repeater_type cumulate)))))
+          `((timestamps (,testing-hash 1 20 ,ts 1 ,(org-ts-to-unixtime ts) nil 0 nil))
+            (timestamp_repeaters (,testing-hash 20 2 day cumulate))))))
 
     (it "deadline (warning)"
       (let* ((ts "<2112-01-01 Thu -2d>")
@@ -810,20 +628,8 @@ list then join the cdr of IN with newlines."
         (expect-sql-tbls (timestamps timestamp_modifiers timestamp_warnings)
                          (list "* parent"
                                planning)
-          `((timestamps :file_hash ,testing-hash
-                        :headline_offset 1
-                        :timestamp_offset 20
-                        :is_active 1
-                        :time_start ,(org-ts-to-unixtime ts)
-                        :start_is_long 0
-                        :time_end nil
-                        :end_is_long nil
-                        :raw_value ,ts)
-            (timestamp_warnings :file_hash ,testing-hash
-                                :timestamp_offset 20
-                                :warning_value 2
-                                :warning_unit day
-                                :warning_type all)))))
+          `((timestamps (,testing-hash 1 20 ,ts 1 ,(org-ts-to-unixtime ts) nil 0 nil))
+            (timestamp_warnings (,testing-hash 20 2 day all))))))
 
     (let* ((ts1 "<2112-01-01 Thu>")
            (ts2 "[2112-01-02 Fri]"))
@@ -832,36 +638,12 @@ list then join the cdr of IN with newlines."
                                                 ts2)
         "multiple content (included)"
         nil
-        `((timestamps :file_hash ,testing-hash
-                      :headline_offset 1
-                      :timestamp_offset 10
-                      :is_active 1
-                      :time_start ,(org-ts-to-unixtime ts1)
-                      :start_is_long 0
-                      :time_end nil
-                      :end_is_long nil
-                      :raw_value ,ts1)
-          (timestamps :file_hash ,testing-hash
-                      :headline_offset 1
-                      :timestamp_offset 27
-                      :is_active 0
-                      :time_start ,(org-ts-to-unixtime ts2)
-                      :start_is_long 0
-                      :time_end nil
-                      :end_is_long nil
-                      :raw_value ,ts2))
+        `((timestamps (,testing-hash 1 27 ,ts2 0 ,(org-ts-to-unixtime ts2) nil 0 nil)
+                      (,testing-hash 1 10 ,ts1 1 ,(org-ts-to-unixtime ts1) nil 0 nil)))
 
         "multiple content (exclude some)"
         ((org-sql-excluded-contents-timestamp-types '(inactive)))
-        `((timestamps :file_hash ,testing-hash
-                      :headline_offset 1
-                      :timestamp_offset 10
-                      :is_active 1
-                      :time_start ,(org-ts-to-unixtime ts1)
-                      :start_is_long 0
-                      :time_end nil
-                      :end_is_long nil
-                      :raw_value ,ts1))
+        `((timestamps (,testing-hash 1 10 ,ts1 1 ,(org-ts-to-unixtime ts1) nil 0 nil)))
 
         "multiple content (exclude all)"
         ((org-sql-excluded-contents-timestamp-types 'all))
@@ -872,31 +654,16 @@ list then join the cdr of IN with newlines."
         (expect-sql-tbls (timestamps) (list "* parent"
                                             "** child"
                                             ts)
-          `((timestamps :file_hash ,testing-hash
-                        :headline_offset 10
-                        :timestamp_offset 19
-                        :is_active 1
-                        :time_start ,(org-ts-to-unixtime ts)
-                        :start_is_long 0
-                        :time_end nil
-                        :end_is_long nil
-                        :raw_value ,ts)))))
-
+          `((timestamps (,testing-hash 10 19 ,ts 1 ,(org-ts-to-unixtime ts) nil 0 nil))))))
+    
     (it "content (ranged)"
       (let* ((ts0 "<2112-01-01 Thu>")
              (ts1 "<2112-01-02 Fri>")
              (ts (format "%s--%s" ts0 ts1)))
         (expect-sql-tbls (timestamps) (list "* parent"
                                             ts)
-          `((timestamps :file_hash ,testing-hash
-                        :headline_offset 1
-                        :timestamp_offset 10
-                        :is_active 1
-                        :time_start ,(org-ts-to-unixtime ts0)
-                        :start_is_long 0
-                        :time_end ,(org-ts-to-unixtime ts1)
-                        :end_is_long 0
-                        :raw_value ,ts))))))
+          `((timestamps (,testing-hash 1 10 ,ts 1 ,(org-ts-to-unixtime ts0)
+                                       ,(org-ts-to-unixtime ts1) 0 0)))))))
 
   (describe "links"
     (expect-sql-tbls-multi (links) (list "* parent"
@@ -904,27 +671,12 @@ list then join the cdr of IN with newlines."
                                          "file:///the/glass/prison")
       "multiple (included)"
       nil
-      `((links :file_hash ,testing-hash
-               :headline_offset 1
-               :link_offset 10
-               :link_path "//example.org"
-               :link_text ""
-               :link_type "https")
-        (links :file_hash ,testing-hash
-               :headline_offset 1
-               :link_offset 30
-               :link_path "/the/glass/prison"
-               :link_text ""
-               :link_type "file"))
+      `((links (,testing-hash 1 30 "/the/glass/prison" "" "file")
+               (,testing-hash 1 10 "//example.org" "" "https")))
 
       "multiple (exclude some)"
       ((org-sql-excluded-link-types '("file")))
-      `((links :file_hash ,testing-hash
-               :headline_offset 1
-               :link_offset 10
-               :link_path "//example.org"
-               :link_text ""
-               :link_type "https"))
+      `((links (,testing-hash 1 10 "//example.org" "" "https")))
 
       "multiple (exclude all)"
       ((org-sql-excluded-link-types 'all))
@@ -934,22 +686,12 @@ list then join the cdr of IN with newlines."
       (expect-sql-tbls (links) (list "* parent"
                                      "** child"
                                      "https://example.com")
-        `((links :file_hash ,testing-hash
-                 :headline_offset 10
-                 :link_offset 19
-                 :link_path "//example.com"
-                 :link_text ""
-                 :link_type "https"))))
+        `((links (,testing-hash 10 19 "//example.com" "" "https")))))
     
     (it "with description"
       (expect-sql-tbls (links) (list "* parent"
                                      "[[https://example.org][relevant]]")
-        `((links :file_hash ,testing-hash
-                 :headline_offset 1
-                 :link_offset 10
-                 :link_path "//example.org"
-                 :link_text "relevant"
-                 :link_type "https")))))
+        `((links (,testing-hash 1 10 "//example.org" "relevant" "https"))))))
 
   (describe "properties"
     (it "single"
@@ -958,13 +700,8 @@ list then join the cdr of IN with newlines."
                 ":PROPERTIES:"
                 ":key: val"
                 ":END:")
-        `((properties :file_hash ,testing-hash
-                      :property_offset 23
-                      :key_text "key"
-                      :val_text "val")
-          (headline_properties :file_hash ,testing-hash
-                               :headline_offset 1
-                               :property_offset 23))))
+        `((properties (,testing-hash 23 "key" "val"))
+          (headline_properties (,testing-hash 1 23)))))
 
     (it "multiple"
       (expect-sql-tbls (properties headline_properties)
@@ -973,20 +710,10 @@ list then join the cdr of IN with newlines."
                 ":p1: ragtime dandies"
                 ":p2: this time its personal"
                 ":END:")
-        `((properties :file_hash ,testing-hash
-                      :property_offset 23
-                      :key_text "p1"
-                      :val_text "ragtime dandies")
-          (headline_properties :file_hash ,testing-hash
-                               :headline_offset 1
-                               :property_offset 23)
-          (properties :file_hash ,testing-hash
-                      :property_offset 44
-                      :key_text "p2"
-                      :val_text "this time its personal")
-          (headline_properties :file_hash ,testing-hash
-                               :headline_offset 1
-                               :property_offset 44))))
+        `((properties (,testing-hash 44 "p2" "this time its personal")
+                      (,testing-hash 23 "p1" "ragtime dandies"))
+          (headline_properties (,testing-hash 1 44)
+                               (,testing-hash 1 23)))))
 
     ;; TODO add inherited properties once they exist
 
@@ -994,12 +721,8 @@ list then join the cdr of IN with newlines."
       (expect-sql-tbls (properties file_properties)
           (list "#+PROPERTY: FOO bar"
                 "* parent")
-        `((properties :file_hash ,testing-hash
-                      :property_offset 1
-                      :key_text "FOO"
-                      :val_text "bar")
-          (file_properties :file_hash ,testing-hash
-                           :property_offset 1)))))
+        `((properties (,testing-hash 1 "FOO" "bar"))
+          (file_properties (,testing-hash 1))))))
 
   (describe "logbook"
     (describe "clocks"
@@ -1011,13 +734,8 @@ list then join the cdr of IN with newlines."
                                           ":LOGBOOK:"
                                           clock
                                           ":END:")
-            `((clocks :file_hash ,testing-hash
-                      :headline_offset 1
-                      :clock_offset 20
-                      :time_start ,(org-ts-to-unixtime ts0)
-                      :time_end ,(org-ts-to-unixtime ts1)
-                      :clock_note nil)))))
-
+            `((clocks (,testing-hash 1 20 ,(org-ts-to-unixtime ts0)
+                                     ,(org-ts-to-unixtime ts1) nil))))))
 
       (it "single (open)"
         (let* ((ts "[2112-01-01 Fri 00:00]")
@@ -1026,12 +744,7 @@ list then join the cdr of IN with newlines."
                                           ":LOGBOOK:"
                                           clock
                                           ":END:")
-            `((clocks :file_hash ,testing-hash
-                      :headline_offset 1
-                      :clock_offset 20
-                      :time_start ,(org-ts-to-unixtime ts)
-                      :time_end nil
-                      :clock_note nil)))))
+            `((clocks (,testing-hash 1 20 ,(org-ts-to-unixtime ts) nil nil))))))
 
       (let* ((ts "[2112-01-01 Fri 00:00]")
              (clock (format "CLOCK: %s" ts)))
@@ -1042,22 +755,12 @@ list then join the cdr of IN with newlines."
                                               ":END:")
           "single (note - included)"
           ((org-log-note-clock-out t))
-          `((clocks :file_hash ,testing-hash
-                    :headline_offset 1
-                    :clock_offset 20
-                    :time_start ,(org-ts-to-unixtime ts)
-                    :time_end nil
-                    :clock_note "random"))
+          `((clocks (,testing-hash 1 20 ,(org-ts-to-unixtime ts) nil "random")))
 
           "single (note - excluded)"
           ((org-log-note-clock-out t)
            (org-sql-exclude-clock-notes t))
-          `((clocks :file_hash ,testing-hash
-                    :headline_offset 1
-                    :clock_offset 20
-                    :time_start ,(org-ts-to-unixtime ts)
-                    :time_end nil
-                    :clock_note nil))))
+          `((clocks (,testing-hash 1 20 ,(org-ts-to-unixtime ts) nil nil)))))
 
       (it "multiple"
         (let* ((ts0 "[2112-01-01 Fri 00:00]")
@@ -1069,18 +772,8 @@ list then join the cdr of IN with newlines."
                                           clock0
                                           clock1
                                           ":END:")
-            `((clocks :file_hash ,testing-hash
-                      :headline_offset 1
-                      :clock_offset 20
-                      :time_start ,(org-ts-to-unixtime ts0)
-                      :time_end nil
-                      :clock_note nil)
-              (clocks :file_hash ,testing-hash
-                      :headline_offset 1
-                      :clock_offset 50
-                      :time_start ,(org-ts-to-unixtime ts1)
-                      :time_end nil
-                      :clock_note nil))))))
+            `((clocks (,testing-hash 1 50 ,(org-ts-to-unixtime ts1) nil nil)
+                      (,testing-hash 1 20 ,(org-ts-to-unixtime ts0) nil nil)))))))
 
     (describe "items"
       (let* ((ts "[2112-01-01 Fri 00:00]")
@@ -1091,13 +784,7 @@ list then join the cdr of IN with newlines."
                                                        (format "  %s" note))
           "note (included)"
           nil
-          `((logbook_entries :file_hash ,testing-hash
-                             :headline_offset 1
-                             :entry_offset 10
-                             :entry_type "note"
-                             :time_logged ,(org-ts-to-unixtime ts)
-                             :header ,header
-                             :note ,note))
+          `((logbook_entries (,testing-hash 1 10 "note" ,(org-ts-to-unixtime ts) ,header ,note)))
 
           "note (exclude)"
           ((org-sql-excluded-logbook-types '(note)))
@@ -1110,17 +797,8 @@ list then join the cdr of IN with newlines."
                   (format "- %s" header))
           "state change (included)"
           nil
-          `((logbook_entries :file_hash ,testing-hash
-                             :headline_offset 1
-                             :entry_offset 10
-                             :entry_type "state"
-                             :time_logged ,(org-ts-to-unixtime ts)
-                             :header ,header
-                             :note nil)
-            (state_changes :file_hash ,testing-hash
-                           :entry_offset 10
-                           :state_old "TODO"
-                           :state_new "DONE"))
+          `((logbook_entries (,testing-hash 1 10 "state" ,(org-ts-to-unixtime ts) ,header nil))
+            (state_changes (,testing-hash 10 "TODO" "DONE")))
 
           "state change (excluded)"
           ((org-sql-excluded-logbook-types '(state)))
@@ -1134,25 +812,11 @@ list then join the cdr of IN with newlines."
                   (format "- %s" header))
           "rescheduled (included)"
           nil
-          `((logbook_entries :file_hash ,testing-hash
-                             :headline_offset 1
-                             :entry_offset 10
-                             :entry_type "reschedule"
-                             :time_logged ,(org-ts-to-unixtime ts1)
-                             :header ,header
-                             :note nil)
-            (timestamps :file_hash ,testing-hash
-                        :headline_offset 1
-                        :timestamp_offset 30
-                        :is_active 0
-                        :time_start ,(org-ts-to-unixtime ts0)
-                        :start_is_long 1
-                        :time_end nil
-                        :end_is_long nil
-                        :raw_value ,ts0)
-            (planning_changes :file_hash ,testing-hash
-                              :entry_offset 10
-                              :timestamp_offset 30))
+          `((timestamps (,testing-hash 1 30 ,ts0 0 ,(org-ts-to-unixtime ts0) nil
+                                       1 nil))
+            (logbook_entries (,testing-hash 1 10 "reschedule"
+                                            ,(org-ts-to-unixtime ts1) ,header nil))
+            (planning_changes (,testing-hash 10 30)))
 
           "rescheduled (excluded)"
           ((org-sql-excluded-logbook-types '(reschedule)))
@@ -1166,25 +830,12 @@ list then join the cdr of IN with newlines."
                   (format "- %s" header))
           "redeadline (included)"
           nil
-          `((logbook_entries :file_hash ,testing-hash
-                             :headline_offset 1
-                             :entry_offset 10
-                             :entry_type "redeadline"
-                             :time_logged ,(org-ts-to-unixtime ts1)
-                             :header ,header
-                             :note nil)
-            (timestamps :file_hash ,testing-hash
-                        :headline_offset 1
-                        :timestamp_offset 31
-                        :is_active 0
-                        :time_start ,(org-ts-to-unixtime ts0)
-                        :start_is_long 1
-                        :time_end nil
-                        :end_is_long nil
-                        :raw_value ,ts0)
-            (planning_changes :file_hash ,testing-hash
-                              :entry_offset 10
-                              :timestamp_offset 31))
+          `((timestamps (,testing-hash 1 31 ,ts0 0 ,(org-ts-to-unixtime ts0)
+                                       nil 1 nil))
+            (logbook_entries (,testing-hash 1 10 "redeadline"
+                                            ,(org-ts-to-unixtime ts1)
+                                            ,header nil))
+            (planning_changes (,testing-hash 10 31)))
 
           "redeadline (excluded)"
           ((org-sql-excluded-logbook-types '(redeadline)))
@@ -1198,25 +849,11 @@ list then join the cdr of IN with newlines."
                   (format "- %s" header))
           "delschedule (included)"
           nil
-          `((logbook_entries :file_hash ,testing-hash
-                             :headline_offset 1
-                             :entry_offset 10
-                             :entry_type "delschedule"
-                             :time_logged ,(org-ts-to-unixtime ts1)
-                             :header ,header
-                             :note nil)
-            (timestamps :file_hash ,testing-hash
-                        :headline_offset 1
-                        :timestamp_offset 32
-                        :is_active 0
-                        :time_start ,(org-ts-to-unixtime ts0)
-                        :start_is_long 1
-                        :time_end nil
-                        :end_is_long nil
-                        :raw_value ,ts0)
-            (planning_changes :file_hash ,testing-hash
-                              :entry_offset 10
-                              :timestamp_offset 32))
+          `((timestamps (,testing-hash 1 32 ,ts0 0 ,(org-ts-to-unixtime ts0) nil 1 nil))
+            (logbook_entries (,testing-hash 1 10 "delschedule"
+                                            ,(org-ts-to-unixtime ts1) ,header
+                                            nil))
+            (planning_changes (,testing-hash 10 32)))
 
           "delschedule (excluded)"
           ((org-sql-excluded-logbook-types '(delschedule)))
@@ -1230,25 +867,12 @@ list then join the cdr of IN with newlines."
                   (format "- %s" header))
           "deldeadline (included)"
           nil
-          `((logbook_entries :file_hash ,testing-hash
-                             :headline_offset 1
-                             :entry_offset 10
-                             :entry_type "deldeadline"
-                             :time_logged ,(org-ts-to-unixtime ts1)
-                             :header ,header
-                             :note nil)
-            (timestamps :file_hash ,testing-hash
-                        :headline_offset 1
-                        :timestamp_offset 35
-                        :is_active 0
-                        :time_start ,(org-ts-to-unixtime ts0)
-                        :start_is_long 1
-                        :time_end nil
-                        :end_is_long nil
-                        :raw_value ,ts0)
-            (planning_changes :file_hash ,testing-hash
-                              :entry_offset 10
-                              :timestamp_offset 35))
+          `((timestamps (,testing-hash 1 35 ,ts0 0 ,(org-ts-to-unixtime ts0)
+                                       nil 1 nil))
+            (logbook_entries (,testing-hash 1 10 "deldeadline"
+                                            ,(org-ts-to-unixtime ts1) ,header
+                                            nil))
+            (planning_changes (,testing-hash 10 35)))
 
           "deldeadline (excluded)"
           ((org-sql-excluded-logbook-types '(deldeadline)))
@@ -1260,13 +884,9 @@ list then join the cdr of IN with newlines."
                                                        (format "- %s" header))
           "refile (included)"
           nil
-          `((logbook_entries :file_hash ,testing-hash
-                             :headline_offset 1
-                             :entry_offset 10
-                             :entry_type "refile"
-                             :time_logged ,(org-ts-to-unixtime ts)
-                             :header ,header
-                             :note nil))
+          `((logbook_entries (,testing-hash 1 10 "refile"
+                                            ,(org-ts-to-unixtime ts)
+                                            ,header nil)))
 
           "refile (excluded)"
           ((org-sql-excluded-logbook-types '(refile)))
@@ -1278,13 +898,8 @@ list then join the cdr of IN with newlines."
                                                        (format "- %s" header))
           "done (included)"
           nil
-          `((logbook_entries :file_hash ,testing-hash
-                             :headline_offset 1
-                             :entry_offset 10
-                             :entry_type "done"
-                             :time_logged ,(org-ts-to-unixtime ts)
-                             :header ,header
-                             :note nil))
+          `((logbook_entries (,testing-hash 1 10 "done" ,(org-ts-to-unixtime ts)
+                                            ,header nil)))
 
           "done (excluded)"
           ((org-sql-excluded-logbook-types '(done)))
@@ -1302,19 +917,11 @@ list then join the cdr of IN with newlines."
                                                           clock
                                                           ":END:"
                                                           (format "- %s" header))
-            `((clocks :file_hash ,testing-hash
-                      :headline_offset 1
-                      :clock_offset 20
-                      :time_start ,(org-ts-to-unixtime ts0)
-                      :time_end ,(org-ts-to-unixtime ts1)
-                      :clock_note nil)
-              (logbook_entries :file_hash ,testing-hash
-                               :headline_offset 1
-                               :entry_offset 88
-                               :entry_type "done"
-                               :time_logged ,(org-ts-to-unixtime ts)
-                               :header ,header
-                               :note nil)))))
+            `((clocks (,testing-hash 1 20 ,(org-ts-to-unixtime ts0)
+                                     ,(org-ts-to-unixtime ts1) nil))
+              (logbook_entries (,testing-hash 1 88 "done"
+                                              ,(org-ts-to-unixtime ts)
+                                              ,header nil))))))
 
       (it "clock + note + non-note"
         (let* ((org-log-note-clock-out t)
@@ -1329,19 +936,12 @@ list then join the cdr of IN with newlines."
                                                           " - this is a clock note"
                                                           ":END:"
                                                           (format "- %s" header))
-            `((clocks :file_hash ,testing-hash
-                      :headline_offset 1
-                      :clock_offset 20
-                      :time_start ,(org-ts-to-unixtime ts0)
-                      :time_end ,(org-ts-to-unixtime ts1)
-                      :clock_note "this is a clock note")
-              (logbook_entries :file_hash ,testing-hash
-                               :headline_offset 1
-                               :entry_offset 112
-                               :entry_type "done"
-                               :time_logged ,(org-ts-to-unixtime ts)
-                               :header ,header
-                               :note nil)))))
+            `((clocks (,testing-hash 1 20 ,(org-ts-to-unixtime ts0)
+                                     ,(org-ts-to-unixtime ts1)
+                                     "this is a clock note"))
+              (logbook_entries (,testing-hash 1 112 "done"
+                                              ,(org-ts-to-unixtime ts)
+                                              ,header nil))))))
 
       (it "non-note + clock"
         (let* ((ts "[2112-01-01 Fri 00:00]")
@@ -1354,19 +954,11 @@ list then join the cdr of IN with newlines."
                                                           ":LOGBOOK:"
                                                           clock
                                                           ":END:")
-            `((clocks :file_hash ,testing-hash
-                      :headline_offset 1
-                      :clock_offset 58
-                      :time_start ,(org-ts-to-unixtime ts0)
-                      :time_end ,(org-ts-to-unixtime ts1)
-                      :clock_note nil)
-              (logbook_entries :file_hash ,testing-hash
-                               :headline_offset 1
-                               :entry_offset 10
-                               :entry_type "done"
-                               :time_logged ,(org-ts-to-unixtime ts)
-                               :header ,header
-                               :note nil)))))
+            `((clocks (,testing-hash 1 58 ,(org-ts-to-unixtime ts0)
+                                     ,(org-ts-to-unixtime ts1) nil))
+              (logbook_entries (,testing-hash 1 10 "done"
+                                              ,(org-ts-to-unixtime ts)
+                                              ,header nil)))))) 
 
       (it "non-note + clock + clock note"
         (let* ((org-log-note-clock-out t)
@@ -1381,19 +973,12 @@ list then join the cdr of IN with newlines."
                                                           clock
                                                           "- this is a clock note"
                                                           ":END:")
-            `((clocks :file_hash ,testing-hash
-                      :headline_offset 1
-                      :clock_offset 58
-                      :time_start ,(org-ts-to-unixtime ts0)
-                      :time_end ,(org-ts-to-unixtime ts1)
-                      :clock_note "this is a clock note")
-              (logbook_entries :file_hash ,testing-hash
-                               :headline_offset 1
-                               :entry_offset 10
-                               :entry_type "done"
-                               :time_logged ,(org-ts-to-unixtime ts)
-                               :header ,header
-                               :note nil))))))
+            `((clocks (,testing-hash 1 58 ,(org-ts-to-unixtime ts0)
+                                     ,(org-ts-to-unixtime ts1)
+                                     "this is a clock note"))
+              (logbook_entries (,testing-hash 1 10 "done"
+                                              ,(org-ts-to-unixtime ts)
+                                              ,header nil)))))))
 
     (describe "non-default drawer configs"
       (it "log drawer (global)"
@@ -1404,13 +989,9 @@ list then join the cdr of IN with newlines."
                                                    ":LOGGING:"
                                                    (format "- %s" header)
                                                    ":END:")
-            `((logbook_entries :file_hash ,testing-hash
-                               :headline_offset 1
-                               :entry_offset 20
-                               :entry_type "done"
-                               :time_logged ,(org-ts-to-unixtime ts)
-                               :header ,header
-                               :note nil)))))
+            `((logbook_entries (,testing-hash 1 20 "done"
+                                              ,(org-ts-to-unixtime ts)
+                                              ,header nil))))))
 
       (it "log drawer (file)"
         (let* ((ts "[2112-01-01 Fri 00:00]")
@@ -1420,14 +1001,9 @@ list then join the cdr of IN with newlines."
                                                    ":LOGBOOK:"
                                                    (format "- %s" header)
                                                    ":END:")
-            `((logbook_entries :file_hash ,testing-hash
-                               :headline_offset 22
-                               :entry_offset 41
-                               :entry_type "done"
-                               :time_logged ,(org-ts-to-unixtime ts)
-                               :header ,header
-                               :note nil)))))
-
+            `((logbook_entries (,testing-hash 22 41 "done"
+                                              ,(org-ts-to-unixtime ts)
+                                              ,header nil))))))
       (it "log drawer (property)"
         (let* ((ts "[2112-01-01 Fri 00:00]")
                (header (format "CLOSING NOTE %s" ts)))
@@ -1438,13 +1014,9 @@ list then join the cdr of IN with newlines."
                                                    ":LOGGING:"
                                                    (format "- %s" header)
                                                    ":END:")
-            `((logbook_entries :file_hash ,testing-hash
-                               :headline_offset 1
-                               :entry_offset 65
-                               :entry_type "done"
-                               :time_logged ,(org-ts-to-unixtime ts)
-                               :header ,header
-                               :note nil)))))
+            `((logbook_entries (,testing-hash 1 65 "done"
+                                              ,(org-ts-to-unixtime ts)
+                                              ,header nil))))))
 
       (it "clock drawer (global)"
         (let* ((org-clock-into-drawer "CLOCKING")
@@ -1455,12 +1027,8 @@ list then join the cdr of IN with newlines."
                                           ":CLOCKING:"
                                           clock
                                           ":END:")
-            `((clocks :file_hash ,testing-hash
-                      :headline_offset 1
-                      :clock_offset 21
-                      :time_start ,(org-ts-to-unixtime ts0)
-                      :time_end ,(org-ts-to-unixtime ts1)
-                      :clock_note nil)))))
+            `((clocks (,testing-hash 1 21 ,(org-ts-to-unixtime ts0)
+                                     ,(org-ts-to-unixtime ts1) nil))))))
 
       (it "clock drawer (property)"
         (let* ((ts0 "[2112-01-01 Fri 00:00]")
@@ -1473,12 +1041,8 @@ list then join the cdr of IN with newlines."
                                           ":CLOCKING:"
                                           clock
                                           ":END:")
-            `((clocks :file_hash ,testing-hash
-                      :headline_offset 1
-                      :clock_offset 69
-                      :time_start ,(org-ts-to-unixtime ts0)
-                      :time_end ,(org-ts-to-unixtime ts1)
-                      :clock_note nil)))))
+            `((clocks (,testing-hash 1 69 ,(org-ts-to-unixtime ts0)
+                                     ,(org-ts-to-unixtime ts1) nil))))))
 
       (it "clock note (global)"
         (let* ((org-log-note-clock-out t)
@@ -1490,12 +1054,9 @@ list then join the cdr of IN with newlines."
                                           clock
                                           "- clock out note"
                                           ":END:")
-            `((clocks :file_hash ,testing-hash
-                      :headline_offset 1
-                      :clock_offset 20
-                      :time_start ,(org-ts-to-unixtime ts0)
-                      :time_end ,(org-ts-to-unixtime ts1)
-                      :clock_note "clock out note")))))
+            `((clocks (,testing-hash 1 20 ,(org-ts-to-unixtime ts0)
+                                     ,(org-ts-to-unixtime ts1)
+                                     "clock out note"))))))
 
       (it "clock note (file)"
         (let* ((ts0 "[2112-01-01 Fri 00:00]")
@@ -1507,12 +1068,9 @@ list then join the cdr of IN with newlines."
                                           clock
                                           "- clock out note"
                                           ":END:")
-            `((clocks :file_hash ,testing-hash
-                      :headline_offset 29
-                      :clock_offset 48
-                      :time_start ,(org-ts-to-unixtime ts0)
-                      :time_end ,(org-ts-to-unixtime ts1)
-                      :clock_note "clock out note"))))))))
+            `((clocks (,testing-hash 29 48 ,(org-ts-to-unixtime ts0)
+                                     ,(org-ts-to-unixtime ts1)
+                                     "clock out note")))))))))
 
 (defun format-with (config type value)
   (funcall (org-sql--compile-mql-format-function config type) value))

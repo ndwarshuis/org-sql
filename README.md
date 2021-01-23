@@ -261,7 +261,7 @@ Each row stores a property at the file level
 
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_hash | x | file_hash - file_hashes, file_hash - properties |  | TEXT / TEXT | hash (MD5) of the org-tree with this property |
+| file_hash | x | file_hash - properties |  | TEXT / TEXT | hash (MD5) of the org-tree with this property |
 | property_offset | x | property_offset - properties |  | INTEGER / INTEGER | offset of this property |
 
 ### headline_properties
@@ -271,8 +271,8 @@ Each row stores a property at the headline level
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
 | file_hash | x | file_hash - properties, file_hash - headlines |  | TEXT / TEXT | hash (MD5) of the org-tree with this property |
-| property_offset | x | property_offset - properties |  | INTEGER / INTEGER | offset of this property |
 | headline_offset |  | headline_offset - headlines |  | INTEGER / INTEGER | offset of the headline with this property |
+| property_offset | x | property_offset - properties |  | INTEGER / INTEGER | offset of this property |
 
 ### clocks
 
@@ -281,8 +281,8 @@ Each row stores one clock entry
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
 | file_hash | x | file_hash - headlines |  | TEXT / TEXT | hash (MD5) of the org-tree with this clock |
-| clock_offset | x |  |  | INTEGER / INTEGER | offset of this clock |
 | headline_offset |  | headline_offset - headlines |  | INTEGER / INTEGER | offset of the headline with this clock |
+| clock_offset | x |  |  | INTEGER / INTEGER | offset of this clock |
 | time_start |  |  | x | INTEGER / INTEGER | timestamp for the start of this clock |
 | time_end |  |  | x | INTEGER / INTEGER | timestamp for the end of this clock |
 | clock_note |  |  | x | TEXT / TEXT | the note entry beneath this clock |
@@ -294,8 +294,8 @@ Each row stores one logbook entry (except for clocks)
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
 | file_hash | x | file_hash - headlines |  | TEXT / TEXT | hash (MD5) of the org-tree with this logbook entry |
-| entry_offset | x |  |  | INTEGER / INTEGER | offset of this logbook entry |
 | headline_offset |  | headline_offset - headlines |  | INTEGER / INTEGER | offset of the headline with this logbook entry |
+| entry_offset | x |  |  | INTEGER / INTEGER | offset of this logbook entry |
 | entry_type |  |  | x | TEXT / TEXT | type of this entry (see `org-log-note-headlines`) |
 | time_logged |  |  | x | INTEGER / INTEGER | timestamp for when this entry was taken |
 | header |  |  | x | TEXT / TEXT | the first line of this entry (usually standardized) |

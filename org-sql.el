@@ -369,8 +369,8 @@ to store them. This is in addition to any properties specifified by
            (desc . "Each row stores a property at the headline level")
            (columns
             ,(file-hash-col "property")
-            ,property-offset-col
-            ,(headline-offset-col "property" t))
+            ,(headline-offset-col "property" t)
+            ,property-offset-col)
            (constraints
             (primary :keys (:file_hash :property_offset))
             (foreign :ref properties
@@ -386,9 +386,9 @@ to store them. This is in addition to any properties specifified by
            (desc . "Each row stores one clock entry")
            (columns
             ,(file-hash-col "clock")
+            ,(headline-offset-col "clock" t)
             (:clock_offset :desc "offset of this clock"
                            :type integer)
-            ,(headline-offset-col "clock" t)
             (:time_start :desc "timestamp for the start of this clock"
                          :type integer)
             (:time_end :desc "timestamp for the end of this clock"
@@ -406,8 +406,8 @@ to store them. This is in addition to any properties specifified by
            (desc . "Each row stores one logbook entry (except for clocks)")
            (columns
             ,(file-hash-col "logbook entry")
-            ,(entry-offset-col)
             ,(headline-offset-col "logbook entry" t)
+            ,(entry-offset-col)
             (:entry_type :desc "type of this entry (see `org-log-note-headlines')"
                          :type text)
             (:time_logged :desc "timestamp for when this entry was taken"
