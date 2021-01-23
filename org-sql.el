@@ -2241,12 +2241,12 @@ CONFIG-KEYS is a list like `org-sql-db-config'."
     (let ((h (-some->> hostname (list "-h")))
           (p (-some->> port (list "-p")))
           (u (-some->> username (list "-U")))
-          (w '("-w"))
-          (f (list "-At"))
+          (noprompt '("-w"))
+          (tidyout '("-qAt"))
           (process-environment
            (if (not password) process-environment
              (cons (format "PGPASSWORD=%s" password) process-environment))))
-      (org-sql--run-command org-sql--psql-exe (append h p u f w args)))))
+      (org-sql--run-command org-sql--psql-exe (append h p u noprompt tidyout args)))))
 
 (defun org-sql--exec-postgres-command (args)
   "Execute a postgres command with ARGS.
@@ -2295,7 +2295,10 @@ The database connection will be handled transparently."
   ;; nil should be an error
   (if (not sql-cmd) '(0 . "")
     (-let ((tmp-path (->> (round (float-time))
-                          (format "%sorg-sql-cmd-%s" (temporary-file-directory)))))
+                          (format "%sorg-sql-cmd-%s" (temporary-file-directory))))
+           (sql-cmd (org-sql--case-mode org-sql-db-config
+                      ((mysql postgres sqlite) sql-cmd)
+                      (sqlserver (format "set nocount on; %s" sql-cmd)))))
       (f-write sql-cmd 'utf-8 tmp-path)
       (let ((res
              (org-sql--case-mode org-sql-db-config
@@ -2335,6 +2338,7 @@ The database connection will be handled transparently."
 
 (defun org-sql-create-tables ()
   (let ((sql-cmd (org-sql--format-mql-schema org-sql-db-config org-sql--mql-tables)))
+    ;; (print sql-cmd)
     (let ((res (org-sql--send-sql sql-cmd)))
       res)))
 
@@ -2425,11 +2429,10 @@ The database connection will be handled transparently."
          (org-sql--send-sql cmd))))
     (sqlserver
      (org-sql--with-config-keys (:schema) org-sql-db-config
-       (when schema
-         (let* ((select (format "SELECT * FROM sys.schemas WHERE name = N'%s'" schema))
-                (create (format "CREATE SCHEMA %s" schema))
-                (cmd (format "IF NOT EXISTS (%s) EXEC('%s');" select create)))
-           (org-sql--send-sql cmd)))))))
+       (let* ((select (format "SELECT * FROM sys.schemas WHERE name = N'%s'" schema))
+              (create (format "CREATE SCHEMA %s" schema))
+              (cmd (format "IF NOT EXISTS (%s) EXEC('%s');" select create)))
+         (org-sql--send-sql cmd))))))
 
 (defun org-sql-drop-namespace ()
   (org-sql--case-mode org-sql-db-config
@@ -2484,7 +2487,9 @@ The database connection will be handled transparently."
     (sqlite
      ;; this is a silly command that should work on all platforms (eg doesn't
      ;; require `touch' to make an empty file)
-     (org-sql--exec-sqlite-command '(".schema")))))
+     (org-sql--on-success* (org-sql--exec-sqlite-command '(".schema"))
+       ;; return a dummy return-code and stdout message
+       '(0 . "")))))
 
 (defun org-sql-drop-db ()
   (org-sql--case-mode org-sql-db-config
@@ -2492,7 +2497,7 @@ The database connection will be handled transparently."
      (error "Must manually drop database using admin privileges"))
     (sqlite
      (org-sql--with-config-keys (:path) org-sql-db-config
-       (delete-file path)
+       (f-delete path)
        ;; return a dummy return-code and stdout message
        '(0 . "")))))
 

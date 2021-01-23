@@ -36,7 +36,7 @@
 
 (defun expect-exit-success (res)
   (-let (((rc . out) res))
-    (if (= 0 rc) (expect t)
+    (if (and (= 0 rc) (equal out "")) (expect t)
       (error out))))
 
 (defun org-sql--count-rows (config tbl-name)
@@ -469,7 +469,7 @@
   "SQL Server: non-default schema"
   (sqlserver :database "org_sql"
               :port "60003"
-              :schema "notdbo"
+              :schema "schema_i_can_edit"
               :hostname "localhost"
               :username "org_sql"
               :password "org_sql333###"))
