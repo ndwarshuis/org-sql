@@ -1,18 +1,18 @@
 version: '3.7'
 
 services:
-  psql:
+  psql12:
     image: postgres:12.4-alpine
-    container_name: org-sql-postgres
+    container_name: org-sql-postgres-12
     restart: 'no'
     environment:    
       - POSTGRES_PASSWORD=org_sql
       - POSTGRES_USER=org_sql
     ports:
       - 60000:5432
-  mariadb:
+  mariadb10:
     image: mariadb:10.5.8
-    container_name: org-sql-mariadb
+    container_name: org-sql-mariadb-10
     restart: 'no'
     environment:    
       - MYSQL_ROOT_PASSWORD=toor
@@ -21,9 +21,9 @@ services:
       - MYSQL_DATABASE=org_sql
     ports:
       - 60100:3306
-  mysql:
+  mysql5:
     image: mysql:5.6.51
-    container_name: org-sql-mysql
+    container_name: org-sql-mysql-5
     restart: 'no'
     environment:    
       - MYSQL_ROOT_PASSWORD=toor
@@ -32,9 +32,9 @@ services:
       - MYSQL_DATABASE=org_sql
     ports:
       - 60200:3306
-  sqlserver:
+  sqlserver2019:
     build: ./docker/sql-server
-    container_name: org-sql-sqlserver
+    container_name: org-sql-sqlserver-2019
     restart: 'no'
     environment:
       - ACCEPT_EULA=Y
