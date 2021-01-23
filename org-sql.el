@@ -2238,14 +2238,16 @@ CONFIG is the plist component if `org-sql-db-config'."
 CONFIG-KEYS is a list like `org-sql-db-config'."
   (org-sql--with-config-keys (:hostname :port :username :password)
       org-sql-db-config
-    (let ((h (-some->> hostname (list "-h")))
-          (p (-some->> port (list "-p")))
-          (u (-some->> username (list "-U")))
-          (noprompt '("-w"))
-          (tidyout '("-qAt"))
-          (process-environment
-           (if (not password) process-environment
-             (cons (format "PGPASSWORD=%s" password) process-environment))))
+    (let* ((h (-some->> hostname (list "-h")))
+           (p (-some->> port (list "-p")))
+           (u (-some->> username (list "-U")))
+           (noprompt '("-w"))
+           (tidyout '("-qAt"))
+           (onlyerror "PGOPTIONS=-c client_min_messages=WARNING")
+           (process-environment
+            (if (not password) (cons onlyerror process-environment)
+              (append (list onlyerror (format "PGPASSWORD=%s" password))
+                      process-environment))))
       (org-sql--run-command org-sql--psql-exe (append h p u noprompt tidyout args)))))
 
 (defun org-sql--exec-postgres-command (args)
