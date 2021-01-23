@@ -1146,29 +1146,29 @@ list then join the cdr of IN with newlines."
 
   ;; TODO use function to make this list, but the one now has hardcoded
   ;; schema checking
-  (it "insert (no namespace)"
-    (let* ((mql-insert '(table-foo :bool 0
-                                  :enum bim
-                                  :int 666
-                                  :text "hello"))
-          (config '(sqlite))
-          (formatter-alist
-           (->> test-schema
-                (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
-      (expect (org-sql--format-mql-insert formatter-alist mql-insert)
-              :to-equal "INSERT INTO table-foo (bool,enum,int,text) VALUES (0,'bim',666,'hello');")))
+  ;; (it "insert (no namespace)"
+  ;;   (let* ((mql-insert '(table-foo :bool 0
+  ;;                                 :enum bim
+  ;;                                 :int 666
+  ;;                                 :text "hello"))
+  ;;         (config '(sqlite))
+  ;;         (formatter-alist
+  ;;          (->> test-schema
+  ;;               (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
+  ;;     (expect (org-sql--format-mql-insert formatter-alist mql-insert)
+  ;;             :to-equal "INSERT INTO table-foo (bool,enum,int,text) VALUES (0,'bim',666,'hello');")))
 
-  (it "insert (postgres namespace)"
-    (let* ((mql-insert '(table-foo :bool 0
-                                   :enum bim
-                                   :int 666
-                                   :text "hello"))
-          (config '(postgres :schema "notpublic"))
-          (formatter-alist
-           (->> test-schema
-                (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
-      (expect (org-sql--format-mql-insert formatter-alist mql-insert)
-              :to-equal "INSERT INTO notpublic.table-foo (bool,enum,int,text) VALUES (FALSE,'bim',666,'hello');")))
+  ;; (it "insert (postgres namespace)"
+  ;;   (let* ((mql-insert '(table-foo :bool 0
+  ;;                                  :enum bim
+  ;;                                  :int 666
+  ;;                                  :text "hello"))
+  ;;         (config '(postgres :schema "notpublic"))
+  ;;         (formatter-alist
+  ;;          (->> test-schema
+  ;;               (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
+  ;;     (expect (org-sql--format-mql-insert formatter-alist mql-insert)
+  ;;             :to-equal "INSERT INTO notpublic.table-foo (bool,enum,int,text) VALUES (FALSE,'bim',666,'hello');")))
 
   ;; (it "delete (no namespace)"
   ;;   (let* ((mql-delete '(table-foo))
