@@ -426,6 +426,13 @@
 (defmacro describe-io-spec (unique-name config)
   (declare (indent 1))
   `(describe ,unique-name
+     (after-all
+       (ignore-errors
+         (org-sql-drop-tables))
+       (ignore-errors
+         (org-sql-drop-namespace))
+       (ignore-errors
+         (org-sql-drop-db)))
      (describe-sql-database-spec ,config)
      (describe-sql-namespace-spec ,config)
      (describe-sql-table-spec ,config)
