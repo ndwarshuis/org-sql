@@ -1169,41 +1169,41 @@ list then join the cdr of IN with newlines."
       (expect (org-sql--format-mql-insert formatter-alist mql-insert)
               :to-equal "INSERT INTO notpublic.table-foo (bool,enum,int,text) VALUES (FALSE,'bim',666,'hello');")))
 
-  (it "delete (no namespace)"
-    (let* ((mql-delete '(table-foo))
-           (config '(sqlite))
-           (formatter-alist
-            (->> test-schema
-                 (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
-      (expect (org-sql--format-mql-delete formatter-alist mql-delete)
-              :to-equal "DELETE FROM table-foo;")))
+  ;; (it "delete (no namespace)"
+  ;;   (let* ((mql-delete '(table-foo))
+  ;;          (config '(sqlite))
+  ;;          (formatter-alist
+  ;;           (->> test-schema
+  ;;                (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
+  ;;     (expect (org-sql--format-mql-delete formatter-alist mql-delete)
+  ;;             :to-equal "DELETE FROM table-foo;")))
 
-  (it "delete (no namespace; where)"
-    (let* ((mql-delete '(table-foo (where :enum bim)))
-           (config '(sqlite))
-           (formatter-alist
-            (->> test-schema
-                 (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
-      (expect (org-sql--format-mql-delete formatter-alist mql-delete)
-              :to-equal "DELETE FROM table-foo WHERE enum='bim';")))
+  ;; (it "delete (no namespace; where)"
+  ;;   (let* ((mql-delete '(table-foo (where :enum bim)))
+  ;;          (config '(sqlite))
+  ;;          (formatter-alist
+  ;;           (->> test-schema
+  ;;                (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
+  ;;     (expect (org-sql--format-mql-delete formatter-alist mql-delete)
+  ;;             :to-equal "DELETE FROM table-foo WHERE enum='bim';")))
 
-  (it "delete (postgres namespace)"
-    (let* ((mql-delete '(table-foo))
-           (config '(postgres :schema "notpublic"))
-           (formatter-alist
-            (->> test-schema
-                 (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
-      (expect (org-sql--format-mql-delete formatter-alist mql-delete)
-              :to-equal "DELETE FROM notpublic.table-foo;")))
+  ;; (it "delete (postgres namespace)"
+  ;;   (let* ((mql-delete '(table-foo))
+  ;;          (config '(postgres :schema "notpublic"))
+  ;;          (formatter-alist
+  ;;           (->> test-schema
+  ;;                (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
+  ;;     (expect (org-sql--format-mql-delete formatter-alist mql-delete)
+  ;;             :to-equal "DELETE FROM notpublic.table-foo;")))
 
-  (it "delete (postgres namespace; where)"
-    (let* ((mql-delete '(table-foo (where :enum bim)))
-           (config '(postgres :schema "notpublic"))
-           (formatter-alist
-            (->> test-schema
-                 (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
-      (expect (org-sql--format-mql-delete formatter-alist mql-delete)
-              :to-equal "DELETE FROM notpublic.table-foo WHERE enum='bim';")))
+  ;; (it "delete (postgres namespace; where)"
+  ;;   (let* ((mql-delete '(table-foo (where :enum bim)))
+  ;;          (config '(postgres :schema "notpublic"))
+  ;;          (formatter-alist
+  ;;           (->> test-schema
+  ;;                (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
+  ;;     (expect (org-sql--format-mql-delete formatter-alist mql-delete)
+  ;;             :to-equal "DELETE FROM notpublic.table-foo WHERE enum='bim';")))
 
   (it "select"
     (let* ((mql-select '(table-foo (columns :bool)))
