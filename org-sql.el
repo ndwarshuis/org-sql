@@ -782,6 +782,17 @@ All column keys must be in PLIST."
     (-some->> (-difference input-keys valid-keys)
       (error "Keys not valid for table %s: %s" tbl-name))))
 
+(defun org-sql--mql-order-columns (tbl-name plist)
+  "Order the keys in PLIST according to the columns in TBL-NAME."
+  (org-sql--mql-check-columns-all tbl-name plist)
+  (let ((order (->> (alist-get tbl-name org-sql--mql-tables)
+                    (alist-get 'columns)
+                    (--map-indexed (cons (car it) it-index)))))
+    (->> (-partition 2 plist)
+         (--map (cons (alist-get (car it) order) (cadr it)))
+         (--sort (< (car it) (car other)))
+         (-map #'cdr))))
+
 (defun org-sql--mql-check-columns-contains (tbl-name plist)
   "Test if keys in PLIST are valid column names for TBL-NAME.
 Only some of the column keys must be in PLIST."
@@ -803,11 +814,19 @@ PLIST is a property list of the columns and values to insert."
   (org-sql--mql-check-columns-all tbl-name plist)
   `(list ',tbl-name ,@plist))
 
+(defconst org-sql--empty-mql-bulk-insert
+  (--map (list (car it)) org-sql--mql-tables)
+  "Empty bulk MQL insert to initialize accumulators.")
+
 (defmacro org-sql--add-mql-insert (acc tbl-name &rest plist)
   "Add a new MQL-insert list for TBL-NAME to ACC.
 PLIST is a property list of the columns and values to insert."
   (declare (indent 2))
-  `(cons (org-sql--mql-insert ,tbl-name ,@plist) ,acc))
+  (let ((ordered-values (org-sql--mql-order-columns tbl-name plist)))
+    ;; WARNING this has side effects (but is super fast because of it)
+    `(let ((tbl (assq ',tbl-name ,acc)))
+       (setcdr tbl (cons (list ,@ordered-values) (cdr tbl)))
+       ,acc)))
 
 (defmacro org-sql--mql-update (tbl-name set where)
   "Return an MQL-update list for TBL-NAME.
@@ -1268,9 +1287,34 @@ FORMATTER-ALIST is an alist of functions given by
                                (->> (plist-get formatter-list :column-formatters)
                                     (alist-get (car it)))
                                (cadr it)))
-                       ;; (--map (funcall (plist-get (alist-get (car it) formatter-list) :column-formatters)))
                        (s-join ","))))
     (format "INSERT INTO %s (%s) VALUES (%s);" tbl-name* columns values)))
+
+(defun org-sql--format-mql-bulk-insert (config mql-bulk-insert)
+  (cl-flet
+      ((format-row
+        (formatters row)
+        (->> (--zip-with (funcall other it) row formatters)
+             (s-join ",")
+             (format "(%s)"))))
+    (-let* (((tbl-name . rows) mql-bulk-insert)
+            (tbl-name* (org-sql--format-mql-table-name config tbl-name))
+            (mql-tbl (alist-get tbl-name org-sql--mql-tables))
+            (mql-columns (alist-get 'columns mql-tbl))
+            (columns* (->> mql-columns
+                          (--map (org-sql--format-mql-column-name (car it)))
+                          (s-join ",")))
+            ;; ASSUME these will be in the right order
+            (formatters (--map (->> (plist-get (cdr it) :type)
+                                    (org-sql--compile-mql-format-function config))
+                               mql-columns)))
+      (->> (--map (format-row formatters it) rows)
+           (s-join ",")
+           (format "INSERT INTO %s (%s) VALUES %s;" tbl-name* columns*)))))
+
+(defun org-sql--format-mql-bulk-inserts (config mql-bulk-inserts)
+  (->> (-filter #'cdr mql-bulk-inserts)
+       (--map (org-sql--format-mql-bulk-insert config it))))
 
 ;; update
 
@@ -1997,13 +2041,12 @@ FSTATE is a list given by `org-sql--to-fstate'."
 (defun org-sql--fstate-to-mql-insert (fstate)
   "Return all MQL-inserts for FSTATE.
 FSTATE is a list given by `org-sql--to-fstate'."
-  (-> nil
+  (-> (-clone org-sql--empty-mql-bulk-insert)
       (org-sql--add-mql-insert-file-hash fstate)
       (org-sql--add-mql-insert-file-metadata fstate)
       (org-sql--add-mql-insert-file-properties fstate)
       (org-sql--add-mql-insert-file-tags fstate)
-      (org-sql--add-mql-insert-headlines fstate)
-      (reverse)))
+      (org-sql--add-mql-insert-headlines fstate)))
 
 (defun org-sql--hashpathpair-to-mql-delete (file-hash)
   (org-sql--mql-delete file_hashes (:file_hash file-hash)))
@@ -2169,7 +2212,7 @@ state as the orgfiles on disk."
           (->> (org-sql--group-hashpathpairs-by-hash hashpathpairs)
                (--mapcat (->> (org-sql--hashpathpair-get-fstate (car it) (cdr it))
                               (org-sql--fstate-to-mql-insert)))
-               (--map (org-sql--format-mql-insert formatter-alist it))))
+               (org-sql--format-mql-bulk-inserts org-sql-db-config)))
          (file-deletes-to-sql
           (hashpathpairs)
           (->> (org-sql--hashpathpairs-to-hashes hashpathpairs)
