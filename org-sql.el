@@ -2534,7 +2534,7 @@ The database connection will be handled transparently."
      (error "Must manually drop database using admin privileges"))
     (sqlite
      (org-sql--with-config-keys (:path) org-sql-db-config
-       (f-delete path)
+       (delete-file path)
        ;; return a dummy return-code and stdout message
        '(0 . "")))))
 

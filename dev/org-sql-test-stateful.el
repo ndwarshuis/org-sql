@@ -220,7 +220,7 @@
   `(describe "Update DB Spec"
      (before-all
        (setq org-sql-db-config ',config)
-       (org-sql-init-db))
+       (org-sql-reset-db))
 
      (describe-reset-db "single file"
        (it "update database"
@@ -387,7 +387,7 @@
   `(describe "Clear DB Spec"
      (before-all
        (setq org-sql-db-config ',config)
-       (org-sql-init-db))
+       (org-sql-reset-db))
 
      (describe-reset-db "clearing an empty db"
        (it "clear database"
