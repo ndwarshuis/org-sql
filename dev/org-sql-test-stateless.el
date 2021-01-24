@@ -1206,32 +1206,32 @@ list then join the cdr of IN with newlines."
   ;;     (expect (org-sql--format-mql-delete formatter-alist mql-delete)
   ;;             :to-equal "DELETE FROM notpublic.table-foo WHERE enum='bim';")))
 
-  (it "select"
-    (let* ((mql-select '(table-foo (columns :bool)))
-           (config '(sqlite))
-           (formatter-alist
-            (->> test-schema
-                 (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
-      (expect (org-sql--format-mql-select config formatter-alist mql-select)
-              :to-equal "SELECT bool FROM table-foo;")))
+  ;; (it "select"
+  ;;   (let* ((mql-select '(table-foo (columns :bool)))
+  ;;          (config '(sqlite))
+  ;;          (formatter-alist
+  ;;           (->> test-schema
+  ;;                (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
+  ;;     (expect (org-sql--format-mql-select config formatter-alist mql-select)
+  ;;             :to-equal "SELECT bool FROM table-foo;")))
 
-  (it "select (all columns)"
-    (let* ((mql-select '(table-foo))
-           (config '(sqlite))
-           (formatter-alist
-            (->> test-schema
-                 (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
-      (expect (org-sql--format-mql-select config formatter-alist mql-select)
-              :to-equal "SELECT * FROM table-foo;")))
+  ;; (it "select (all columns)"
+  ;;   (let* ((mql-select '(table-foo))
+  ;;          (config '(sqlite))
+  ;;          (formatter-alist
+  ;;           (->> test-schema
+  ;;                (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
+  ;;     (expect (org-sql--format-mql-select config formatter-alist mql-select)
+  ;;             :to-equal "SELECT * FROM table-foo;")))
 
-  (it "select (where)"
-    (let* ((mql-select '(table-foo (columns :bool) (where :enum bim)))
-           (config '(sqlite))
-           (formatter-alist
-            (->> test-schema
-                 (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
-      (expect (org-sql--format-mql-select config formatter-alist mql-select)
-              :to-equal "SELECT bool FROM table-foo WHERE enum='bim';")))
+  ;; (it "select (where)"
+  ;;   (let* ((mql-select '(table-foo (columns :bool) (where :enum bim)))
+  ;;          (config '(sqlite))
+  ;;          (formatter-alist
+  ;;           (->> test-schema
+  ;;                (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
+  ;;     (expect (org-sql--format-mql-select config formatter-alist mql-select)
+  ;;             :to-equal "SELECT bool FROM table-foo WHERE enum='bim';")))
 
   (it "create table (SQLite)"
     (let ((config '(sqlite)))
