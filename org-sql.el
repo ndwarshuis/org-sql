@@ -710,6 +710,9 @@ keys/symbols like those from the &plist switch from `-let'."
   `(-let (((&plist ,@keys) (cdr ,config)))
      ,@body))
 
+(defun org-sql--get-config-key (key config)
+  (plist-get (cdr config) key))
+
 ;; ensure integrity of the metaschema
 
 (eval-when-compile
@@ -2252,21 +2255,6 @@ The connection options for the postgres server. will be handled here."
       (org-sql--run-command org-sql--mysql-exe
                             (append h p u protocol-arg batch-args args)))))
 
-(defun org-sql--exec-mysql-command (args)
-  "Execute a mysql command with ARGS.
-CONFIG-KEYS is the plist component if `org-sql-db-config'.
-The connection options for the postgres server. will be handled here."
-  (org-sql--with-config-keys (:database) org-sql-db-config
-    (if (not database) (error "No database specified")
-      (org-sql--exec-mysql-command-nodb `("-D" ,database ,@args)))))
-
-(defun org-sql--exec-sqlite-command (args)
-  "Execute a sqlite command with ARGS.
-CONFIG is the plist component if `org-sql-db-config'."
-  (org-sql--with-config-keys (:path) org-sql-db-config
-    (if (not path) (error "No path specified")
-      (org-sql--run-command org-sql--sqlite-exe (cons path args)))))
-
 (defun org-sql--exec-postgres-command-nodb (args)
   "Execute a postgres command with ARGS.
 CONFIG-KEYS is a list like `org-sql-db-config'."
@@ -2284,14 +2272,6 @@ CONFIG-KEYS is a list like `org-sql-db-config'."
                       process-environment))))
       (org-sql--run-command org-sql--psql-exe (append h p u noprompt tidyout args)))))
 
-(defun org-sql--exec-postgres-command (args)
-  "Execute a postgres command with ARGS.
-CONFIG-KEYS is the plist component if `org-sql-db-config'. Note this
-uses the 'psql' client command in the background."
-  (org-sql--with-config-keys (:database) org-sql-db-config
-    (if (not database) (error "No database specified")
-      (org-sql--exec-postgres-command-nodb `("-d" ,database ,@args)))))
-
 (defun org-sql--exec-sqlserver-command-nodb (args)
   (org-sql--with-config-keys (:hostname :port :username :password)
       org-sql-db-config
@@ -2305,24 +2285,44 @@ uses the 'psql' client command in the background."
              (cons (format "SQLCMDPASSWORD=%s" password) process-environment))))
       (org-sql--run-command org-sql--sqlserver-exe (append S U no-headers sep args)))))
 
+(defun org-sql--exec-sqlite-command (args)
+  "Execute a sqlite command with ARGS.
+CONFIG is the plist component if `org-sql-db-config'."
+  (org-sql--with-config-keys (:path) org-sql-db-config
+    (if (not path) (error "No path specified")
+      (org-sql--run-command org-sql--sqlite-exe (cons path args)))))
+
 (defun org-sql--exec-sqlserver-command (args)
   (org-sql--with-config-keys (:database) org-sql-db-config
     (if (not database) (error "No database specified")
       (org-sql--exec-sqlserver-command-nodb `("-d" ,database ,@args)))))
 
+(defun org-sql--exec-command-in-db (args)
+  (cl-flet
+      ((send
+        (fun flag key args)
+        (-if-let (target (org-sql--get-config-key key org-sql-db-config))
+            (funcall fun (if flag `(,flag ,target ,@args) (cons target args)))
+          (error (format "%s not specified" key)))))
+  (org-sql--case-mode org-sql-db-config
+    (mysql
+     (send #'org-sql--exec-mysql-command-nodb "-D" :database args))
+    (postgres
+     (send #'org-sql--exec-postgres-command-nodb "-d" :database args))
+    (sqlite
+     (org-sql--exec-sqlite-command args))
+    (sqlserver
+     (send #'org-sql--exec-sqlserver-command-nodb "-d" :database args)))))
+
 (defun org-sql--send-sql (sql-cmd)
   "Execute SQL-CMD.
 The database connection will be handled transparently."
-  (org-sql--case-mode org-sql-db-config
-    (mysql
-     (org-sql--exec-mysql-command `("-e" ,sql-cmd)))
-    (postgres
-     (org-sql--exec-postgres-command `("-c" ,sql-cmd)))
-    (sqlite
-     (org-sql--exec-sqlite-command `(,sql-cmd)))
-    (sqlserver
-     (let ((cmd (format "set nocount on; %s" sql-cmd)))
-       (org-sql--exec-sqlserver-command `("-Q" ,cmd))))))
+  (let ((args (org-sql--case-mode org-sql-db-config
+                (mysql `("-e" ,sql-cmd))
+                (postgres `("-c" ,sql-cmd))
+                (sqlite `(,sql-cmd))
+                (sqlserver `("-Q" ,(format "SET NOCOUNT ON; %s" sql-cmd))))))
+    (org-sql--exec-command-in-db args)))
 
 (defun org-sql--send-sql* (sql-cmd)
   "Execute SQL-CMD as a separate file input.
