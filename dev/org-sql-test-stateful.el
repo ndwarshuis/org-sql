@@ -57,36 +57,10 @@
                 table-specs)))
     `(describe "test that correct tables are populated" ,@it-forms)))
 
-(defun org-sql--dump-table (config tbl-name)
-  ;; TODO this assumes the table in question has no text with newlines
-  (-let* (((mode . keyvals) org-sql-db-config)
-          ;; TODO make an mql builder function for this
-          (select (org-sql--format-mql-select config nil `(,tbl-name))))
-    (org-sql--send-sql select)))
-
-(defun expect-db-has-table-contents (config tbl-name &rest rows)
-  (declare (indent 2))
-  (cl-flet
-      ((test-row-match
-        (row-plist row-out)
-        (let* ((required-columns (-slice row-plist 0 nil 2))
-               (columns (->> (alist-get tbl-name org-sql--mql-tables)
-                             (alist-get 'columns)
-                             (-map #'car)))
-               (row-out-plist
-                (->> (org-sql--parse-output-to-plist config columns row-out)
-                     (car)
-                     (-partition 2)
-                     (--filter (memq (car it) required-columns))
-                     (-flatten-n 1))))
-          (expect row-out-plist :to-equal row-plist))))
-    (-let* ((out (->> (org-sql--dump-table config tbl-name)
-                      (cdr)
-                      (s-trim)
-                      (s-lines)
-                      (-remove-item ""))))
-      (expect (length out) :to-be (length rows))
-      (--each (-zip-pair rows out) (test-row-match (car it) (cdr it))))))
+(defun expect-db-has-table-contents (tbl-name &rest rows)
+  (declare (indent 1))
+  (let ((out (->> (org-sql-dump-table tbl-name))))
+    (expect out :to-equal rows)))
 
 (defmacro describe-reset-db (header &rest body)
   (declare (indent 1))
@@ -323,8 +297,8 @@
            (let ((org-sql-files (list test-path)))
              (expect-exit-success (org-sql-update-db))))
          (it "test for file in tables"
-           (expect-db-has-table-contents ',config 'file_metadata
-                                         `(:file_path ,test-path))))
+           (expect-db-has-table-contents 'file_metadata
+             `(,test-path "106e9f12c9e4ff3333425115d148fbd4"))))
        (describe "rename inserted file"
          ;; "rename" here means to point `org-sql-files' to an identical file
          ;; with a different name
@@ -334,8 +308,8 @@
            (let ((org-sql-files (list test-path)))
              (expect-exit-success (org-sql-update-db))))
          (it "test for file in tables"
-           (expect-db-has-table-contents ',config 'file_metadata
-                                         `(:file_path ,test-path)))))
+           (expect-db-has-table-contents 'file_metadata
+             `(,test-path "106e9f12c9e4ff3333425115d148fbd4")))))
 
      (describe-reset-db "deleted file"
        (it "update database"
@@ -362,8 +336,8 @@
              (f-write-text contents1 'utf-8 test-path)
              (expect-exit-success (org-sql-update-db))))
          (it "test file hash"
-           (expect-db-has-table-contents ',config 'file_hashes
-             '(:file_hash "ece424e0090cff9b6f1ac50722c336c0"))))
+           (expect-db-has-table-contents 'file_hashes
+             `("ece424e0090cff9b6f1ac50722c336c0" "0"))))
        (describe "alter the file"
          (before-all
            (setq test-path "/tmp/org-sql-test-file.org"))
@@ -375,8 +349,8 @@
              (f-write-text contents2 'utf-8 test-path)
              (expect-exit-success (org-sql-update-db))))
          (it "test for new file hash"
-           (expect-db-has-table-contents ',config 'file_hashes
-             '(:file_hash "399bc042f23ea976a04b9102c18e9cb5")))
+           (expect-db-has-table-contents 'file_hashes
+             `("399bc042f23ea976a04b9102c18e9cb5" "0")))
          (it "clean up"
            ;; yes killing the buffer is necessary
            (kill-buffer (find-file-noselect test-path t))

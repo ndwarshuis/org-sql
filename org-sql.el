@@ -1006,18 +1006,21 @@ Only the :lb-config and :headline keys will be changed."
 
 ;;; SQL string parsing functions
 
-(defun org-sql--parse-output-to-plist (config cols out)
-  "Parse SQL output string OUT to an plist representing the data.
-COLS are the column names as symbols used to obtain OUT.
-CONFIG is the `org-sql-db-config' list."
+(defun org-sql--parse-output-to-list (config out)
   (unless (equal out "")
     (let ((sep (org-sql--case-mode config
                  (mysql "\t")
                  ((postgres sqlite sqlserver) "|"))))
       (->> (s-trim out)
            (s-split "\n")
-           (--map (-map #'s-trim (s-split sep it)))
-           (--map (-interleave cols it))))))
+           (--map (-map #'s-trim (s-split sep it)))))))
+
+(defun org-sql--parse-output-to-plist (config cols out)
+  "Parse SQL output string OUT to an plist representing the data.
+COLS are the column names as symbols used to obtain OUT.
+CONFIG is the `org-sql-db-config' list."
+  (-some->> (org-sql--parse-output-to-list config out)
+    (--map (-interleave cols it))))
 
 ;;; MQL -> SQL string formatting functions
 
@@ -1323,23 +1326,14 @@ CONFIG is the `org-sql-db-config' list."
 
 ;; select
 
-(defun org-sql--format-mql-select (config formatter-alist mql-select)
-  "Return SQL string for MQL-SELECT.
-FORMATTER-ALIST is an alist of functions given by
-`org-sql--compile-mql-format-function'. CONFIG is the
-`org-sql-db-config' list."
-  (-let* (((tbl-name . (&alist 'columns 'where)) mql-select)
-          (tbl-name* (org-sql--format-mql-table-name config tbl-name))
-          (formatter-list (alist-get tbl-name formatter-alist))
-          (columns* (or (-some->> (-map #'org-sql--format-mql-column-name columns)
-                          (s-join ","))
-                        "*")))
-    (if (not where) (format "SELECT %s FROM %s;" columns* tbl-name*)
-      (->> (org-sql--format-mql-plist formatter-list " AND " where)
-           (format "SELECT %s FROM %s WHERE %s;" columns* tbl-name*)))))
+(defun org-sql--format-select-statement (config columns tbl-name)
+  (let ((tbl-name* (org-sql--format-mql-table-name config tbl-name))
+        (columns* (or (-some->> (-map #'org-sql--format-mql-column-name columns)
+                        (s-join ","))
+                      "*")))
+    (format "SELECT %s FROM %s;" columns* tbl-name*)))
 
 ;; hashpathpairs/fstate -> SQL statements
-
 
 (defun org-sql--format-path-delete-statement (config hashpathpairs)
   (when hashpathpairs
@@ -2200,15 +2194,14 @@ Each hashpathpair will have it's :db-path set to nil. Only files in
 (defun org-sql--db-get-hashpathpairs ()
   "Get a list of hashpathpair for the database.
 Each hashpathpair will have it's :disk-path set to nil."
-  (-let* ((columns '(:file_path :file_hash))
-          ;; TODO add compile check for this
-          (sql-select (org-sql--format-mql-select org-sql-db-config nil `(file_metadata (columns ,@columns)))))
-    (org-sql--on-success* (org-sql--send-sql sql-select)
+  (let* ((tbl-name 'file_metadata)
+         (cols '(:file_path :file_hash))
+         (cmd (org-sql--format-select-statement org-sql-db-config cols tbl-name)))
+    (org-sql--on-success* (org-sql--send-sql cmd)
       (->> (s-trim it-out)
-           (org-sql--parse-output-to-plist org-sql-db-config columns)
+           (org-sql--parse-output-to-plist org-sql-db-config cols)
            (--map (-let (((&plist :file_hash h :file_path p) it))
                     (cons h p)))))))
-
 
 (defun org-sql--get-transactions ()
   "Return SQL string of the update transaction.
@@ -2562,6 +2555,16 @@ The database connection will be handled transparently."
 
 ;;; composite database functions
 
+(defun org-sql-dump-table (tbl-name &optional as-plist)
+  (let ((cmd (org-sql--format-select-statement org-sql-db-config nil tbl-name)))
+    (org-sql--on-success* (org-sql--send-sql cmd)
+      (if as-plist
+          (let ((col-names (->> (alist-get tbl-name org-sql--mql-tables)
+                                (alist-get 'columns)
+                                (-map #'car))))
+            (org-sql--parse-output-to-plist org-sql-db-config col-names it-out))
+        (org-sql--parse-output-to-list org-sql-db-config it-out)))))
+
 (defun org-sql-init-db ()
   (org-sql--case-mode org-sql-db-config
     (mysql
@@ -2579,15 +2582,10 @@ The database connection will be handled transparently."
 
 (defun org-sql-clear-db ()
   ;; only delete from files as we assume actions here cascade down
-  ;; TODO this is stupid
-  ;; (let ((formatter-alist (--map (org-sql--compile-mql-schema-formatter-alist 
-  ;;                                org-sql-db-config it)
-  ;;                               org-sql--mql-tables)))
-    ;; (->> (org-sql--mql-delete file_hashes nil)
-    ;;      (org-sql--format-mql-delete formatter-alist)
   (->> (org-sql--format-mql-table-name org-sql-db-config 'file_hashes)
        (format "DELETE FROM %s;")
        (list)
+       ;; TODO the only reason this is necessary is to set the pragma for sqlite
        (org-sql--format-sql-transaction org-sql-db-config)
        (org-sql--send-sql)))
 
