@@ -1302,7 +1302,13 @@ CONFIG is the `org-sql-db-config' list."
                    ((mysql sqlserver) nil)
                    ((pgsql sqlite) t)))
           (fmt (org-sql--case-mode config
-                 ((mysql pgsql sqlite) "CREATE TABLE IF NOT EXISTS %s (%s);")
+                 ((mysql sqlite)
+                  "CREATE TABLE IF NOT EXISTS %s (%s);")
+                 (pgsql
+                  (org-sql--with-config-keys (:unlogged) config
+                    (s-join " " (list "CREATE"
+                                      (if unlogged "UNLOGGED TABLE" "TABLE")
+                                      "IF NOT EXISTS %s (%s);"))))
                  (sqlserver
                   (org-sql--with-config-keys (:database) config
                     (format "IF NOT EXISTS (SELECT * FROM sys.tables where name = '%%1$s') CREATE TABLE %%1$s (%%2$s);" database))))))
