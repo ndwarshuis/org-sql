@@ -6,7 +6,7 @@ USE org_sql;
 GO
 CREATE USER org_sql;
 GO
-GRANT CREATE TABLE to org_sql;
+CREATE SCHEMA nondbo AUTHORIZATION org_sql;
 GO
-GRANT CREATE SCHEMA to org_sql;
+GRANT CREATE TABLE to org_sql;
 GO

@@ -457,7 +457,7 @@
   "SQL Server: non-default schema"
   (sqlserver :database "org_sql"
               :port "60300"
-              :schema "schema_i_can_edit"
+              :schema "nondbo"
               :hostname "localhost"
               :username "org_sql"
               :password "org_sql333###"))
