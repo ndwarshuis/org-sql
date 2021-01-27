@@ -668,12 +668,12 @@ ARGS is a list of additional arguments to pass to `cl-subsetp'."
   "Execute one of ALIST-FORMS depending on TYPE.
 TYPE must be one of 'boolean', 'text', 'enum', or 'integer'."
   (declare (indent 1))
-  (-let (((keys &as &alist 'boolean 'char 'enum 'integer 'text 'varchar)
+  (-let (((&alist 'boolean 'char 'enum 'integer 'text 'varchar)
           (--splice (listp (car it))
                     (-let (((keys . form) it))
                       (--map (cons it form) keys))
                     alist-forms)))
-    (unless (-none? #'null keys)
+    (when (-any? #'null (list boolean char enum integer text varchar))
       (error "Must provide form for all types"))
     `(cl-case ,type
        (boolean ,@boolean)
@@ -691,8 +691,13 @@ TYPE must be one of 'boolean', 'text', 'enum', or 'integer'."
                     (-let (((keys . form) it))
                       (--map (cons it form) keys))
                     alist-forms)))
-    (unless (-none? #'null keys)
+    (when (-any? #'null (list mysql pgsql sqlserver sqlite))
       (error "Must provide form for all modes"))
+    (-some->> (-difference (-map #'car keys) '(mysql pgsql sqlserver sqlite))
+      (-map #'symbol-name)
+      (s-join ",")
+      (format "Unknown forms: %s")
+      (error))
     `(cl-case (car ,config)
        (mysql ,@mysql)
        (pgsql ,@pgsql)
@@ -1040,21 +1045,22 @@ The returned function will depend on the MODE and TYPE."
            (integer
             '(number-to-string it))
            ((char text varchar)
-            (let ((esc-newline
+            (let ((escaped-chars
                    (org-sql--case-mode config
-                     (mysql "\\\\n")
+                     (mysql '(("'" . "\\\\'")
+                              ("\n" . "\\\\n")))
                      ;; TODO not sure if these also needs Char(13) in front of
                      ;; Char(10) for the carriage return if using on windows
                      ;; (alas...newline war)
-                     (pgsql "'||chr(10)||'")
-                     (sqlite "'||char(10)||'")
-                     (sqlserver "+Char(10)+")))
-                  (esc-single-quote
-                   (org-sql--case-mode config
-                     (mysql "\\\\'")
-                     ((pgsql sqlite sqlserver) "''"))))
-              `(->> (s-replace-regexp "'" ,esc-single-quote it)
-                    (s-replace-regexp "\n" ,esc-newline)
+                     (pgsql '(("'" . "''")
+                              ("\n" . "'||chr(10)||'")))
+                     (sqlite '(("'" . "''")
+                               ("\n" . "'||char(10)||'")))
+                     (sqlserver '(("'" . "''")
+                                  ("\n" . "+Char(10)+"))))))
+              `(->> ',escaped-chars
+                    ;; TODO this doesn't need to replace regexps
+                    (--reduce-from (s-replace-regexp (car it) (cdr it) acc) it)
                     (format "'%s'")))))))
     `(lambda (it) (if it ,formatter-form "NULL"))))
 
@@ -1215,8 +1221,8 @@ of the table."
                      (s-join ",")
                      (format "ENUM(%s)")))
          (pgsql (if type-id type-id
-                     (->> (format "enum_%s_%s" tbl-name column-name*)
-                          (org-sql--format-mql-enum-name config))))
+                  (->> (format "enum_%s_%s" tbl-name column-name*)
+                       (org-sql--format-mql-enum-name config))))
          (sqlite "TEXT")
          (sqlserver (-if-let (length (plist-get (cdr mql-column) :length))
                         (format "VARCHAR(%s)" length)
@@ -1333,6 +1339,7 @@ CONFIG is the `org-sql-db-config' list."
             (mql-tbl (alist-get tbl-name org-sql--mql-tables))
             (mql-columns (alist-get 'columns mql-tbl))
             (columns* (->> mql-columns
+                          ;; TODO there is a better function for this
                           (--map (org-sql--format-mql-column-name (car it)))
                           (s-join ",")))
             ;; ASSUME these will be in the right order
@@ -2478,65 +2485,65 @@ The database connection will be handled transparently."
 
 ;; namespace layer
 
-(defun org-sql-create-namespace ()
-  "Create the configured database."
-  (org-sql--case-mode org-sql-db-config
-    ((mysql sqlite)
-     (error "Namespace schemas only exist for Postgres and SQL Server"))
-    (pgsql
-     (org-sql--with-config-keys (:schema) org-sql-db-config
-       (let ((cmd (format "CREATE SCHEMA IF NOT EXISTS %s;" (or schema "public"))))
-         (org-sql--send-sql cmd))))
-    (sqlserver
-     (org-sql--with-config-keys (:schema) org-sql-db-config
-       (let* ((select (format "SELECT * FROM sys.schemas WHERE name = N'%s'" schema))
-              (create (format "CREATE SCHEMA %s" schema))
-              (cmd (format "IF NOT EXISTS (%s) EXEC('%s');" select create)))
-         (org-sql--send-sql cmd))))))
+;; (defun org-sql-create-namespace ()
+;;   "Create the configured database."
+;;   (org-sql--case-mode org-sql-db-config
+;;     ((mysql sqlite)
+;;      (error "Namespace schemas only exist for Postgres and SQL Server"))
+;;     (pgsql
+;;      (org-sql--with-config-keys (:schema) org-sql-db-config
+;;        (let ((cmd (format "CREATE SCHEMA IF NOT EXISTS %s;" (or schema "public"))))
+;;          (org-sql--send-sql cmd))))
+;;     (sqlserver
+;;      (org-sql--with-config-keys (:schema) org-sql-db-config
+;;        (let* ((select (format "SELECT * FROM sys.schemas WHERE name = N'%s'" schema))
+;;               (create (format "CREATE SCHEMA %s" schema))
+;;               (cmd (format "IF NOT EXISTS (%s) EXEC('%s');" select create)))
+;;          (org-sql--send-sql cmd))))))
 
-(defun org-sql-drop-namespace ()
-  (org-sql--case-mode org-sql-db-config
-    ((mysql sqlite)
-     (error "Namespace schemas only exist for Postgres and SQL Server"))
-    (pgsql
-     (org-sql--with-config-keys (:schema) org-sql-db-config
-       (let ((cmd (format "DROP SCHEMA IF EXISTS %s CASCADE;" (or schema "public"))))
-         (org-sql--send-sql cmd))))
-    (sqlserver
-     ;; drop all tables manually first
-     (org-sql-drop-tables)
-     (org-sql--with-config-keys (:schema) org-sql-db-config
-       (when schema
-         (let* ((select (format "SELECT * FROM sys.schemas WHERE name = N'%s'" schema))
-                (drop (format "DROP SCHEMA %s" schema))
-                (cmd (format "IF EXISTS (%s) EXEC('%s');" select drop)))
-           (org-sql--send-sql cmd)))))))
+;; (defun org-sql-drop-namespace ()
+;;   (org-sql--case-mode org-sql-db-config
+;;     ((mysql sqlite)
+;;      (error "Namespace schemas only exist for Postgres and SQL Server"))
+;;     (pgsql
+;;      (org-sql--with-config-keys (:schema) org-sql-db-config
+;;        (let ((cmd (format "DROP SCHEMA IF EXISTS %s CASCADE;" (or schema "public"))))
+;;          (org-sql--send-sql cmd))))
+;;     (sqlserver
+;;      ;; drop all tables manually first
+;;      (org-sql-drop-tables)
+;;      (org-sql--with-config-keys (:schema) org-sql-db-config
+;;        (when schema
+;;          (let* ((select (format "SELECT * FROM sys.schemas WHERE name = N'%s'" schema))
+;;                 (drop (format "DROP SCHEMA %s" schema))
+;;                 (cmd (format "IF EXISTS (%s) EXEC('%s');" select drop)))
+;;            (org-sql--send-sql cmd)))))))
 
-(defun org-sql-namespace-exists ()
-  ;; NOTE: namespace = "schema" for all databases that have "schemas"
-  (org-sql--case-mode org-sql-db-config
-    ((mysql sqlite)
-     (error "Namespace schemas only exist for Postgres and SQL Server"))
-    (pgsql
-     (org-sql--with-config-keys (:database :schema) org-sql-db-config
-       (org-sql--on-success* (org-sql--send-sql "\\dn")
-         (--> (s-split "\n" it-out)
-           (--map (s-split "|" it) it)
-           ;; TODO this (or schema "public") thing is silly and should be
-           ;; refactored into something civilized (see other instances below)
-           (--find (and (equal (car it) (or schema "public"))
-                        (equal (cadr it) database))
-                   it)
-           (and it t)))))
-    (sqlserver
-     (org-sql--with-config-keys (:database :schema) org-sql-db-config
-       (let ((cmd (format "select name from [%s].sys.schemas;" database)))
-         (org-sql--on-success* (org-sql--send-sql cmd)
-           (--> (s-trim it-out)
-             (s-split "\n" it)
-             (-map #'s-trim it)
-             (--find (equal it (or schema "dbo")) it)
-             (and it t))))))))
+;; (defun org-sql-namespace-exists ()
+;;   ;; NOTE: namespace = "schema" for all databases that have "schemas"
+;;   (org-sql--case-mode org-sql-db-config
+;;     ((mysql sqlite)
+;;      (error "Namespace schemas only exist for Postgres and SQL Server"))
+;;     (pgsql
+;;      (org-sql--with-config-keys (:database :schema) org-sql-db-config
+;;        (org-sql--on-success* (org-sql--send-sql "\\dn")
+;;          (--> (s-split "\n" it-out)
+;;            (--map (s-split "|" it) it)
+;;            ;; TODO this (or schema "public") thing is silly and should be
+;;            ;; refactored into something civilized (see other instances below)
+;;            (--find (and (equal (car it) (or schema "public"))
+;;                         (equal (cadr it) database))
+;;                    it)
+;;            (and it t)))))
+;;     (sqlserver
+;;      (org-sql--with-config-keys (:database :schema) org-sql-db-config
+;;        (let ((cmd (format "select name from [%s].sys.schemas;" database)))
+;;          (org-sql--on-success* (org-sql--send-sql cmd)
+;;            (--> (s-trim it-out)
+;;              (s-split "\n" it)
+;;              (-map #'s-trim it)
+;;              (--find (equal it (or schema "dbo")) it)
+;;              (and it t))))))))
 
 ;; database layer
 

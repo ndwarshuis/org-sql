@@ -72,7 +72,7 @@
 (defmacro describe-sql-database-spec (config)
   (let ((it-forms
          (org-sql--case-mode config
-           ((mysql postgres sqlserver)
+           ((mysql pgsql sqlserver)
             '((it "create database should error"
                 (should-error (org-sql-create-db)))
               (it "drop database should error"
@@ -97,36 +97,36 @@
            (org-sql-drop-db)))
        ,@it-forms)))
 
-(defmacro describe-sql-namespace-spec (config)
-  (let ((it-forms
-         (org-sql--case-mode config
-           ((mysql sqlite)
-            '((it "create namespace should error"
-                (should-error (org-sql-create-namespace)))
-              (it "drop namespace should error"
-                (should-error (org-sql-drop-namespace)))
-              (it "testing for existence should error"
-                (should-error (org-sql-namespace-exists)))))
-           ((postgres sqlserver)
-            '((it "create namespace"
-                (expect-exit-success (org-sql-create-namespace)))
-              (it "namespace should exist"
-                (expect (org-sql-namespace-exists)))
-              (it "drop namespace"
-                (expect-exit-success (org-sql-drop-namespace)))
-              (it "namespace should not exist"
-                (expect (not (org-sql-namespace-exists)))))))))
-    `(describe "Namespace Admin Spec"
-       (before-all
-         (setq org-sql-db-config ',config)
-         (ignore-errors
-           (org-sql-create-db)))
-       (after-all
-         (ignore-errors
-           (org-sql-drop-namespace))
-         (ignore-errors
-           (org-sql-drop-db)))
-       ,@it-forms)))
+;; (defmacro describe-sql-namespace-spec (config)
+;;   (let ((it-forms
+;;          (org-sql--case-mode config
+;;            ((mysql sqlite)
+;;             '((it "create namespace should error"
+;;                 (should-error (org-sql-create-namespace)))
+;;               (it "drop namespace should error"
+;;                 (should-error (org-sql-drop-namespace)))
+;;               (it "testing for existence should error"
+;;                 (should-error (org-sql-namespace-exists)))))
+;;            ((postgres sqlserver)
+;;             '((it "create namespace"
+;;                 (expect-exit-success (org-sql-create-namespace)))
+;;               (it "namespace should exist"
+;;                 (expect (org-sql-namespace-exists)))
+;;               (it "drop namespace"
+;;                 (expect-exit-success (org-sql-drop-namespace)))
+;;               (it "namespace should not exist"
+;;                 (expect (not (org-sql-namespace-exists)))))))))
+;;     `(describe "Namespace Admin Spec"
+;;        (before-all
+;;          (setq org-sql-db-config ',config)
+;;          (ignore-errors
+;;            (org-sql-create-db)))
+;;        (after-all
+;;          (ignore-errors
+;;            (org-sql-drop-namespace))
+;;          (ignore-errors
+;;            (org-sql-drop-db)))
+;;        ,@it-forms)))
 
 (defmacro describe-sql-table-spec (config)
   `(describe "Table Admin Spec"
@@ -154,14 +154,14 @@
        (expect (length (org-sql-list-tables)) :to-be 0))))
 
 (defmacro describe-sql-init-spec (config)
-  (-let (((it-namespace1 it-namespace2)
-          (org-sql--case-mode config
-            ((mysql sqlite)
-             nil)
-            ((postgres sqlserver)
-             (let ((x '(expect (org-sql-namespace-exists))))
-               (list `((it "namespace exists" ,x))
-                     `((it "namespace still exists" ,x))))))))
+  ;; (-let (((it-namespace1 it-namespace2)
+  ;;         (org-sql--case-mode config
+  ;;           ((mysql sqlite)
+  ;;            nil)
+  ;;           ((postgres sqlserver)
+  ;;            (let ((x '(expect (org-sql-namespace-exists))))
+  ;;              (list `((it "namespace exists" ,x))
+  ;;                    `((it "namespace still exists" ,x))))))))
   `(describe "Initialization/Reset Spec"
      (before-all
        (setq org-sql-db-config ',config))
@@ -187,7 +187,7 @@
      ;; ,@it-namespace2
      (it "tables should still exist"
        (expect (org-sql--sets-equal org-sql-table-names (org-sql-list-tables)
-                                    :test #'equal))))))
+                                    :test #'equal)))))
 
 (defmacro describe-sql-update-spec (config)
   ;; ASSUME init/reset work
