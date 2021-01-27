@@ -133,14 +133,14 @@
      (before-all
        (setq org-sql-db-config ',config)
        (ignore-errors
-         (org-sql-create-db))
-       (ignore-errors
-         (org-sql-create-namespace)))
+         (org-sql-create-db)))
+       ;; (ignore-errors
+       ;;   (org-sql-create-namespace)))
      (after-all
        (ignore-errors
          (org-sql-drop-tables))
-       (ignore-errors
-         (org-sql-drop-namespace))
+       ;; (ignore-errors
+       ;;   (org-sql-drop-namespace))
        (ignore-errors
          (org-sql-drop-db)))
      (it "create tables"
@@ -168,15 +168,15 @@
      (after-all
        (ignore-errors
          (org-sql-drop-tables))
-       (ignore-errors
-         (org-sql-drop-namespace))
+       ;; (ignore-errors
+       ;;   (org-sql-drop-namespace))
        (ignore-errors
          (org-sql-drop-db)))
      (it "initialize database"
        (expect-exit-success (org-sql-init-db)))
      (it "database should exist"
        (expect (org-sql-db-exists)))
-     ,@it-namespace1
+     ;; ,@it-namespace1
      (it "tables should exist"
        (expect (org-sql--sets-equal org-sql-table-names (org-sql-list-tables)
                                     :test #'equal)))
@@ -184,7 +184,7 @@
        (expect-exit-success (org-sql-reset-db)))
      (it "database should still exist"
        (expect (org-sql-db-exists)))
-     ,@it-namespace2
+     ;; ,@it-namespace2
      (it "tables should still exist"
        (expect (org-sql--sets-equal org-sql-table-names (org-sql-list-tables)
                                     :test #'equal))))))
@@ -403,12 +403,12 @@
      (after-all
        (ignore-errors
          (org-sql-drop-tables))
-       (ignore-errors
-         (org-sql-drop-namespace))
+       ;; (ignore-errors
+       ;;   (org-sql-drop-namespace))
        (ignore-errors
          (org-sql-drop-db)))
      (describe-sql-database-spec ,config)
-     (describe-sql-namespace-spec ,config)
+     ;; (describe-sql-namespace-spec ,config)
      (describe-sql-table-spec ,config)
      (describe-sql-init-spec ,config)
      (describe-sql-update-spec ,config)

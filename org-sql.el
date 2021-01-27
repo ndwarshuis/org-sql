@@ -1124,30 +1124,56 @@ separated by SEP."
 
 ;; create table
 
-(defun org-sql--format-mql-schema-enum-types (config mql-tables)
-  "Return a series of CREATE TYPE statements for MQL-SCHEMA.
-The SQL statements will create all enum types found in
-MQL-TABLES. CONFIG is the `org-sql-db-config'."
-  ;; ASSUME only modes that support ENUM will call this
-  (cl-labels
-      ((format-column
-        (tbl-name mql-column)
-        (-let* (((column-name . (&plist :type :type-id :allowed)) mql-column)
-                (column-name* (org-sql--format-mql-column-name column-name)))
+;; (defun org-sql--format-mql-schema-enum-types (config mql-tables)
+;;   "Return a series of CREATE TYPE statements for MQL-SCHEMA.
+;; The SQL statements will create all enum types found in
+;; MQL-TABLES. CONFIG is the `org-sql-db-config'."
+;;   ;; ASSUME only modes that support ENUM will call this
+;;   (cl-labels
+;;       ((format-column
+;;         (tbl-name mql-column)
+;;         (-let* (((column-name . (&plist :type :type-id :allowed)) mql-column)
+;;                 (column-name* (org-sql--format-mql-column-name column-name)))
+;;           (when (and (eq type 'enum) allowed)
+;;             (let ((type-name
+;;                    (->> (or type-id (format "enum_%s_%s" tbl-name column-name*))
+;;                         (org-sql--format-mql-enum-name config))))
+;;               (->> (--map (format "'%s'" it) allowed)
+;;                    (s-join ",")
+;;                    (format "CREATE TYPE %s AS ENUM (%s);" type-name))))))
+;;        (format-table
+;;         (mql-table)
+;;         (-let (((table-name . (&alist 'columns)) mql-table))
+;;           (--map (format-column table-name it) columns))))
+;;     (->> (-mapcat #'format-table mql-tables)
+;;          (-non-nil)
+;;          (-uniq))))
+
+(defun org-sql--get-enum-type-names (config mql-tables)
+  (cl-flet
+      ((flatten
+        (tbl)
+        (let ((tbl-name (car tbl)))
+          (--map (cons tbl-name it) (alist-get 'columns (cdr tbl)))))
+       (format-column
+        (grouped)
+        (-let (((tbl-name . (col-name . (&plist :type :type-id :allowed))) grouped))
           (when (and (eq type 'enum) allowed)
-            (let ((type-name
-                   (->> (or type-id (format "enum_%s_%s" tbl-name column-name*))
-                        (org-sql--format-mql-enum-name config))))
-              (->> (--map (format "'%s'" it) allowed)
-                   (s-join ",")
-                   (format "CREATE TYPE %s AS ENUM (%s);" type-name))))))
-       (format-table
-        (mql-table)
-        (-let (((table-name . (&alist 'columns)) mql-table))
-          (--map (format-column table-name it) columns))))
-    (->> (-mapcat #'format-table mql-tables)
+            (cons (->> (or type-id
+                           (->> (org-sql--format-mql-column-name col-name)
+                                (format "enum_%s_%s" tbl-name)))
+                       (org-sql--format-mql-enum-name config))
+                  (--map (format "'%s'" it) allowed))))))
+    (->> (-mapcat #'flatten mql-tables)
+         (-map #'format-column)
          (-non-nil)
          (-uniq))))
+
+(defun org-sql--format-mql-schema-enum-types (config mql-tables)
+  (->> (org-sql--get-enum-type-names config mql-tables)
+       (--map (format "CREATE TYPE %s AS ENUM (%s);"
+                      (car it)
+                      (s-join "," (cdr it))))))
 
 (defun org-sql--format-mql-schema-column-constraints (mql-column-constraints)
   "Return formatted column constraints for MQL-COLUMN-CONSTRAINTS."
@@ -2382,11 +2408,17 @@ The database connection will be handled transparently."
           (org-sql--send-sql)))
     (postgres
      (org-sql--with-config-keys (:schema) org-sql-db-config
-       (->> (if schema (--map (format "%s.%s" schema it) org-sql-table-names)
-              org-sql-table-names)
-            (s-join ",")
-            (format "DROP TABLE IF EXISTS %s CASCADE;")
-            (org-sql--send-sql))))
+       (let ((drop-tables (->> (if schema
+                                   (--map (format "%s.%s" schema it)
+                                          org-sql-table-names)
+                                 org-sql-table-names)
+                               (s-join ",")
+                               (format "DROP TABLE IF EXISTS %s CASCADE;")))
+             (drop-types (->> (org-sql--get-enum-type-names org-sql-db-config org-sql--mql-tables)
+                              (-map #'car)
+                              (s-join ",")
+                              (format "DROP TYPE IF EXISTS %s CASCADE;"))))
+         (org-sql--send-sql (concat drop-tables drop-types)))))
     (sqlite
      (->> (--map (format "DROP TABLE IF EXISTS %s;" it) org-sql-table-names)
           ;; TODO figure out a better way to format the transaction
@@ -2570,7 +2602,8 @@ The database connection will be handled transparently."
     (mysql
      nil)
     ((postgres sqlserver)
-     (org-sql-create-namespace))
+     nil)
+     ;; (org-sql-create-namespace))
     (sqlite
      (org-sql-create-db)))
   (org-sql-create-tables))
@@ -2597,7 +2630,8 @@ The database connection will be handled transparently."
     (mysql
      (org-sql-drop-tables))
     ((postgres sqlserver)
-     (org-sql-drop-namespace))
+     (org-sql-drop-tables))
+     ;; (org-sql-drop-namespace))
     (sqlite
      (org-sql-drop-db)))
   (org-sql-init-db))
