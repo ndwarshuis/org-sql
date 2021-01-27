@@ -1083,7 +1083,7 @@ list then join the cdr of IN with newlines."
   (declare (indent 2))
   (-let (((&plist :sqlite :postgres) value-plist))
     (expect (format-with '(sqlite) type input) :to-equal sqlite)
-    (expect (format-with '(postgres) type input) :to-equal postgres)))
+    (expect (format-with '(pgsql) type input) :to-equal postgres)))
 
 (describe "meta-query language type formatting spec"
   (it "boolean (NULL)"
@@ -1243,7 +1243,7 @@ list then join the cdr of IN with newlines."
         "CREATE TABLE IF NOT EXISTS table-bar (intone INTEGER,inttwo INTEGER,PRIMARY KEY (intone),FOREIGN KEY (inttwo) REFERENCES table-foo (int) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED);"))))
 
   (it "create table (postgres)"
-    (let ((config '(postgres)))
+    (let ((config '(pgsql)))
       (expect
        (org-sql--format-mql-schema config test-schema)
        :to-equal
@@ -1261,10 +1261,10 @@ list then join the cdr of IN with newlines."
        "PRAGMA foreign_keys = ON;BEGIN;INSERT INTO foo (bar) values (1);COMMIT;")))
 
   (it "transaction (postgres)"
-    (let ((mode 'postgres)
+    (let ((mode 'pgsql)
           (statements (list "INSERT INTO foo (bar) values (1);")))
       (expect
-       (org-sql--format-sql-transaction '(postgres) statements)
+       (org-sql--format-sql-transaction '(pgsql) statements)
        :to-equal
        "BEGIN;INSERT INTO foo (bar) values (1);COMMIT;"))))
 

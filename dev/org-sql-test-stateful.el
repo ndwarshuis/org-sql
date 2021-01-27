@@ -426,14 +426,14 @@
   (sqlite :path "/tmp/org-sql-test.db")
 
   "Postgres"
-  (postgres :database "org_sql"
+  (pgsql :database "org_sql"
             :port "60000"
             :hostname "localhost"
             :username "org_sql"
             :password "org_sql")
 
   "Postgres: non-default schema"
-  (postgres :database "org_sql"
+  (pgsql :database "org_sql"
             :port "60000"
             :schema "nonpublic"
             :hostname "localhost"
