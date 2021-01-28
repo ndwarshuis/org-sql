@@ -45,7 +45,7 @@
   ;; hacky AF...
   (let* ((tbl-name* (org-sql--format-mql-table-name config tbl-name))
          (select (format "SELECT Count(*) FROM %s" tbl-name*)))
-    (org-sql--send-sql select)))
+    (org-sql-send-sql select)))
 
 (defmacro expect-db-has-tables (config header &rest table-specs)
   (declare (indent 1))
@@ -415,8 +415,8 @@
          (org-sql-drop-db)))
 
      (after-all
-       (org-sql--send-sql "DROP TABLE IF EXISTS fake_init_table;")
-       (org-sql--send-sql "DROP TABLE IF EXISTS fake_update_table;")
+       (org-sql-send-sql "DROP TABLE IF EXISTS fake_init_table;")
+       (org-sql-send-sql "DROP TABLE IF EXISTS fake_update_table;")
        (setq org-sql-db-config `,config))
 
      (describe-reset-db "update hook"

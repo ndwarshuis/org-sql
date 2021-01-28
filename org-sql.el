@@ -2274,7 +2274,7 @@ Each hashpathpair will have it's :disk-path set to nil."
   (let* ((tbl-name 'file_metadata)
          (cols '(:file_path :file_hash))
          (cmd (org-sql--format-select-statement org-sql-db-config cols tbl-name)))
-    (org-sql--on-success* (org-sql--send-sql cmd)
+    (org-sql--on-success* (org-sql-send-sql cmd)
       (->> (s-trim it-out)
            (org-sql--parse-output-to-plist org-sql-db-config cols)
            (--map (-let (((&plist :file_hash h :file_path p) it))
@@ -2385,24 +2385,14 @@ CONFIG is the plist component if `org-sql-db-config'."
     (sqlserver
      (send #'org-sql--exec-sqlserver-command-nodb "-d" :database args)))))
 
-(defun org-sql--send-sql (sql-cmd)
-  "Execute SQL-CMD.
-The database connection will be handled transparently."
-  (let ((args (org-sql--case-mode org-sql-db-config
-                (mysql `("-e" ,sql-cmd))
-                (pgsql `("-c" ,sql-cmd))
-                (sqlite `(,sql-cmd))
-                (sqlserver `("-Q" ,(format "SET NOCOUNT ON; %s" sql-cmd))))))
-    (org-sql--exec-command-in-db args)))
-
 (defun org-sql--send-sql-file (path)
   (org-sql--case-mode org-sql-db-config
     (mysql
-     (org-sql--send-sql (format "source %s" path)))
+     (org-sql-send-sql (format "source %s" path)))
     (pgsql
-     (org-sql--send-sql (format "\\i %s" path)))
+     (org-sql-send-sql (format "\\i %s" path)))
     (sqlite
-     (org-sql--send-sql (format ".read %s" path)))
+     (org-sql-send-sql (format ".read %s" path)))
     (sqlserver
      ;; I think ":r tmp-path" should work here to make this analogous
      ;; with the others
@@ -2444,12 +2434,22 @@ The database connection will be handled transparently."
 ;; Because all supported DBMSs have different layers, these will mean different
 ;; things and must take these restrictions into account.
 
+(defun org-sql-send-sql (sql-cmd)
+  "Execute SQL-CMD.
+The database connection will be handled transparently."
+  (let ((args (org-sql--case-mode org-sql-db-config
+                (mysql `("-e" ,sql-cmd))
+                (pgsql `("-c" ,sql-cmd))
+                (sqlite `(,sql-cmd))
+                (sqlserver `("-Q" ,(format "SET NOCOUNT ON; %s" sql-cmd))))))
+    (org-sql--exec-command-in-db args)))
+
 ;; table layer
 
 (defun org-sql--run-hook (q hook-def)
   (org-sql--on-success (pcase hook-def
                          (`(file ,path) (org-sql--send-sql-file path))
-                         (`(sql ,cmd) (org-sql--send-sql cmd))
+                         (`(sql ,cmd) (org-sql-send-sql cmd))
                          (e (error "Unknown hook definition: %s" e)))
     (when org-sql-debug
       (let ((fmt (if (equal "" it-out)
@@ -2472,7 +2472,7 @@ The database connection will be handled transparently."
 
 (defun org-sql-create-tables ()
   (->> (org-sql--format-mql-schema org-sql-db-config org-sql--mql-tables)
-       (org-sql--send-sql)))
+       (org-sql-send-sql)))
 
 ;; TODO add function to drop all tables?
 (defun org-sql-drop-tables ()
@@ -2481,7 +2481,7 @@ The database connection will be handled transparently."
      (->> (s-join "," org-sql-table-names)
           (format "DROP TABLE IF EXISTS %s;")
           (format "SET FOREIGN_KEY_CHECKS = 0;%sSET FOREIGN_KEY_CHECKS = 1;")
-          (org-sql--send-sql)))
+          (org-sql-send-sql)))
     (pgsql
      (org-sql--with-config-keys (:schema) org-sql-db-config
        (let ((drop-tables (->> (if schema
@@ -2494,13 +2494,13 @@ The database connection will be handled transparently."
                               (-map #'car)
                               (s-join ",")
                               (format "DROP TYPE IF EXISTS %s CASCADE;"))))
-         (org-sql--send-sql (concat drop-tables drop-types)))))
+         (org-sql-send-sql (concat drop-tables drop-types)))))
     (sqlite
      (->> (--map (format "DROP TABLE IF EXISTS %s;" it) org-sql-table-names)
           ;; TODO figure out a better way to format the transaction
           (s-join "")
           (format "PRAGMA foreign_keys = OFF;BEGIN;%sCOMMIT;")
-          (org-sql--send-sql)))
+          (org-sql-send-sql)))
     (sqlserver
      (org-sql--with-config-keys (:schema) org-sql-db-config
        ;; NOTE this assumes the order of the table names is parent -> child
@@ -2513,7 +2513,7 @@ The database connection will be handled transparently."
                              (format "DROP TABLE IF EXISTS %s;"))))
          (->> (-snoc alter-cmds drop-cmd)
               (org-sql--format-sql-transaction org-sql-db-config)
-              (org-sql--send-sql)))))))
+              (org-sql-send-sql)))))))
 
 (defun org-sql-list-tables ()
   (-let (((sql-cmd parse-fun)
@@ -2549,7 +2549,7 @@ The database connection will be handled transparently."
                                            (cons (s-trim s-name) (s-trim t-name))))
                                   (--filter (equal schema* (car it)))
                                   (--map (cdr it)))))))))))))
-    (org-sql--on-success* (org-sql--send-sql sql-cmd)
+    (org-sql--on-success* (org-sql-send-sql sql-cmd)
       (funcall parse-fun it-out))))
 
 ;; TODO postgres also has custom types, so add a types layer
@@ -2665,7 +2665,7 @@ The database connection will be handled transparently."
 
 (defun org-sql-dump-table (tbl-name &optional as-plist)
   (let ((cmd (org-sql--format-select-statement org-sql-db-config nil tbl-name)))
-    (org-sql--on-success* (org-sql--send-sql cmd)
+    (org-sql--on-success* (org-sql-send-sql cmd)
       (if as-plist
           (let ((col-names (->> (alist-get tbl-name org-sql--mql-tables)
                                 (alist-get 'columns)
@@ -2700,7 +2700,7 @@ The database connection will be handled transparently."
            (list)
            ;; TODO the only reason this is necessary is to set the pragma for sqlite
            (org-sql--format-sql-transaction org-sql-db-config)
-           (org-sql--send-sql))
+           (org-sql-send-sql))
     (org-sql--run-hooks :post-clear-hooks)
     (cons 0 it-out)))
 
