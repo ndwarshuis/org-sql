@@ -1347,13 +1347,14 @@ CONFIG is the `org-sql-db-config' list."
   "Return schema SQL string for MQL-TABLES.
 CONFIG is the `org-sql-db-config' list."
   (let ((create-tables (->> mql-tables
-                            (--map (org-sql--format-mql-schema-table config it))
-                            (s-join ""))))
+                            (--map (org-sql--format-mql-schema-table config it)))))
+                            ;; (s-join ""))))
     (org-sql--case-mode config
       (pgsql
-       (let ((create-types (->> (org-sql--format-mql-schema-enum-types config mql-tables)
-                                (s-join ""))))
-         (concat create-types create-tables)))
+       (let ((create-types (->> (org-sql--format-mql-schema-enum-types config mql-tables))))
+                                ;; (s-join ""))))
+         ;; (concat create-types create-tables)))
+         (append create-types create-tables)))
       ((mysql sqlite sqlserver)
        create-tables))))
 
@@ -2416,6 +2417,7 @@ The database connection will be handled transparently."
         (f-delete tmp-path)
         res))))
 
+;; TODO add switches to make these async when desired
 (defun org-sql--send-transaction (statements)
   (->> (org-sql--format-sql-transaction org-sql-db-config statements)
        (org-sql-send-sql)))
@@ -2481,7 +2483,7 @@ The database connection will be handled transparently."
 
 (defun org-sql-create-tables ()
   (->> (org-sql--format-mql-schema org-sql-db-config org-sql--mql-tables)
-       (org-sql-send-sql)))
+       (org-sql--send-transaction)))
 
 ;; TODO add function to drop all tables?
 (defun org-sql-drop-tables ()
@@ -2698,6 +2700,8 @@ The database connection will be handled transparently."
 (defun org-sql-update-db ()
   (let ((inhibit-message t))
     (org-save-all-org-buffers))
+  ;; TODO when this is async concat the hooks onto the transaction, that way
+  ;; everything can be sent once and emacs can go about its business
   (org-sql--on-success* (org-sql--send-transaction-long (org-sql--get-transactions))
     (org-sql--run-hooks :post-update-hooks)
     (cons 0 it-out)))
