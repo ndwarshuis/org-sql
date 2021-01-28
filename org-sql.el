@@ -146,11 +146,12 @@ to store them. This is in addition to any properties specifified by
            (desc . "Each row describes one org file (which may have multiple filepaths)")
            (columns
             ,(file-hash-col)
-            (:size :desc "size of the org file in bytes"
-                   :type integer
-                   :constraints (notnull)))
-           ;; (:lines :desc "number of lines in the org file"
-           ;;         :type integer))
+            (:tree_size :desc "number of characters of the org tree"
+                        :type integer
+                        :constraints (notnull))
+            (:tree_lines :desc "number of lines in the org file"
+                         :type integer
+                         :constraints (notnull)))
            (constraints
             (primary :keys (:file_hash))))
 
@@ -939,7 +940,7 @@ If not present, return the current value of CLOCK-OUT-NOTES."
    "lognoteclock-out" "nolognoteclock-out" clock-out-notes top-section))
 
 (defun org-sql--to-fstate (file-hash paths-with-attributes log-note-headings
-                                     todo-keywords lb-config tree)
+                                     todo-keywords lb-config size lines tree)
   "Return a plist representing the state of an org buffer.
 The plist will include:
 - `:file-hash': the hash of this org file (given by FILE-HASH)
@@ -958,6 +959,8 @@ The plist will include:
          (top-section (-some-> (assq 'section children) (org-ml-get-children))))
     (list :file-hash file-hash
           :paths-with-attributes paths-with-attributes
+          :size size
+          :lines lines
           :top-section top-section
           :headlines (if top-section (cdr children) children)
           :lb-config (->> lb-config
@@ -2093,11 +2096,11 @@ FSTATE is a list given by `org-sql--to-fstate'."
 (defun org-sql--add-mql-insert-file-hash (acc fstate)
   "Add MQL-insert for file in FSTATE to ACC.
 FSTATE is a list given by `org-sql--to-fstate'."
-  (-let (((&plist :file-hash) fstate))
+  (-let (((&plist :file-hash :size :lines) fstate))
     (org-sql--add-mql-insert acc file_hashes
       :file_hash file-hash
-      ;; TODO this is wrong obviously
-      :size 0)))
+      :tree_size size
+      :tree_lines lines)))
 
 (defun org-sql--add-mql-insert-file-metadata* (acc path hash attrs)
   (org-sql--add-mql-insert acc file_metadata
@@ -2232,10 +2235,14 @@ Return a cons cell like (RETURNCODE . OUTPUT)."
             (todo-keywords (-map #'substring-no-properties org-todo-keywords-1))
             (lb-config (list :log-into-drawer org-log-into-drawer
                              :clock-into-drawer org-clock-into-drawer
-                             :clock-out-notes org-log-note-clock-out)))
+                             :clock-out-notes org-log-note-clock-out))
+            (size (buffer-size))
+            (lines (save-excursion
+                     (goto-char (point-max))
+                     (line-number-at-pos))))
         (org-sql--to-fstate file-hash paths-with-attributes
                             org-log-note-headings todo-keywords lb-config
-                            tree)))))
+                            size lines tree)))))
 
 ;;; reading hashpathpair from external state
 

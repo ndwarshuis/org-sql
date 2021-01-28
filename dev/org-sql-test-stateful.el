@@ -339,7 +339,7 @@
              (expect-exit-success (org-sql-update-db))))
          (it "test file hash"
            (expect-db-has-table-contents 'file_hashes
-             `("ece424e0090cff9b6f1ac50722c336c0" "0"))))
+             `("ece424e0090cff9b6f1ac50722c336c0" "6" "1"))))
        (describe "alter the file"
          (before-all
            (setq test-path "/tmp/org-sql-test-file.org"))
@@ -352,7 +352,7 @@
              (expect-exit-success (org-sql-update-db))))
          (it "test for new file hash"
            (expect-db-has-table-contents 'file_hashes
-             `("399bc042f23ea976a04b9102c18e9cb5" "0")))
+             `("399bc042f23ea976a04b9102c18e9cb5" "6" "1")))
          (it "clean up"
            ;; yes killing the buffer is necessary
            (kill-buffer (find-file-noselect test-path t))

@@ -53,6 +53,10 @@ list then join the cdr of IN with newlines."
 
 (defconst testing-hash "123456")
 
+(defconst testing-size 2112)
+
+(defconst testing-lines 666)
+
 (defconst testing-metadata-mql
   `(file_metadata (,testing-filepath
                    ,testing-hash
@@ -67,7 +71,7 @@ list then join the cdr of IN with newlines."
                    ,(file-attribute-modes testing-attributes))))
 
 (defconst testing-hashes-mql
-  `(file_hashes (,testing-hash 0)))
+  `(file_hashes (,testing-hash ,testing-size ,testing-lines)))
 
 (defmacro expect-sql* (in tbl res-form)
   `(progn
@@ -83,7 +87,8 @@ list then join the cdr of IN with newlines."
         (acc (-clone org-sql--empty-mql-bulk-insert)))
     (->> (org-ml-parse-this-buffer)
          (org-sql--to-fstate testing-hash paths-with-attributes
-                             org-log-note-headings '("TODO" "DONE") lb-config)
+                             org-log-note-headings '("TODO" "DONE")
+                             lb-config testing-size testing-lines)
          (org-sql--fstate-to-mql-insert acc)
          (-filter #'cdr))))
 
@@ -134,7 +139,7 @@ list then join the cdr of IN with newlines."
                (list (cons testing-filepath testing-attributes)))
               (fstate (org-sql--to-fstate testing-hash paths-with-attributes
                                           ,log-note-headings '("TODO" "DONE")
-                                          lb-config
+                                          lb-config testing-size testing-lines
                                           nil))
               (hstate (org-sql--to-hstate fstate headline))
               (entry (->> (org-sql--item-to-entry hstate item)
