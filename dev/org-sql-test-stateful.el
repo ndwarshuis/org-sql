@@ -34,6 +34,8 @@
 
 (defconst test-files (f-join test-dir "files"))
 
+(defconst test-scripts (f-join test-dir "scripts"))
+
 (defun expect-exit-success (res)
   (-let (((rc . out) res))
     (if (and (= 0 rc) (equal out "")) (expect t)
@@ -168,8 +170,6 @@
      (after-all
        (ignore-errors
          (org-sql-drop-tables))
-       ;; (ignore-errors
-       ;;   (org-sql-drop-namespace))
        (ignore-errors
          (org-sql-drop-db)))
      (it "initialize database"
@@ -363,6 +363,12 @@
        (setq org-sql-db-config ',config)
        (org-sql-reset-db))
 
+     (after-all
+       (ignore-errors
+         (org-sql-drop-tables))
+       (ignore-errors
+         (org-sql-drop-db)))
+
      (describe-reset-db "clearing an empty db"
        (it "clear database"
          (expect-exit-success (org-sql-clear-db)))
@@ -397,14 +403,66 @@
          (planning_entries . 0)
          (clocks . 0)))))
 
+(defmacro describe-sql-hook-spec (config)
+  `(describe "DB Hook Spec"
+     (before-all
+       (setq org-sql-db-config `,config)
+       (ignore-errors
+         (org-sql-drop-tables))
+       (ignore-errors
+         (org-sql-drop-db)))
+
+     (after-all
+       (org-sql--send-sql "DROP TABLE IF EXISTS fake_init_table;")
+       (org-sql--send-sql "DROP TABLE IF EXISTS fake_update_table;")
+       (setq org-sql-db-config `,config))
+
+     (describe-reset-db "update hook"
+       (it "init database"
+         (setq org-sql-db-config
+               (append ',config
+                       (list :post-init-hooks
+                             `((file ,(f-join test-scripts "init_hook.sql"))
+                               (sql "INSERT INTO fake_init_table VALUES (1);")))))
+         (expect-exit-success (org-sql-init-db)))
+       (it "fake init table should exist"
+         (expect-db-has-table-contents 'fake_init_table '("1")))
+       (it "update database"
+         (setq org-sql-db-config
+               (append ',config
+                       (list
+                        :post-update-hooks
+                        `((file ,(f-join test-scripts "update_hook.sql"))
+                          (sql "INSERT INTO fake_update_table VALUES (1);")))))
+         (let ((org-sql-files (list (f-join test-files "foo1.org"))))
+           (expect-exit-success (org-sql-update-db))))
+       (it "fake update table should exist"
+         (expect-db-has-table-contents 'fake_update_table '("1")))
+       (it "clear database"
+         (setq org-sql-db-config
+               (append ',config
+                       (list
+                        :post-clear-hooks
+                        `((file ,(f-join test-scripts "clear_hook.sql"))
+                          (sql "DROP TABLE fake_update_table;")))))
+         (expect-exit-success (org-sql-clear-db)))
+       (it "fake init table should not exist"
+         (expect (not (member "fake_init_table" (org-sql-list-tables)))))
+       (it "fake update table should not exist"
+         (expect (not (member "fake_update_table" (org-sql-list-tables))))))))
+
 (defmacro describe-io-spec (unique-name config)
   (declare (indent 1))
+  ;; this spec only works with the default schema; I suppose if I was less lazy
+  ;; I could make it work for non-default schema's but it's nice when the same
+  ;; SQL statements work for all tests and configs ;)
+  (let ((hook-spec (org-sql--with-config-keys (:schema) config
+                     (unless schema `((describe-sql-hook-spec ,config))))))
+                   
   `(describe ,unique-name
      (after-all
        (ignore-errors
          (org-sql-drop-tables))
-       ;; (ignore-errors
-       ;;   (org-sql-drop-namespace))
        (ignore-errors
          (org-sql-drop-db)))
      (describe-sql-database-spec ,config)
@@ -412,7 +470,8 @@
      (describe-sql-table-spec ,config)
      (describe-sql-init-spec ,config)
      (describe-sql-update-spec ,config)
-     (describe-sql-clear-spec ,config)))
+     (describe-sql-clear-spec ,config)
+     ,@hook-spec)))
 
 (defmacro describe-io-specs (&rest specs)
   (declare (indent 0))
@@ -421,6 +480,8 @@
     `(describe "SQL IO Spec"
        ,@forms)))
 
+;; NOTE hooks are tested internally so they don't need to be specified in
+;; the configs here
 (describe-io-specs
   "SQLite"
   (sqlite :path "/tmp/org-sql-test.db")
@@ -440,6 +501,14 @@
             :username "org_sql"
             :password "org_sql")
 
+  "Postgres: unlogged tables"
+  (pgsql :database "org_sql"
+            :port "60000"
+            :hostname "localhost"
+            :username "org_sql"
+            :password "org_sql"
+            :unlogged t)
+
   "MariaDB"
   (mysql :database "org_sql"
          :port "60100"
@@ -454,6 +523,7 @@
          :username "org_sql"
          :password "org_sql")
 
+  ;; TODO add default schema
   "SQL Server: non-default schema"
   (sqlserver :database "org_sql"
               :port "60300"

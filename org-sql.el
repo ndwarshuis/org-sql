@@ -2354,6 +2354,19 @@ The database connection will be handled transparently."
                 (sqlserver `("-Q" ,(format "SET NOCOUNT ON; %s" sql-cmd))))))
     (org-sql--exec-command-in-db args)))
 
+(defun org-sql--send-sql-file (path)
+  (org-sql--case-mode org-sql-db-config
+    (mysql
+     (org-sql--send-sql (format "source %s" path)))
+    (pgsql
+     (org-sql--send-sql (format "\\i %s" path)))
+    (sqlite
+     (org-sql--send-sql (format ".read %s" path)))
+    (sqlserver
+     ;; I think ":r tmp-path" should work here to make this analogous
+     ;; with the others
+     (org-sql--exec-sqlserver-command `("-i" ,path)))))
+
 (defun org-sql--send-sql* (sql-cmd)
   "Execute SQL-CMD as a separate file input.
 The database connection will be handled transparently."
@@ -2367,18 +2380,7 @@ The database connection will be handled transparently."
                       ((mysql pgsql sqlite) sql-cmd)
                       (sqlserver (format "set nocount on; %s" sql-cmd)))))
       (f-write sql-cmd 'utf-8 tmp-path)
-      (let ((res
-             (org-sql--case-mode org-sql-db-config
-               (mysql
-                (org-sql--send-sql (format "source %s" tmp-path)))
-               (pgsql
-                (org-sql--send-sql (format "\\i %s" tmp-path)))
-               (sqlite
-                (org-sql--send-sql (format ".read %s" tmp-path)))
-               (sqlserver
-                ;; I think ":r tmp-path" should work here to make this analogous
-                ;; with the others
-                (org-sql--exec-sqlserver-command `("-i" ,tmp-path))))))
+      (let ((res (org-sql--send-sql-file tmp-path)))
         (f-delete tmp-path)
         res))))
 
@@ -2403,11 +2405,33 @@ The database connection will be handled transparently."
 
 ;; table layer
 
+(defun org-sql--run-hook (q hook-def)
+  (org-sql--on-success (pcase hook-def
+                         (`(file ,path) (org-sql--send-sql-file path))
+                         (`(sql ,cmd) (org-sql--send-sql cmd))
+                         (e (error "Unknown hook definition: %s" e)))
+    (when org-sql-debug
+      (let ((fmt (if (equal "" it-out)
+                     (format "%s hook %%S completed successfully" q)
+                   (format "%s hook %%S completed with output: %s" q it-out))))
+        (message fmt it-out)))
+    (let ((fmt (if (equal "" it-out) (format "%s hook %%S failed" q)
+                 (format "%s hook %%S failed with output: %s" q it-out))))
+      (message fmt it-out))))
+
+(defun org-sql--run-hooks (key)
+  (-when-let (hooks (org-sql--get-config-key key org-sql-db-config))
+    (when hooks
+      (let ((qualifier (pcase key
+                         (:post-init-hooks "Init")
+                         (:post-update-hooks "Update")
+                         (:post-clear-hooks "Clear")
+                         (e (error "Unknown qualifier: %s" e)))))
+        (--each hooks (org-sql--run-hook qualifier it))))))
+
 (defun org-sql-create-tables ()
-  (let ((sql-cmd (org-sql--format-mql-schema org-sql-db-config org-sql--mql-tables)))
-    ;; (print sql-cmd)
-    (let ((res (org-sql--send-sql sql-cmd)))
-      res)))
+  (->> (org-sql--format-mql-schema org-sql-db-config org-sql--mql-tables)
+       (org-sql--send-sql)))
 
 ;; TODO add function to drop all tables?
 (defun org-sql-drop-tables ()
@@ -2617,21 +2641,27 @@ The database connection will be handled transparently."
      ;; (org-sql-create-namespace))
     (sqlite
      (org-sql-create-db)))
-  (org-sql-create-tables))
+  (org-sql--on-success* (org-sql-create-tables)
+    (org-sql--run-hooks :post-init-hooks)
+    (cons 0 it-out)))
 
 (defun org-sql-update-db ()
   (let ((inhibit-message t))
     (org-save-all-org-buffers))
-  (org-sql--send-sql* (org-sql--get-transactions)))
+  (org-sql--on-success* (org-sql--send-sql* (org-sql--get-transactions))
+    (org-sql--run-hooks :post-update-hooks)
+    (cons 0 it-out)))
 
 (defun org-sql-clear-db ()
-  ;; only delete from files as we assume actions here cascade down
-  (->> (org-sql--format-mql-table-name org-sql-db-config 'file_hashes)
-       (format "DELETE FROM %s;")
-       (list)
-       ;; TODO the only reason this is necessary is to set the pragma for sqlite
-       (org-sql--format-sql-transaction org-sql-db-config)
-       (org-sql--send-sql)))
+  (org-sql--on-success*
+      (->> (org-sql--format-mql-table-name org-sql-db-config 'file_hashes)
+           (format "DELETE FROM %s;")
+           (list)
+           ;; TODO the only reason this is necessary is to set the pragma for sqlite
+           (org-sql--format-sql-transaction org-sql-db-config)
+           (org-sql--send-sql))
+    (org-sql--run-hooks :post-clear-hooks)
+    (cons 0 it-out)))
 
 (defun org-sql-reset-db ()
   (org-sql--case-mode org-sql-db-config
