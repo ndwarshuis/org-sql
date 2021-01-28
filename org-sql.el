@@ -2292,16 +2292,17 @@ state as the orgfiles on disk."
                    'paths-to-delete pd)
            (org-sql--partition-hashpathpairs disk-hashpathpairs db-hashpathpairs))
           (pi* (--map (cons (car it) (cons (cdr it) (file-attributes (cdr it)))) pi)))
-    (->> (list (org-sql--format-path-delete-statement org-sql-db-config pd)
-               (org-sql--format-file-delete-statement org-sql-db-config fd)
-               (->> (org-sql--group-hashpathpairs-by-hash fi)
-                    (--map (org-sql--hashpathpair-get-fstate (car it) (cdr it)))
-                    (org-sql--format-insert-statements org-sql-db-config pi*)))
-         (org-sql--format-sql-transaction org-sql-db-config))))
+    (list (org-sql--format-path-delete-statement org-sql-db-config pd)
+          (org-sql--format-file-delete-statement org-sql-db-config fd)
+          (->> (org-sql--group-hashpathpairs-by-hash fi)
+               (--map (org-sql--hashpathpair-get-fstate (car it) (cdr it)))
+               (org-sql--format-insert-statements org-sql-db-config pi*)))))
+         ;; (org-sql--format-sql-transaction org-sql-db-config))))
 
 (defun org-sql-dump-update-transactions ()
   "Dump the update transaction to a separate buffer."
-  (let ((out (org-sql--get-transactions)))
+  (let ((out (->> (org-sql--get-transactions)
+                  (org-sql--format-sql-transaction org-sql-db-config))))
     (switch-to-buffer "SQL: Org-update-dump")
     (insert (s-replace ";" ";\n" out))))
 
@@ -2414,6 +2415,14 @@ The database connection will be handled transparently."
       (let ((res (org-sql--send-sql-file tmp-path)))
         (f-delete tmp-path)
         res))))
+
+(defun org-sql--send-transaction (statements)
+  (->> (org-sql--format-sql-transaction org-sql-db-config statements)
+       (org-sql-send-sql)))
+
+(defun org-sql--send-transaction-long (statements)
+  (->> (org-sql--format-sql-transaction org-sql-db-config statements)
+       (org-sql--send-sql*)))
 
 ;;;
 ;;; Public API
@@ -2689,7 +2698,7 @@ The database connection will be handled transparently."
 (defun org-sql-update-db ()
   (let ((inhibit-message t))
     (org-save-all-org-buffers))
-  (org-sql--on-success* (org-sql--send-sql* (org-sql--get-transactions))
+  (org-sql--on-success* (org-sql--send-transaction-long (org-sql--get-transactions))
     (org-sql--run-hooks :post-update-hooks)
     (cons 0 it-out)))
 
@@ -2698,9 +2707,7 @@ The database connection will be handled transparently."
       (->> (org-sql--format-mql-table-name org-sql-db-config 'file_hashes)
            (format "DELETE FROM %s;")
            (list)
-           ;; TODO the only reason this is necessary is to set the pragma for sqlite
-           (org-sql--format-sql-transaction org-sql-db-config)
-           (org-sql-send-sql))
+           (org-sql--send-transaction))
     (org-sql--run-hooks :post-clear-hooks)
     (cons 0 it-out)))
 
