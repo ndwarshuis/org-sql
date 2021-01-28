@@ -2489,10 +2489,13 @@ The database connection will be handled transparently."
 (defun org-sql-drop-tables ()
   (org-sql--case-mode org-sql-db-config
     (mysql
-     (->> (s-join "," org-sql-table-names)
-          (format "DROP TABLE IF EXISTS %s;")
-          (format "SET FOREIGN_KEY_CHECKS = 0;%sSET FOREIGN_KEY_CHECKS = 1;")
-          (org-sql-send-sql)))
+     (->> 
+          ;; (format "DROP TABLE IF EXISTS %s;")
+          ;; (format "SET FOREIGN_KEY_CHECKS = 0;%sSET FOREIGN_KEY_CHECKS = 1;")
+      (list "SET FOREIGN_KEY_CHECKS = 0;"
+            (format "DROP TABLE IF EXISTS %s;" (s-join "," org-sql-table-names))
+            "SET FOREIGN_KEY_CHECKS = 1;")
+          (org-sql--send-transaction)))
     (pgsql
      (org-sql--with-config-keys (:schema) org-sql-db-config
        (let ((drop-tables (->> (if schema
@@ -2505,26 +2508,23 @@ The database connection will be handled transparently."
                               (-map #'car)
                               (s-join ",")
                               (format "DROP TYPE IF EXISTS %s CASCADE;"))))
-         (org-sql-send-sql (concat drop-tables drop-types)))))
+         (org-sql--send-transaction (list drop-tables drop-types)))))
     (sqlite
      (->> (--map (format "DROP TABLE IF EXISTS %s;" it) org-sql-table-names)
-          ;; TODO figure out a better way to format the transaction
-          (s-join "")
-          (format "PRAGMA foreign_keys = OFF;BEGIN;%sCOMMIT;")
-          (org-sql-send-sql)))
+          (reverse)
+          (org-sql--send-transaction)))
     (sqlserver
      (org-sql--with-config-keys (:schema) org-sql-db-config
-       ;; NOTE this assumes the order of the table names is parent -> child
-       (let* ((tbl-names (if schema
-                             (--map (format "%s.%s" schema it) (reverse org-sql-table-names))
-                           (reverse org-sql-table-names)))
-              ;; TODO this will crap out if a table doesn't exist
-              (alter-cmds (--map (format "ALTER TABLE %s NOCHECK CONSTRAINT ALL;" it) tbl-names))
-              (drop-cmd (->> (s-join "," tbl-names)
-                             (format "DROP TABLE IF EXISTS %s;"))))
-         (->> (-snoc alter-cmds drop-cmd)
-              (org-sql--format-sql-transaction org-sql-db-config)
-              (org-sql-send-sql)))))))
+       (let ((tbl-names (--> org-sql-table-names
+                          (if schema (--map (format "%s.%s" schema it) it) it)
+                          (reverse it))))
+         (->> (append
+               (--map (format "ALTER TABLE %s NOCHECK CONSTRAINT ALL;" it) tbl-names)
+               ;; TODO this will crap out if a table doesn't exist
+               (->> (s-join "," tbl-names)
+                    (format "DROP TABLE IF EXISTS %s;")
+                    (list)))
+              (org-sql--send-transaction)))))))
 
 (defun org-sql-list-tables ()
   (-let (((sql-cmd parse-fun)
