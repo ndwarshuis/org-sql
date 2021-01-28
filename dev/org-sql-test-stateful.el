@@ -298,7 +298,8 @@
              (expect-exit-success (org-sql-update-db))))
          (it "test for file in tables"
            (expect-db-has-table-contents 'file_metadata
-             `(,test-path "106e9f12c9e4ff3333425115d148fbd4"))))
+             `(,test-path "106e9f12c9e4ff3333425115d148fbd4" "1000" "1000"
+                          "1600315628" "1600315628" "-rw-r--r--"))))
        (describe "rename inserted file"
          ;; "rename" here means to point `org-sql-files' to an identical file
          ;; with a different name
@@ -309,7 +310,8 @@
              (expect-exit-success (org-sql-update-db))))
          (it "test for file in tables"
            (expect-db-has-table-contents 'file_metadata
-             `(,test-path "106e9f12c9e4ff3333425115d148fbd4")))))
+             `(,test-path "106e9f12c9e4ff3333425115d148fbd4" "1000" "1000"
+                          "1611105708" "1611105708" "-rw-r--r--")))))
 
      (describe-reset-db "deleted file"
        (it "update database"

@@ -54,7 +54,17 @@ list then join the cdr of IN with newlines."
 (defconst testing-hash "123456")
 
 (defconst testing-metadata-mql
-  `(file_metadata (,testing-filepath ,testing-hash)))
+  `(file_metadata (,testing-filepath
+                   ,testing-hash
+                   ,(file-attribute-user-id testing-attributes)
+                   ,(file-attribute-group-id testing-attributes)
+                   ,(->> (file-attribute-modification-time testing-attributes)
+                         (float-time)
+                         (round))
+                   ,(->> (file-attribute-status-change-time testing-attributes)
+                         (float-time)
+                         (round))
+                   ,(file-attribute-modes testing-attributes))))
 
 (defconst testing-hashes-mql
   `(file_hashes (,testing-hash 0)))

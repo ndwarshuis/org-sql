@@ -160,7 +160,23 @@ to store them. This is in addition to any properties specifified by
             (:file_path :desc "path to org file"
                         :type varchar
                         :length ,file_path-varchar-length)
-            ,(file-hash-col "path" t))
+            ,(file-hash-col "path" t)
+            (:file_uid :desc "UID of the file"
+                       :type integer
+                       :constraints (notnull))
+            (:file_gid :desc "GID of the file"
+                       :type integer
+                       :constraints (notnull))
+            (:file_modification_time :desc "time of the file's last modification"
+                                     :type integer
+                                     :constraints (notnull))
+            (:file_attr_change_time :desc "time of the file's last attribute change"
+                                    :type integer
+                                    :constraints (notnull))
+            (:file_modes :desc "permission mode bits for the file"
+                         :type varchar
+                         :length 10
+                         :constraints (notnull)))
            (constraints
             (primary :keys (:file_path))
             (foreign :ref file_hashes
@@ -1410,7 +1426,8 @@ CONFIG is the `org-sql-db-config' list."
   (let* ((acc (-clone org-sql--empty-mql-bulk-insert))
          (acc* (--reduce-from (org-sql--fstate-to-mql-insert acc it) acc file-fstates)))
     (->> path-hashpathpairs
-         (--reduce-from (org-sql--add-mql-insert-file-metadata* acc (cdr it) (car it)) acc*)
+         ;; TODO this caaaddddaaddar stuff is confusing AF...
+         (--reduce-from (org-sql--add-mql-insert-file-metadata* acc (cadr it) (car it) (cddr it)) acc*)
          (org-sql--format-mql-bulk-inserts config))))
 
 ;;; SQL string -> SQL string formatting functions
@@ -2082,19 +2099,25 @@ FSTATE is a list given by `org-sql--to-fstate'."
       ;; TODO this is wrong obviously
       :size 0)))
 
-(defun org-sql--add-mql-insert-file-metadata* (acc file-path file-hash)
+(defun org-sql--add-mql-insert-file-metadata* (acc path hash attrs)
   (org-sql--add-mql-insert acc file_metadata
-    :file_hash file-hash
-    :file_path file-path))
+    :file_hash hash
+    :file_path path
+    :file_uid (file-attribute-user-id attrs)
+    :file_gid (file-attribute-group-id attrs)
+    :file_modification_time (->> (file-attribute-modification-time attrs)
+                                 (float-time)
+                                 (round))
+    :file_attr_change_time (->> (file-attribute-status-change-time attrs)
+                                 (float-time)
+                                 (round))
+    :file_modes (file-attribute-modes attrs)))
 
 (defun org-sql--add-mql-insert-file-metadata (acc fstate)
   "Add MQL-insert for file in FSTATE to ACC.
 FSTATE is a list given by `org-sql--to-fstate'."
   (-let (((&plist :paths-with-attributes :file-hash) fstate))
-    (--reduce-from (org-sql--add-mql-insert-file-metadata* acc (car it) file-hash)
-    ;; (--reduce-from (org-sql--add-mql-insert acc file_metadata
-    ;;                  :file_hash file-hash
-    ;;                  :file_path (car it))
+    (--reduce-from (org-sql--add-mql-insert-file-metadata* acc (car it) file-hash (cdr it))
                    acc paths-with-attributes)))
 
 (defun org-sql--fstate-to-mql-insert (acc fstate)
@@ -2116,11 +2139,11 @@ FSTATE is a list given by `org-sql--to-fstate'."
 ;;   ;; (--map (org-sql--mql-delete file_metadata (:file_path it :file_hash file-hash))
 ;;   ;;        file-paths))
 
-(defun org-sql--hashpathpair-to-mql-path-insert (file-hash file-paths)
-  (--map (org-sql--mql-insert file_metadata
-           :file_path it
-           :file_hash file-hash)
-         file-paths))
+;; (defun org-sql--hashpathpair-to-mql-path-insert (file-hash file-paths)
+;;   (--map (org-sql--mql-insert file_metadata
+;;            :file_path it
+;;            :file_hash file-hash)
+;;          file-paths))
 
 ;; hashpathpair function
 
@@ -2202,7 +2225,7 @@ Return a cons cell like (RETURNCODE . OUTPUT)."
 ;;; hashpathpair -> fstate
 
 (defun org-sql--hashpathpair-get-fstate (file-hash file-paths)
-  (let ((paths-with-attributes (--map (cons it (file-attributes it)) file-paths)))
+  (let ((paths-with-attributes (--map (cons it (file-attributes it 'integer)) file-paths)))
     ;; just pick the first file path to open
     (with-current-buffer (find-file-noselect (car file-paths) t)
       (let ((tree (org-element-parse-buffer))
@@ -2260,12 +2283,13 @@ state as the orgfiles on disk."
                    'files-to-delete fd
                    'paths-to-insert pi
                    'paths-to-delete pd)
-           (org-sql--partition-hashpathpairs disk-hashpathpairs db-hashpathpairs)))
+           (org-sql--partition-hashpathpairs disk-hashpathpairs db-hashpathpairs))
+          (pi* (--map (cons (car it) (cons (cdr it) (file-attributes (cdr it)))) pi)))
     (->> (list (org-sql--format-path-delete-statement org-sql-db-config pd)
                (org-sql--format-file-delete-statement org-sql-db-config fd)
                (->> (org-sql--group-hashpathpairs-by-hash fi)
                     (--map (org-sql--hashpathpair-get-fstate (car it) (cdr it)))
-                    (org-sql--format-insert-statements org-sql-db-config pi)))
+                    (org-sql--format-insert-statements org-sql-db-config pi*)))
          (org-sql--format-sql-transaction org-sql-db-config))))
 
 (defun org-sql-dump-update-transactions ()
