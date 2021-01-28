@@ -434,8 +434,8 @@
                (append ',config
                        (list
                         :post-update-hooks
-                        `((file ,(f-join test-scripts "update_hook.sql"))
-                          (sql "INSERT INTO fake_update_table VALUES (1);")))))
+                        `((file+ ,(f-join test-scripts "update_hook.sql"))
+                          (sql+ "INSERT INTO fake_update_table VALUES (1);")))))
          (let ((org-sql-files (list (f-join test-files "foo1.org"))))
            (expect-exit-success (org-sql-update-db))))
        (it "fake update table should exist"

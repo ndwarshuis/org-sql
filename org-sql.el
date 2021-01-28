@@ -2426,6 +2426,13 @@ The database connection will be handled transparently."
   (->> (org-sql--format-sql-transaction org-sql-db-config statements)
        (org-sql--send-sql*)))
 
+(defun org-sql--send-transaction-with-hook (key trans-stmts)
+  (-let* (((in-trans after-trans) (org-sql--pull-hook key))
+          (ts (->> (append trans-stmts in-trans)
+                   (org-sql--format-sql-transaction org-sql-db-config)))
+          (is (s-join "" after-trans)))
+    (org-sql--send-sql* (concat ts is))))
+
 ;;;
 ;;; Public API
 ;;;
@@ -2480,6 +2487,21 @@ The database connection will be handled transparently."
                          (:post-clear-hooks "Clear")
                          (e (error "Unknown qualifier: %s" e)))))
         (--each hooks (org-sql--run-hook qualifier it))))))
+
+(defun org-sql--pull-hook (key)
+  (-some->> (org-sql--get-config-key key org-sql-db-config)
+    (--map (pcase it
+             (`(file ,path) (cons nil (f-read-text path)))
+             (`(file+ ,path) (cons t (f-read-text path)))
+             (`(sql ,cmd) (cons nil cmd))
+             (`(sql+ ,cmd) (cons t cmd))
+             (e (error "Unknown hook definition: %s" e))))
+    (-separate #'car)
+    (--map (-map #'cdr it))))
+
+(defun org-sql--append-hook (stmts key)
+  (-let (((&alist 'append a 'independent i) (org-sql--pull-hook key)))
+    (list (append stmts a) (list i))))
 
 (defun org-sql-create-tables ()
   (->> (org-sql--format-mql-schema org-sql-db-config org-sql--mql-tables)
@@ -2693,27 +2715,20 @@ The database connection will be handled transparently."
      ;; (org-sql-create-namespace))
     (sqlite
      (org-sql-create-db)))
-  (org-sql--on-success* (org-sql-create-tables)
-    (org-sql--run-hooks :post-init-hooks)
-    (cons 0 it-out)))
+  (->> (org-sql--format-mql-schema org-sql-db-config org-sql--mql-tables)
+       (org-sql--send-transaction-with-hook :post-init-hooks)))
 
 (defun org-sql-update-db ()
   (let ((inhibit-message t))
     (org-save-all-org-buffers))
-  ;; TODO when this is async concat the hooks onto the transaction, that way
-  ;; everything can be sent once and emacs can go about its business
-  (org-sql--on-success* (org-sql--send-transaction-long (org-sql--get-transactions))
-    (org-sql--run-hooks :post-update-hooks)
-    (cons 0 it-out)))
+  (->> (org-sql--get-transactions)
+       (org-sql--send-transaction-with-hook :post-update-hooks)))
 
 (defun org-sql-clear-db ()
-  (org-sql--on-success*
-      (->> (org-sql--format-mql-table-name org-sql-db-config 'file_hashes)
-           (format "DELETE FROM %s;")
-           (list)
-           (org-sql--send-transaction))
-    (org-sql--run-hooks :post-clear-hooks)
-    (cons 0 it-out)))
+  ;; (org-sql--on-success*
+  (->> (org-sql--format-mql-table-name org-sql-db-config 'file_hashes)
+       (format "DELETE FROM %s;")
+       (list)
 
 (defun org-sql-reset-db ()
   (org-sql--case-mode org-sql-db-config
