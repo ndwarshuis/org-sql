@@ -144,7 +144,7 @@ list then join the cdr of IN with newlines."
   (before-each
     (erase-buffer))
 
-  (it "default -  none"
+  (it "default - none"
     (expect-sql-logbook-item (list "- logbook item \\\\"
                                    "  fancy note")
         org-log-note-headings
@@ -164,7 +164,7 @@ list then join the cdr of IN with newlines."
              :old-state nil
              :new-state nil)))
 
-  (it "default -  state"
+  (it "default - state"
     (let* ((ts "[2112-01-03 Sun]")
            (h (format "State \"DONE\" from \"TODO\" %s" ts)))
       (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
@@ -185,7 +185,7 @@ list then join the cdr of IN with newlines."
                 :old-state "TODO"
                 :new-state "DONE"))))
 
-  (it "default -  refile"
+  (it "default - refile"
     (let* ((ts "[2112-01-03 Sun]")
            (h (format "Refiled on %s" ts)))
       (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
@@ -206,7 +206,7 @@ list then join the cdr of IN with newlines."
                  :old-state nil
                  :new-state nil))))
 
-  (it "default -  note"
+  (it "default - note"
     (let* ((ts "[2112-01-03 Sun]")
            (h (format "Note taken on %s" ts)))
       (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
@@ -227,7 +227,7 @@ list then join the cdr of IN with newlines."
                :old-state nil
                :new-state nil))))
 
-  (it "default -  done"
+  (it "default - done"
     (let* ((ts "[2112-01-03 Sun]")
            (h (format "CLOSING NOTE %s" ts)))
       (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
@@ -248,7 +248,7 @@ list then join the cdr of IN with newlines."
                :old-state nil
                :new-state nil))))
 
-  (it "default -  reschedule"
+  (it "default - reschedule"
     (let* ((ts "[2112-01-03 Sun]")
            (ts0 "[2112-01-04 Mon]")
            (h (format "Rescheduled from \"%s\" on %s" ts0 ts)))
@@ -270,7 +270,7 @@ list then join the cdr of IN with newlines."
                      :old-state nil
                      :new-state nil))))
 
-  (it "default -  delschedule"
+  (it "default - delschedule"
     (let* ((ts "[2112-01-03 Sun]")
            (ts0 "[2112-01-04 Mon]")
            (h (format "Not scheduled, was \"%s\" on %s" ts0 ts)))
@@ -505,16 +505,34 @@ list then join the cdr of IN with newlines."
           (headline_closures
            (,testing-hash 1 1 0)))))
 
-    (it "nested"
-      (expect-sql (list "* headline"
-                        "** nested headline")
-        `(,testing-hashes-mql
-          ,testing-metadata-mql
-          (headlines (,testing-hash 12 "nested headline" nil nil nil 0 0 nil)
-                     (,testing-hash 1 "headline" nil nil nil 0 0 nil))
-          (headline_closures (,testing-hash 12 12 0)
-                             (,testing-hash 12 1 1)
-                             (,testing-hash 1 1 0)))))
+    (expect-sql-tbls-multi (file_hashes file_metadata headlines headline_closures)
+        (list "* headline"
+              "** nested headline")
+      "nested (predicate applied to parent)"
+      ((org-sql-exclude-headline-predicate
+        (lambda (h)
+          (= 1 (org-ml-get-property :level h)))))
+      `(,testing-hashes-mql
+        ,testing-metadata-mql)
+
+      "nested (predicate applied to child)"
+      ((org-sql-exclude-headline-predicate
+        (lambda (h)
+          (= 2 (org-ml-get-property :level h)))))
+      `(,testing-hashes-mql
+        ,testing-metadata-mql
+        (headlines (,testing-hash 1 "headline" nil nil nil 0 0 nil))
+        (headline_closures (,testing-hash 1 1 0)))
+      
+      "nested (no predicate)"
+      nil
+      `(,testing-hashes-mql
+        ,testing-metadata-mql
+        (headlines (,testing-hash 12 "nested headline" nil nil nil 0 0 nil)
+                   (,testing-hash 1 "headline" nil nil nil 0 0 nil))
+        (headline_closures (,testing-hash 12 12 0)
+                           (,testing-hash 12 1 1)
+                           (,testing-hash 1 1 0))))
 
     (it "archived"
       (expect-sql "* headline :ARCHIVE:"

@@ -643,6 +643,13 @@ ignored."
   :type 'boolean
   :group 'org-sql)
 
+(defcustom org-sql-exclude-headline-predicate nil
+  "A function that is called for each headline.
+If it returns t, the current headline is to be excluded. Note
+that excluding a headline will also exclude its children."
+  :type 'function
+  :group 'org-sql)
+
 (defcustom org-sql-debug nil
   "Set to t to enable high-level debugging of SQL transactions."
   :type 'boolean
@@ -2020,9 +2027,12 @@ FSTATE is a list given by `org-sql--to-fstate'."
           (let ((sub (org-ml-headline-get-subheadlines hl))
                 (hstate* (if hstate (org-sql--update-hstate hstate hl)
                            (org-sql--to-hstate fstate hl))))
-            (--> (org-sql--add-mql-insert-headline acc hstate*)
-                 (org-sql--add-mql-insert-headline-closures it hstate*)
-                 (--reduce-from (add-headline acc hstate* it) it sub)))))
+            (if (and org-sql-exclude-headline-predicate
+                     (funcall org-sql-exclude-headline-predicate hl))
+                acc
+              (--> (org-sql--add-mql-insert-headline acc hstate*)
+                (org-sql--add-mql-insert-headline-closures it hstate*)
+                (--reduce-from (add-headline acc hstate* it) it sub))))))
       (--reduce-from (add-headline acc nil it) acc headlines))))
 
 (defun org-sql--add-mql-insert-file-tags (acc fstate)
