@@ -2442,8 +2442,8 @@ The database connection will be handled transparently."
             (f-delete tmp-path)
           (if (process-live-p res)
               (set-process-sentinel res (lambda (p e) (f-delete tmp-path)))
-            (f-delete tmp-path))
-          res)))))
+            (f-delete tmp-path)))
+        res))))
 
 ;; TODO add switches to make these async when desired
 (defun org-sql--send-transaction (statements)
