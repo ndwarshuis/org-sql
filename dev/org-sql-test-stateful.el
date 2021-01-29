@@ -37,9 +37,14 @@
 (defconst test-scripts (f-join test-dir "scripts"))
 
 (defun expect-exit-success (res)
-  (-let (((rc . out) res))
-    (if (and (= 0 rc) (equal out "")) (expect t)
-      (error out))))
+  (if org-sql-async
+      (let ((out (or (while (accept-process-output res)) ""))
+            (status (process-status res)))
+        (if (and (eq 'exit status) (equal out "")) (expect t)
+          (error out)))
+    (-let (((rc . out) res))
+      (if (and (= 0 rc) (equal out "")) (expect t)
+        (error out)))))
 
 (defun org-sql--count-rows (config tbl-name)
   ;; hacky AF...
@@ -156,38 +161,54 @@
        (expect (length (org-sql-list-tables)) :to-be 0))))
 
 (defmacro describe-sql-init-spec (config)
-  ;; (-let (((it-namespace1 it-namespace2)
-  ;;         (org-sql--case-mode config
-  ;;           ((mysql sqlite)
-  ;;            nil)
-  ;;           ((postgres sqlserver)
-  ;;            (let ((x '(expect (org-sql-namespace-exists))))
-  ;;              (list `((it "namespace exists" ,x))
-  ;;                    `((it "namespace still exists" ,x))))))))
-  `(describe "Initialization/Reset Spec"
-     (before-all
-       (setq org-sql-db-config ',config))
-     (after-all
-       (ignore-errors
-         (org-sql-drop-tables))
-       (ignore-errors
-         (org-sql-drop-db)))
-     (it "initialize database"
-       (expect-exit-success (org-sql-init-db)))
-     (it "database should exist"
-       (expect (org-sql-db-exists)))
-     ;; ,@it-namespace1
-     (it "tables should exist"
-       (expect (org-sql--sets-equal org-sql-table-names (org-sql-list-tables)
-                                    :test #'equal)))
-     (it "reset database"
-       (expect-exit-success (org-sql-reset-db)))
-     (it "database should still exist"
-       (expect (org-sql-db-exists)))
-     ;; ,@it-namespace2
-     (it "tables should still exist"
-       (expect (org-sql--sets-equal org-sql-table-names (org-sql-list-tables)
-                                    :test #'equal)))))
+  ;; TODO refactor this future, less lazy self...
+  `(progn
+     (describe "Initialization/Reset Spec"
+       (before-all
+         (setq org-sql-db-config ',config))
+       (after-all
+         (ignore-errors
+           (org-sql-drop-tables))
+         (ignore-errors
+           (org-sql-drop-db)))
+       (it "initialize database"
+         (expect-exit-success (org-sql-init-db)))
+       (it "database should exist"
+         (expect (org-sql-db-exists)))
+       (it "tables should exist"
+         (expect (org-sql--sets-equal org-sql-table-names (org-sql-list-tables)
+                                      :test #'equal)))
+       (it "reset database"
+         (expect-exit-success (org-sql-reset-db)))
+       (it "database should still exist"
+         (expect (org-sql-db-exists)))
+       (it "tables should still exist"
+         (expect (org-sql--sets-equal org-sql-table-names (org-sql-list-tables)
+                                      :test #'equal))))
+     (describe "Initialization/Reset Spec (async)"
+       (before-all
+         (setq org-sql-db-config ',config))
+       (after-all
+         (ignore-errors
+           (org-sql-drop-tables))
+         (ignore-errors
+           (org-sql-drop-db)))
+       (it "initialize database"
+         (let ((org-sql-async t))
+           (expect-exit-success (org-sql-init-db))))
+       (it "database should exist"
+         (expect (org-sql-db-exists)))
+       (it "tables should exist"
+         (expect (org-sql--sets-equal org-sql-table-names (org-sql-list-tables)
+                                      :test #'equal)))
+       (it "reset database"
+         (let ((org-sql-async t))
+           (expect-exit-success (org-sql-reset-db))))
+       (it "database should still exist"
+         (expect (org-sql-db-exists)))
+       (it "tables should still exist"
+         (expect (org-sql--sets-equal org-sql-table-names (org-sql-list-tables)
+                                      :test #'equal))))))
 
 (defmacro describe-sql-update-spec (config)
   ;; ASSUME init/reset work
@@ -199,6 +220,29 @@
      (describe-reset-db "single file"
        (it "update database"
          (let ((org-sql-files (list (f-join test-files "foo1.org"))))
+           (expect-exit-success (org-sql-update-db))))
+       (expect-db-has-tables ,config
+         (file_hashes . 1)
+         (file_metadata . 1)
+         (headlines . 1)
+         (headline_closures . 1)
+         (planning_entries . 0)
+         (timestamps . 0)
+         (timestamp_warnings . 0)
+         (timestamp_repeaters . 0)
+         (links . 0)
+         (headline_tags . 0)
+         (headline_properties . 0)
+         (properties . 0)
+         (logbook_entries . 0)
+         (state_changes . 0)
+         (planning_changes . 0)
+         (clocks . 0)))
+
+     (describe-reset-db "single file (async)"
+       (it "update database"
+         (let ((org-sql-files (list (f-join test-files "foo1.org")))
+               (org-sql-async t))
            (expect-exit-success (org-sql-update-db))))
        (expect-db-has-tables ,config
          (file_hashes . 1)
@@ -384,6 +428,35 @@
            (expect-exit-success (org-sql-update-db))))
        (it "clear database"
          (expect-exit-success (org-sql-clear-db)))
+       (it "tables should still exist"
+         (expect (org-sql--sets-equal org-sql-table-names (org-sql-list-tables)
+                                      :test #'equal)))
+       (expect-db-has-tables ,config
+         (file_hashes . 0)
+         (file_metadata . 0)
+         (headlines . 0)
+         (timestamps . 0)
+         (timestamp_warnings . 0)
+         (timestamp_repeaters . 0)
+         (properties . 0)
+         (file_properties . 0)
+         (headline_properties . 0)
+         (file_tags . 0)
+         (headline_tags . 0)
+         (logbook_entries . 0)
+         (planning_changes . 0)
+         (state_changes . 0)
+         (planning_entries . 0)
+         (clocks . 0)))
+     
+     (describe-reset-db "loading a file and clearing (async)"
+       (it "update database"
+         (let ((org-sql-files (list (f-join test-files "foo1.org")))
+               (org-sql-async t))
+           (expect-exit-success (org-sql-update-db))))
+       (it "clear database"
+         (let ((org-sql-async t))
+           (expect-exit-success (org-sql-clear-db))))
        (it "tables should still exist"
          (expect (org-sql--sets-equal org-sql-table-names (org-sql-list-tables)
                                       :test #'equal)))
