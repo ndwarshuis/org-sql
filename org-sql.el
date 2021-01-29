@@ -1094,8 +1094,7 @@ The returned function will depend on the MODE and TYPE."
                      (sqlserver '(("'" . "''")
                                   ("\n" . "+Char(10)+"))))))
               `(->> ',escaped-chars
-                    ;; TODO this doesn't need to replace regexps
-                    (--reduce-from (s-replace-regexp (car it) (cdr it) acc) it)
+                    (--reduce-from (s-replace (car it) (cdr it) acc) it)
                     (format "'%s'")))))))
     `(lambda (it) (if it ,formatter-form "NULL"))))
 
