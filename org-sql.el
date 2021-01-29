@@ -569,6 +569,15 @@ For 'postgres', the following options are in OPTION-PLIST:
 ;;                                    :value-type string))
 ;;   :group 'org-sql)
 
+(defcustom org-sql-async nil
+  "When t database updates will be asynchronous.
+All admin operations will still be synchronous. Note that this
+only spawns a process for the database client command; all
+processing the needs to be performed on org files (parsing to
+make the INSERT statements) will still be synchronous."
+  :type 'boolean
+  :group 'org-sql)
+
 (defcustom org-sql-files nil
   "A list of org files or directories to put into sql database.
 Any directories in this list imply that all files within the
@@ -2214,10 +2223,14 @@ same meaning."
 
 ;;; low-level IO
 
-(defun org-sql--run-command (path args)
+(defun org-sql--run-command (path args async)
   "Execute PATH with ARGS.
 Return a cons cell like (RETURNCODE . OUTPUT)."
-  (org-sql--run-command* path nil args))
+  (if (not async) (org-sql--run-command* path nil args)
+      (make-process :command (cons path args)
+                    :buffer "*Org-SQL*"
+                    :connection-type 'pipe
+                    :name "org-sql-async")))
 
 (defun org-sql--run-command* (path file args)
   "Execute PATH with ARGS and FILE routed to stdin.
@@ -2226,6 +2239,14 @@ Return a cons cell like (RETURNCODE . OUTPUT)."
     (let ((rc (apply #'call-process path file (current-buffer) nil args)))
       (cons rc (buffer-string)))))
 
+;; (defun org-sql--run-command-async (path args)
+;;   (make-process :command (cons path args)
+;;                 :buffer "*Org-SQL*"
+;;                 :connection-type 'pipe
+;;                 :name "org-sql-async"))
+;;     ;; (process-send-string proc (concat payload "\n"))
+;;     ;; (process-send-eof proc)))
+    
 ;;; hashpathpair -> fstate
 
 (defun org-sql--hashpathpair-get-fstate (file-hash file-paths)
@@ -2254,7 +2275,7 @@ Each hashpathpair will have it's :db-path set to nil. Only files in
   (cl-flet
       ((get-md5
         (fp)
-        (org-sql--on-success (org-sql--run-command "md5sum" `(,fp))
+        (org-sql--on-success (org-sql--run-command "md5sum" `(,fp) nil)
           (car (s-split-up-to " " it-out 1))
           (error "Could not get md5")))
        (expand-if-dir
@@ -2309,7 +2330,7 @@ state as the orgfiles on disk."
 
 ;;; SQL command wrappers
 
-(defun org-sql--exec-mysql-command-nodb (args)
+(defun org-sql--exec-mysql-command-nodb (args async)
   "Execute a mysql command with ARGS.
 CONFIG-KEYS is the plist component if `org-sql-db-config'.
 The connection options for the postgres server. will be handled here."
@@ -2326,9 +2347,10 @@ The connection options for the postgres server. will be handled here."
            (if (not password) process-environment
              (cons (format "MYSQL_PWD=%s" password) process-environment))))
       (org-sql--run-command org-sql--mysql-exe
-                            (append h p u protocol-arg batch-args args)))))
+                            (append h p u protocol-arg batch-args args)
+                            async))))
 
-(defun org-sql--exec-postgres-command-nodb (args)
+(defun org-sql--exec-postgres-command-nodb (args async)
   "Execute a postgres command with ARGS.
 CONFIG-KEYS is a list like `org-sql-db-config'."
   (org-sql--with-config-keys (:hostname :port :username :password)
@@ -2343,9 +2365,9 @@ CONFIG-KEYS is a list like `org-sql-db-config'."
             (if (not password) (cons onlyerror process-environment)
               (append (list onlyerror (format "PGPASSWORD=%s" password))
                       process-environment))))
-      (org-sql--run-command org-sql--psql-exe (append h p u noprompt tidyout args)))))
+      (org-sql--run-command org-sql--psql-exe (append h p u noprompt tidyout args) async))))
 
-(defun org-sql--exec-sqlserver-command-nodb (args)
+(defun org-sql--exec-sqlserver-command-nodb (args async)
   (org-sql--with-config-keys (:hostname :port :username :password)
       org-sql-db-config
     ;; TODO support more than just tcp connections
@@ -2356,51 +2378,53 @@ CONFIG-KEYS is a list like `org-sql-db-config'."
           (process-environment
            (if (not password) process-environment
              (cons (format "SQLCMDPASSWORD=%s" password) process-environment))))
-      (org-sql--run-command org-sql--sqlserver-exe (append S U no-headers sep args)))))
+      (org-sql--run-command org-sql--sqlserver-exe (append S U no-headers sep args) async))))
 
-(defun org-sql--exec-sqlite-command (args)
+(defun org-sql--exec-sqlite-command (args async)
   "Execute a sqlite command with ARGS.
 CONFIG is the plist component if `org-sql-db-config'."
   (org-sql--with-config-keys (:path) org-sql-db-config
     (if (not path) (error "No path specified")
-      (org-sql--run-command org-sql--sqlite-exe (cons path args)))))
+      (org-sql--run-command org-sql--sqlite-exe (cons path args) async))))
 
-(defun org-sql--exec-sqlserver-command (args)
+(defun org-sql--exec-sqlserver-command (args async)
   (org-sql--with-config-keys (:database) org-sql-db-config
     (if (not database) (error "No database specified")
-      (org-sql--exec-sqlserver-command-nodb `("-d" ,database ,@args)))))
+      (org-sql--exec-sqlserver-command-nodb `("-d" ,database ,@args) async))))
 
-(defun org-sql--exec-command-in-db (args)
+(defun org-sql--exec-command-in-db (args async)
   (cl-flet
       ((send
-        (fun flag key args)
+        (fun flag key args async)
         (-if-let (target (org-sql--get-config-key key org-sql-db-config))
-            (funcall fun (if flag `(,flag ,target ,@args) (cons target args)))
+            (funcall fun (if flag `(,flag ,target ,@args) (cons target args)) async)
           (error (format "%s not specified" key)))))
   (org-sql--case-mode org-sql-db-config
     (mysql
-     (send #'org-sql--exec-mysql-command-nodb "-D" :database args))
+     (send #'org-sql--exec-mysql-command-nodb "-D" :database args async))
     (pgsql
-     (send #'org-sql--exec-postgres-command-nodb "-d" :database args))
+     (send #'org-sql--exec-postgres-command-nodb "-d" :database args async))
     (sqlite
-     (org-sql--exec-sqlite-command args))
+     (org-sql--exec-sqlite-command args async))
     (sqlserver
-     (send #'org-sql--exec-sqlserver-command-nodb "-d" :database args)))))
+     (send #'org-sql--exec-sqlserver-command-nodb "-d" :database args async)))))
 
-(defun org-sql--send-sql-file (path)
+;; TODO everything sent through this can be async
+(defun org-sql--send-sql-file (path async)
   (org-sql--case-mode org-sql-db-config
     (mysql
-     (org-sql-send-sql (format "source %s" path)))
+     (org-sql-send-sql (format "source %s" path) async))
     (pgsql
-     (org-sql-send-sql (format "\\i %s" path)))
+     (org-sql-send-sql (format "\\i %s" path) async))
     (sqlite
-     (org-sql-send-sql (format ".read %s" path)))
+     (org-sql-send-sql (format ".read %s" path) async))
     (sqlserver
      ;; I think ":r tmp-path" should work here to make this analogous
      ;; with the others
-     (org-sql--exec-sqlserver-command `("-i" ,path)))))
+     (org-sql--exec-sqlserver-command `("-i" ,path) async))))
 
-(defun org-sql--send-sql* (sql-cmd)
+;; TODO everything sent through this can be async
+(defun org-sql--send-sql* (sql-cmd async)
   "Execute SQL-CMD as a separate file input.
 The database connection will be handled transparently."
   ;; (print sql-cmd)
@@ -2413,25 +2437,33 @@ The database connection will be handled transparently."
                       ((mysql pgsql sqlite) sql-cmd)
                       (sqlserver (format "set nocount on; %s" sql-cmd)))))
       (f-write sql-cmd 'utf-8 tmp-path)
-      (let ((res (org-sql--send-sql-file tmp-path)))
-        (f-delete tmp-path)
-        res))))
+      (let ((res (org-sql--send-sql-file tmp-path async)))
+        (if (not async)
+            (progn
+              (f-delete tmp-path)
+              res)
+          (progn
+            (if (process-live-p res)
+                (f-delete tmp-path)
+              (set-process-sentinel res (lambda (p e) (f-delete tmp-path))))
+            (cons 0 "")))))))
 
 ;; TODO add switches to make these async when desired
 (defun org-sql--send-transaction (statements)
   (->> (org-sql--format-sql-transaction org-sql-db-config statements)
        (org-sql-send-sql)))
 
-(defun org-sql--send-transaction-long (statements)
-  (->> (org-sql--format-sql-transaction org-sql-db-config statements)
-       (org-sql--send-sql*)))
+;; (defun org-sql--send-transaction-long (statements)
+;;   (->> (org-sql--format-sql-transaction org-sql-db-config statements)
+;;        (org-sql--send-sql*)))
 
+;; TODO everything sent through this can be async
 (defun org-sql--send-transaction-with-hook (key trans-stmts)
   (-let* (((in-trans after-trans) (org-sql--pull-hook key))
           (ts (->> (append trans-stmts in-trans)
                    (org-sql--format-sql-transaction org-sql-db-config)))
           (is (s-join "" after-trans)))
-    (org-sql--send-sql* (concat ts is))))
+    (org-sql--send-sql* (concat ts is) org-sql-async)))
 
 ;;;
 ;;; Public API
@@ -2452,7 +2484,7 @@ The database connection will be handled transparently."
 ;; Because all supported DBMSs have different layers, these will mean different
 ;; things and must take these restrictions into account.
 
-(defun org-sql-send-sql (sql-cmd)
+(defun org-sql-send-sql (sql-cmd &optional async)
   "Execute SQL-CMD.
 The database connection will be handled transparently."
   (let ((args (org-sql--case-mode org-sql-db-config
@@ -2460,36 +2492,37 @@ The database connection will be handled transparently."
                 (pgsql `("-c" ,sql-cmd))
                 (sqlite `(,sql-cmd))
                 (sqlserver `("-Q" ,(format "SET NOCOUNT ON; %s" sql-cmd))))))
-    (org-sql--exec-command-in-db args)))
+    (org-sql--exec-command-in-db args async)))
 
 ;; table layer
 
-(defun org-sql--run-hook (q hook-def)
-  (org-sql--on-success (pcase hook-def
-                         (`(file ,path) (org-sql--send-sql-file path))
-                         (`(sql ,cmd) (org-sql-send-sql cmd))
-                         (e (error "Unknown hook definition: %s" e)))
-    (when org-sql-debug
-      (let ((fmt (if (equal "" it-out)
-                     (format "%s hook %%S completed successfully" q)
-                   (format "%s hook %%S completed with output: %s" q it-out))))
-        (message fmt it-out)))
-    (let ((fmt (if (equal "" it-out) (format "%s hook %%S failed" q)
-                 (format "%s hook %%S failed with output: %s" q it-out))))
-      (message fmt it-out))))
+;; (defun org-sql--run-hook (q hook-def)
+;;   (org-sql--on-success (pcase hook-def
+;;                          (`(file ,path) (org-sql--send-sql-file path))
+;;                          (`(sql ,cmd) (org-sql-send-sql cmd))
+;;                          (e (error "Unknown hook definition: %s" e)))
+;;     (when org-sql-debug
+;;       (let ((fmt (if (equal "" it-out)
+;;                      (format "%s hook %%S completed successfully" q)
+;;                    (format "%s hook %%S completed with output: %s" q it-out))))
+;;         (message fmt it-out)))
+;;     (let ((fmt (if (equal "" it-out) (format "%s hook %%S failed" q)
+;;                  (format "%s hook %%S failed with output: %s" q it-out))))
+;;       (message fmt it-out))))
 
-(defun org-sql--run-hooks (key)
-  (-when-let (hooks (org-sql--get-config-key key org-sql-db-config))
-    (when hooks
-      (let ((qualifier (pcase key
-                         (:post-init-hooks "Init")
-                         (:post-update-hooks "Update")
-                         (:post-clear-hooks "Clear")
-                         (e (error "Unknown qualifier: %s" e)))))
-        (--each hooks (org-sql--run-hook qualifier it))))))
+;; (defun org-sql--run-hooks (key)
+;;   (-when-let (hooks (org-sql--get-config-key key org-sql-db-config))
+;;     (when hooks
+;;       (let ((qualifier (pcase key
+;;                          (:post-init-hooks "Init")
+;;                          (:post-update-hooks "Update")
+;;                          (:post-clear-hooks "Clear")
+;;                          (e (error "Unknown qualifier: %s" e)))))
+;;         (--each hooks (org-sql--run-hook qualifier it))))))
 
 (defun org-sql--pull-hook (key)
   (-some->> (org-sql--get-config-key key org-sql-db-config)
+    ;; t = INSIDE
     (--map (pcase it
              (`(file ,path) (cons nil (f-read-text path)))
              (`(file+ ,path) (cons t (f-read-text path)))
@@ -2497,6 +2530,7 @@ The database connection will be handled transparently."
              (`(sql+ ,cmd) (cons t cmd))
              (e (error "Unknown hook definition: %s" e))))
     (-separate #'car)
+    ;; (INSIDE AFTER)
     (--map (-map #'cdr it))))
 
 (defun org-sql--append-hook (stmts key)
@@ -2658,7 +2692,7 @@ The database connection will be handled transparently."
     (sqlite
      ;; this is a silly command that should work on all platforms (eg doesn't
      ;; require `touch' to make an empty file)
-     (org-sql--on-success* (org-sql--exec-sqlite-command '(".schema"))
+     (org-sql--on-success* (org-sql--exec-sqlite-command '(".schema") nil)
        ;; return a dummy return-code and stdout message
        '(0 . "")))))
 
@@ -2677,12 +2711,12 @@ The database connection will be handled transparently."
     (mysql
      (org-sql--with-config-keys (:database) org-sql-db-config
        (let ((cmd (format "SHOW DATABASES LIKE '%s';" database)))
-         (org-sql--on-success* (org-sql--exec-mysql-command-nodb `("-e" ,cmd))
+         (org-sql--on-success* (org-sql--exec-mysql-command-nodb `("-e" ,cmd) nil)
            (equal database (car (s-lines it-out)))))))
     (pgsql
      (org-sql--with-config-keys (:database) org-sql-db-config
        (let ((cmd (format "SELECT 1 FROM pg_database WHERE datname='%s';" database)))
-         (org-sql--on-success* (org-sql--exec-postgres-command-nodb `("-c" ,cmd))
+         (org-sql--on-success* (org-sql--exec-postgres-command-nodb `("-c" ,cmd) nil)
            (equal "1" (s-trim it-out))))))
     (sqlite
      (org-sql--with-config-keys (:path) org-sql-db-config
@@ -2691,7 +2725,7 @@ The database connection will be handled transparently."
      (org-sql--with-config-keys (:database) org-sql-db-config
        ;; TODO the 'set nocount on' bit should be common to all commands
        (let ((cmd (format "SET NOCOUNT ON;SELECT 1 FROM sys.databases WHERE name = '%s';" database)))
-         (org-sql--on-success* (org-sql--exec-sqlserver-command-nodb `("-Q" ,cmd))
+         (org-sql--on-success* (org-sql--exec-sqlserver-command-nodb `("-Q" ,cmd) nil)
            (equal "1" (s-trim it-out))))))))
 
 ;;; composite database functions
@@ -2729,6 +2763,7 @@ The database connection will be handled transparently."
   (->> (org-sql--format-mql-table-name org-sql-db-config 'file_hashes)
        (format "DELETE FROM %s;")
        (list)
+       (org-sql--send-transaction-with-hook :post-clear-hooks)))
 
 (defun org-sql-reset-db ()
   (org-sql--case-mode org-sql-db-config
