@@ -2439,14 +2439,11 @@ The database connection will be handled transparently."
       (f-write sql-cmd 'utf-8 tmp-path)
       (let ((res (org-sql--send-sql-file tmp-path async)))
         (if (not async)
-            (progn
-              (f-delete tmp-path)
-              res)
-          (progn
-            (if (process-live-p res)
-                (f-delete tmp-path)
-              (set-process-sentinel res (lambda (p e) (f-delete tmp-path))))
-            (cons 0 "")))))))
+            (f-delete tmp-path)
+          (if (process-live-p res)
+              (set-process-sentinel res (lambda (p e) (f-delete tmp-path)))
+            (f-delete tmp-path))
+          res)))))
 
 ;; TODO add switches to make these async when desired
 (defun org-sql--send-transaction (statements)
