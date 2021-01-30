@@ -2571,10 +2571,14 @@ The database connection will be handled transparently."
      (org-sql--with-config-keys (:schema) org-sql-db-config
        (let ((tbl-names (--> org-sql-table-names
                           (if schema (--map (format "%s.%s" schema it) it) it)
-                          (reverse it))))
+                          (reverse it)))
+             (alter-fmt (->> (list
+                              "IF NOT EXISTS"
+                              "(SELECT * FROM sys.tables where name = '%%1$s')"
+                              "ALTER TABLE %1$s NOCHECK CONSTRAINT ALL;")
+                             (s-join " "))))
          (->> (append
-               (--map (format "ALTER TABLE %s NOCHECK CONSTRAINT ALL;" it) tbl-names)
-               ;; TODO this will crap out if a table doesn't exist
+               (--map (format alter-fmt it) tbl-names)
                (->> (s-join "," tbl-names)
                     (format "DROP TABLE IF EXISTS %s;")
                     (list)))
