@@ -2540,16 +2540,12 @@ The database connection will be handled transparently."
   (->> (org-sql--format-mql-schema org-sql-db-config org-sql--mql-tables)
        (org-sql--send-transaction)))
 
-(defun org-sql-drop-tables ()
-  (org-sql--case-mode org-sql-db-config
+(defun org-org-sql--get-drop-table-statements (config)
+  (org-sql--case-mode config
     (mysql
-     (->> 
-          ;; (format "DROP TABLE IF EXISTS %s;")
-          ;; (format "SET FOREIGN_KEY_CHECKS = 0;%sSET FOREIGN_KEY_CHECKS = 1;")
-      (list "SET FOREIGN_KEY_CHECKS = 0;"
-            (format "DROP TABLE IF EXISTS %s;" (s-join "," org-sql-table-names))
-            "SET FOREIGN_KEY_CHECKS = 1;")
-          (org-sql--send-transaction)))
+     (list "SET FOREIGN_KEY_CHECKS = 0;"
+           (format "DROP TABLE IF EXISTS %s;" (s-join "," org-sql-table-names))
+           "SET FOREIGN_KEY_CHECKS = 1;"))
     (pgsql
      (org-sql--with-config-keys (:schema) org-sql-db-config
        (let ((drop-tables (->> (if schema
@@ -2558,31 +2554,29 @@ The database connection will be handled transparently."
                                  org-sql-table-names)
                                (s-join ",")
                                (format "DROP TABLE IF EXISTS %s CASCADE;")))
-             (drop-types (->> (org-sql--get-enum-type-names org-sql-db-config org-sql--mql-tables)
+             (drop-types (->> (org-sql--get-enum-type-names config org-sql--mql-tables)
                               (-map #'car)
                               (s-join ",")
                               (format "DROP TYPE IF EXISTS %s CASCADE;"))))
-         (org-sql--send-transaction (list drop-tables drop-types)))))
+         (list drop-tables drop-types))))
     (sqlite
-     (->> (--map (format "DROP TABLE IF EXISTS %s;" it) org-sql-table-names)
-          (reverse)
-          (org-sql--send-transaction)))
+     (reverse (--map (format "DROP TABLE IF EXISTS %s;" it) org-sql-table-names)))
     (sqlserver
-     (org-sql--with-config-keys (:schema) org-sql-db-config
+     (org-sql--with-config-keys (:schema) config
        (let ((tbl-names (--> org-sql-table-names
                           (if schema (--map (format "%s.%s" schema it) it) it)
                           (reverse it)))
              (alter-fmt (->> (list
-                              "IF NOT EXISTS"
-                              "(SELECT * FROM sys.tables where name = '%%1$s')"
+                              "IF EXISTS"
+                              "(SELECT * FROM sys.tables where name = '%1$s')"
                               "ALTER TABLE %1$s NOCHECK CONSTRAINT ALL;")
                              (s-join " "))))
-         (->> (append
-               (--map (format alter-fmt it) tbl-names)
-               (->> (s-join "," tbl-names)
-                    (format "DROP TABLE IF EXISTS %s;")
-                    (list)))
-              (org-sql--send-transaction)))))))
+         (-snoc (--map (format alter-fmt it) tbl-names)
+                (format "DROP TABLE IF EXISTS %s;" (s-join "," tbl-names))))))))
+
+(defun org-sql-drop-tables ()
+  (->> (org-org-sql--get-drop-table-statements org-sql-db-config)
+       (org-sql--send-transaction)))
 
 (defun org-sql-list-tables ()
   (-let (((sql-cmd parse-fun)
@@ -2702,10 +2696,18 @@ The database connection will be handled transparently."
 (defun org-sql-reset-db ()
   (org-sql--case-mode org-sql-db-config
     ((mysql pgsql sqlserver)
-     (org-sql-drop-tables))
+     nil)
     (sqlite
      (org-sql-drop-db)))
-  (org-sql-init-db))
+  (let ((drop-tbl-stmts
+         (org-sql--case-mode org-sql-db-config
+           ((mysql pgsql sqlserver)
+            (org-org-sql--get-drop-table-statements org-sql-db-config))
+           (sqlite nil)))
+        (init-stmts
+         (org-sql--format-mql-schema org-sql-db-config org-sql--mql-tables)))
+    (->> (append drop-tbl-stmts init-stmts)
+         (org-sql--send-transaction-with-hook :post-init-hooks))))
 
 ;;; interactive functions
 
