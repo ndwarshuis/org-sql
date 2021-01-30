@@ -200,6 +200,11 @@ to store them. This is in addition to any properties specifified by
                      :type integer)
             (:priority :desc "character value of the priority"
                        :type text)
+            (:stats_cookie_type :desc "type of the statistics cookie"
+                                :type enum
+                                :allowed (fraction percent))
+            (:stats_cookie_value :desc "value of the statistics cookie"
+                                 :type real)
             (:is_archived :desc "true if the headline has an archive tag"
                           :type boolean
                           :constraints (notnull))
@@ -701,18 +706,19 @@ ARGS is a list of additional arguments to pass to `cl-subsetp'."
   "Execute one of ALIST-FORMS depending on TYPE.
 TYPE must be one of 'boolean', 'text', 'enum', or 'integer'."
   (declare (indent 1))
-  (-let (((&alist 'boolean 'char 'enum 'integer 'text 'varchar)
+  (-let (((&alist 'boolean 'char 'enum 'integer 'real 'text 'varchar)
           (--splice (listp (car it))
                     (-let (((keys . form) it))
                       (--map (cons it form) keys))
                     alist-forms)))
-    (when (-any? #'null (list boolean char enum integer text varchar))
+    (when (-any? #'null (list boolean char enum real integer text varchar))
       (error "Must provide form for all types"))
     `(cl-case ,type
        (boolean ,@boolean)
        (char ,@char)
        (enum ,@enum)
        (integer ,@integer)
+       (real ,@real)
        (text ,@text)
        (varchar ,@varchar)
        (t (error "Invalid type: %s" ,type)))))
@@ -1075,7 +1081,7 @@ The returned function will depend on the MODE and TYPE."
                '(if (= it 1) "1" "0"))))
            (enum
             '(format "'%s'" (symbol-name it)))
-           (integer
+           ((integer real)
             '(number-to-string it))
            ((char text varchar)
             (let ((escaped-chars
@@ -1259,6 +1265,10 @@ of the table."
                       "TEXT"))))
       (integer
        "INTEGER")
+      (real
+       (org-sql--case-mode config
+         (mysql "FLOAT")
+         ((pgsql sqlite sqlserver) "REAL")))
       (text
        "TEXT")
       (varchar
@@ -2016,6 +2026,11 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
     (-let* (((&plist :file-hash :lb-config :headline) hstate)
             (supercontents (org-ml-headline-get-supercontents lb-config headline))
             (logbook (org-ml-supercontents-get-logbook supercontents))
+            (sc (-some->> (org-ml-headline-get-statistics-cookie headline)
+                  (org-ml-get-property :value)))
+            ((sc-value sc-type) (pcase sc
+                                  (`(,n ,d) `(,(/ (* 1.0 n) d) fraction))
+                                  (`(,p) `(,p percent))))
             (contents (org-ml-supercontents-get-contents supercontents)))
       (--> (org-sql--add-mql-insert acc headlines
              :file_hash file-hash
@@ -2026,6 +2041,8 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
                          (effort-to-int))
              :priority (-some->> (org-ml-get-property :priority headline)
                          (byte-to-string))
+             :stats_cookie_type sc-type
+             :stats_cookie_value sc-value
              :is_archived (if (org-ml-get-property :archivedp headline) 1 0)
              :is_commented (if (org-ml-get-property :commentedp headline) 1 0)
              :content (-some->> (-map #'org-ml-to-string contents)

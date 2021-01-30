@@ -494,7 +494,7 @@ list then join the cdr of IN with newlines."
       (expect-sql "* headline"
         `(,testing-hashes-mql
           ,testing-metadata-mql
-          (headlines (,testing-hash 1 "headline" nil nil nil 0 0 nil))
+          (headlines (,testing-hash 1 "headline" nil nil nil nil nil 0 0 nil))
           (headline_closures (,testing-hash 1 1 0)))))
 
     (it "two"
@@ -502,13 +502,13 @@ list then join the cdr of IN with newlines."
                         "* another headline")
         `(,testing-hashes-mql
           ,testing-metadata-mql
-          (headlines (,testing-hash 12 "another headline" nil nil nil 0 0 nil)
-                     (,testing-hash 1 "headline" nil nil nil 0 0 nil))
+          (headlines (,testing-hash 12 "another headline" nil nil nil nil nil 0 0 nil)
+                     (,testing-hash 1 "headline" nil nil nil nil nil 0 0 nil))
           (headline_closures (,testing-hash 12 12 0)
                              (,testing-hash 1 1 0)))))
 
     (it "fancy"
-      (expect-sql (list "* TODO [#A] COMMENT another headline"
+      (expect-sql (list "* TODO [#A] COMMENT another headline [1/2]"
                         ":PROPERTIES:"
                         ":Effort: 0:30"
                         ":END:"
@@ -516,7 +516,8 @@ list then join the cdr of IN with newlines."
         `(,testing-hashes-mql
           ,testing-metadata-mql
           (headlines
-           (,testing-hash 1 "another headline" "TODO" 30 "A" 0 1 "this /should/ appear\n"))
+           (,testing-hash 1 "another headline [1/2]" "TODO" 30 "A" fraction 0.5
+                          0 1 "this /should/ appear\n"))
           (headline_closures
            (,testing-hash 1 1 0)))))
 
@@ -536,15 +537,15 @@ list then join the cdr of IN with newlines."
           (= 2 (org-ml-get-property :level h)))))
       `(,testing-hashes-mql
         ,testing-metadata-mql
-        (headlines (,testing-hash 1 "headline" nil nil nil 0 0 nil))
+        (headlines (,testing-hash 1 "headline" nil nil nil nil nil 0 0 nil))
         (headline_closures (,testing-hash 1 1 0)))
       
       "nested (no predicate)"
       nil
       `(,testing-hashes-mql
         ,testing-metadata-mql
-        (headlines (,testing-hash 12 "nested headline" nil nil nil 0 0 nil)
-                   (,testing-hash 1 "headline" nil nil nil 0 0 nil))
+        (headlines (,testing-hash 12 "nested headline" nil nil nil nil nil 0 0 nil)
+                   (,testing-hash 1 "headline" nil nil nil nil nil 0 0 nil))
         (headline_closures (,testing-hash 12 12 0)
                            (,testing-hash 12 1 1)
                            (,testing-hash 1 1 0))))
@@ -553,7 +554,7 @@ list then join the cdr of IN with newlines."
       (expect-sql "* headline :ARCHIVE:"
         `(,testing-hashes-mql
           ,testing-metadata-mql
-          (headlines (,testing-hash 1 "headline" nil nil nil 1 0 nil))
+          (headlines (,testing-hash 1 "headline" nil nil nil nil nil 1 0 nil))
           (headline_closures (,testing-hash 1 1 0))))))
 
   (describe "planning entries"
