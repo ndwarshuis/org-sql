@@ -67,6 +67,8 @@
 (defun expect-db-has-table-contents (tbl-name &rest rows)
   (declare (indent 1))
   (let ((out (->> (org-sql-dump-table tbl-name))))
+    (print out)
+    (print rows)
     (->> (--zip-with (->> (--zip-with (if (functionp it)
                                           (funcall it other)
                                         (equal it other))
@@ -219,7 +221,6 @@
                                       :test #'equal))))))
 
 (defun org-sql-is-epoch (x)
-  (print x)
   (or (null x) (and (stringp x) (s-matches? "[0-9]+" x))))
 
 (defmacro describe-sql-update-spec (config)
