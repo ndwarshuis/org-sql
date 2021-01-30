@@ -899,8 +899,6 @@ PLIST is a property list of the columns and values to insert."
 ;;   `(list ',tbl-name
 ;;          (list 'where ,@where)))
 
-;; TODO I forgot select
-
 ;; external state
 
 ;; TODO this is hilariously inefficient
@@ -1221,8 +1219,6 @@ separated by SEP."
         (pcase constraint
           ('notnull "NOT NULL")
           ('unique "UNIQUE")
-          ;; TODO add CHECK?
-          ;; TODO add PRIMARY KEY?
           (e (error "Unknown constraint %s" e)))))
     (s-join " " (-map #'format-constraint mql-column-constraints))))
 
@@ -1232,7 +1228,7 @@ CONFIG is the `org-sql-db-config' list and TBL-NAME is the name
 of the table."
   (-let* (((column-name . (&plist :type :type-id)) mql-column)
           (column-name* (org-sql--format-mql-column-name column-name)))
-    ;; TODO use ntext for sql server instead of text?
+    ;; TODO use nvarchar(max) for text and just nvarchar in sql server
     (org-sql--case-type type
       (boolean
        (org-sql--case-mode config
@@ -1302,7 +1298,6 @@ foreign key constraint. CONFIG is the `org-sql-db-config' list."
                (format "PRIMARY KEY (%s)"))))
        (format-foreign
         (keyvals)
-        ;; TODO shouldn't need 'on update' anymore
         (-let* (((&plist :ref :keys :parent-keys :on_delete) keyvals)
                 (ref* (org-sql--format-mql-table-name config ref))
                 (keys* (->> keys (-map #'org-sql--format-mql-column-name) (s-join ",")))
@@ -1460,8 +1455,7 @@ transaction. MODE is the SQL mode."
 
 ;;; org-element/org-ml wrapper functions
 
-;; TODO these are all functions that may be included in org-ml in the future
-        
+;; TODO use org-ml-get-parents for this
 (defun org-sql--headline-get-path (headline)
   "Return the path for HEADLINE node.
 Path will be a list of offsets for the parent headline and its
@@ -2408,7 +2402,6 @@ CONFIG is the plist component if `org-sql-db-config'."
     (sqlserver
      (send #'org-sql--exec-sqlserver-command-nodb "-d" :database args async)))))
 
-;; TODO everything sent through this can be async
 (defun org-sql--send-sql-file (path async)
   (org-sql--case-mode org-sql-db-config
     (mysql
@@ -2422,11 +2415,9 @@ CONFIG is the plist component if `org-sql-db-config'."
      ;; with the others
      (org-sql--exec-sqlserver-command `("-i" ,path) async))))
 
-;; TODO everything sent through this can be async
 (defun org-sql--send-sql* (sql-cmd async)
   "Execute SQL-CMD as a separate file input.
 The database connection will be handled transparently."
-  ;; (print sql-cmd)
   ;; TODO I don't think there are cases where I want to send a nil cmd, so
   ;; nil should be an error
   (if (not sql-cmd) '(0 . "")
@@ -2444,16 +2435,10 @@ The database connection will be handled transparently."
             (f-delete tmp-path)))
         res))))
 
-;; TODO add switches to make these async when desired
 (defun org-sql--send-transaction (statements)
   (->> (org-sql--format-sql-transaction org-sql-db-config statements)
        (org-sql-send-sql)))
 
-;; (defun org-sql--send-transaction-long (statements)
-;;   (->> (org-sql--format-sql-transaction org-sql-db-config statements)
-;;        (org-sql--send-sql*)))
-
-;; TODO everything sent through this can be async
 (defun org-sql--send-transaction-with-hook (key trans-stmts)
   (-let* (((in-trans after-trans) (org-sql--pull-hook key))
           (ts (->> (append trans-stmts in-trans)
@@ -2537,7 +2522,6 @@ The database connection will be handled transparently."
   (->> (org-sql--format-mql-schema org-sql-db-config org-sql--mql-tables)
        (org-sql--send-transaction)))
 
-;; TODO add function to drop all tables?
 (defun org-sql-drop-tables ()
   (org-sql--case-mode org-sql-db-config
     (mysql
@@ -2615,70 +2599,6 @@ The database connection will be handled transparently."
     (org-sql--on-success* (org-sql-send-sql sql-cmd)
       (funcall parse-fun it-out))))
 
-;; TODO postgres also has custom types, so add a types layer
-
-;; namespace layer
-
-;; (defun org-sql-create-namespace ()
-;;   "Create the configured database."
-;;   (org-sql--case-mode org-sql-db-config
-;;     ((mysql sqlite)
-;;      (error "Namespace schemas only exist for Postgres and SQL Server"))
-;;     (pgsql
-;;      (org-sql--with-config-keys (:schema) org-sql-db-config
-;;        (let ((cmd (format "CREATE SCHEMA IF NOT EXISTS %s;" (or schema "public"))))
-;;          (org-sql--send-sql cmd))))
-;;     (sqlserver
-;;      (org-sql--with-config-keys (:schema) org-sql-db-config
-;;        (let* ((select (format "SELECT * FROM sys.schemas WHERE name = N'%s'" schema))
-;;               (create (format "CREATE SCHEMA %s" schema))
-;;               (cmd (format "IF NOT EXISTS (%s) EXEC('%s');" select create)))
-;;          (org-sql--send-sql cmd))))))
-
-;; (defun org-sql-drop-namespace ()
-;;   (org-sql--case-mode org-sql-db-config
-;;     ((mysql sqlite)
-;;      (error "Namespace schemas only exist for Postgres and SQL Server"))
-;;     (pgsql
-;;      (org-sql--with-config-keys (:schema) org-sql-db-config
-;;        (let ((cmd (format "DROP SCHEMA IF EXISTS %s CASCADE;" (or schema "public"))))
-;;          (org-sql--send-sql cmd))))
-;;     (sqlserver
-;;      ;; drop all tables manually first
-;;      (org-sql-drop-tables)
-;;      (org-sql--with-config-keys (:schema) org-sql-db-config
-;;        (when schema
-;;          (let* ((select (format "SELECT * FROM sys.schemas WHERE name = N'%s'" schema))
-;;                 (drop (format "DROP SCHEMA %s" schema))
-;;                 (cmd (format "IF EXISTS (%s) EXEC('%s');" select drop)))
-;;            (org-sql--send-sql cmd)))))))
-
-;; (defun org-sql-namespace-exists ()
-;;   ;; NOTE: namespace = "schema" for all databases that have "schemas"
-;;   (org-sql--case-mode org-sql-db-config
-;;     ((mysql sqlite)
-;;      (error "Namespace schemas only exist for Postgres and SQL Server"))
-;;     (pgsql
-;;      (org-sql--with-config-keys (:database :schema) org-sql-db-config
-;;        (org-sql--on-success* (org-sql--send-sql "\\dn")
-;;          (--> (s-split "\n" it-out)
-;;            (--map (s-split "|" it) it)
-;;            ;; TODO this (or schema "public") thing is silly and should be
-;;            ;; refactored into something civilized (see other instances below)
-;;            (--find (and (equal (car it) (or schema "public"))
-;;                         (equal (cadr it) database))
-;;                    it)
-;;            (and it t)))))
-;;     (sqlserver
-;;      (org-sql--with-config-keys (:database :schema) org-sql-db-config
-;;        (let ((cmd (format "select name from [%s].sys.schemas;" database)))
-;;          (org-sql--on-success* (org-sql--send-sql cmd)
-;;            (--> (s-trim it-out)
-;;              (s-split "\n" it)
-;;              (-map #'s-trim it)
-;;              (--find (equal it (or schema "dbo")) it)
-;;              (and it t))))))))
-
 ;; database layer
 
 (defun org-sql-create-db ()
@@ -2738,11 +2658,8 @@ The database connection will be handled transparently."
 
 (defun org-sql-init-db ()
   (org-sql--case-mode org-sql-db-config
-    (mysql
+    ((mysql pgsql sqlserver)
      nil)
-    ((pgsql sqlserver)
-     nil)
-     ;; (org-sql-create-namespace))
     (sqlite
      (org-sql-create-db)))
   (->> (org-sql--format-mql-schema org-sql-db-config org-sql--mql-tables)
@@ -2755,7 +2672,6 @@ The database connection will be handled transparently."
        (org-sql--send-transaction-with-hook :post-update-hooks)))
 
 (defun org-sql-clear-db ()
-  ;; (org-sql--on-success*
   (->> (org-sql--format-mql-table-name org-sql-db-config 'file_hashes)
        (format "DELETE FROM %s;")
        (list)
@@ -2763,14 +2679,8 @@ The database connection will be handled transparently."
 
 (defun org-sql-reset-db ()
   (org-sql--case-mode org-sql-db-config
-    ;; TODO might make sense to provide this as an option for the others (eg
-    ;; maybe they don't want to delete an entire schema when dropping the
-    ;; tables will do)
-    (mysql
+    ((mysql pgsql sqlserver)
      (org-sql-drop-tables))
-    ((pgsql sqlserver)
-     (org-sql-drop-tables))
-     ;; (org-sql-drop-namespace))
     (sqlite
      (org-sql-drop-db)))
   (org-sql-init-db))
@@ -2780,7 +2690,6 @@ The database connection will be handled transparently."
 (defun org-sql-user-update ()
   "Update the Org SQL database."
   (interactive)
-  ;; TODO need to see if schema is correct?
   (message "Updating Org SQL database")
   (let ((out (org-sql-update-db)))
     (when org-sql-debug
