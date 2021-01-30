@@ -1479,17 +1479,17 @@ parents (with HEADLINE on the right end of the list)."
   (->> (org-ml-get-property :tags headline)
        (-map #'substring-no-properties)))
 
-(defun org-sql--headline-get-contents (headline)
-  "Return the contents of HEADLINE.
-This includes everything in the headline's section element that
-is not the planning, logbook drawer, or property drawer."
-  (-some->> (org-ml-headline-get-section headline)
-    ;; TODO need a function in org-ml that returns non-meta
-    ;; TODO this only works when `org-log-into-drawer' is defined
-    (--remove (org-ml-is-any-type '(planning property-drawer) it))
-    (--remove (and (org-ml-is-type 'drawer it)
-                   (equal (org-element-property :drawer-name it)
-                          org-log-into-drawer)))))
+;; (defun org-sql--headline-get-contents (headline)
+;;   "Return the contents of HEADLINE.
+;; This includes everything in the headline's section element that
+;; is not the planning, logbook drawer, or property drawer."
+;;   (-some->> (org-ml-headline-get-section headline)
+;;     ;; TODO need a function in org-ml that returns non-meta
+;;     ;; TODO this only works when `org-log-into-drawer' is defined
+;;     (--remove (org-ml-is-any-type '(planning property-drawer) it))
+;;     (--remove (and (org-ml-is-type 'drawer it)
+;;                    (equal (org-element-property :drawer-name it)
+;;                           org-log-into-drawer)))))
 
 (defun org-sql--split-paragraph (paragraph)
   "Split PARAGRAPH by first line-break node."
@@ -1667,8 +1667,7 @@ HSTATE is a list given by `org-sql--to-hstate'."
             (let ((ts-offset (+ header-offset (car match-bounds))))
               (->> (org-ml-get-children header-node)
                    (--find (and (org-ml-is-type 'timestamp it)
-                                ;; TODO make this function public
-                                (org-ml--property-is-eq :begin ts-offset it)))))))
+                                (eq (org-ml-get-property :begin it) ts-offset)))))))
          (get-substring
           (match-bounds)
           (when match-bounds
@@ -1772,7 +1771,6 @@ returned by `org-sql--to-hstate'."
              ((memq entry-type org-sql-excluded-logbook-types)
               acc)
              ((memq entry-type '(redeadline deldeadline reschedule delschedule))
-                 ;; TODO this is inconsistent and it bugs me
               (org-sql--add-mql-insert-planning-change acc hstate entry))
              ((eq entry-type 'state)
               (org-sql--add-mql-insert-state-change acc entry))
@@ -2323,55 +2321,75 @@ state as the orgfiles on disk."
 
 ;;; SQL command wrappers
 
-(defun org-sql--exec-mysql-command-nodb (args async)
-  "Execute a mysql command with ARGS.
-CONFIG-KEYS is the plist component if `org-sql-db-config'.
-The connection options for the postgres server. will be handled here."
-  (org-sql--with-config-keys (:hostname :port :username :password)
-      org-sql-db-config
-    (let ((h (-some->> hostname (list "-h")))
-          (p (-some->> port (list "-P")))
-          (u (-some->> username (list "-u")))
-          ;; TODO add a switch for this?
-          (protocol-arg '("--protocol=TCP"))
-          ;; TODO should this have the -r option?
-          (batch-args '("-Ns"))
-          (process-environment
-           (if (not password) process-environment
-             (cons (format "MYSQL_PWD=%s" password) process-environment))))
-      (org-sql--run-command org-sql--mysql-exe
-                            (append h p u protocol-arg batch-args args)
-                            async))))
+(defun org-sql--append-process-environment (env &rest pairs)
+  (declare (indent 1))
+  (->> (-partition 2 pairs)
+       (--map (and (cadr it) (format "%s=%s" (car it) (cadr it))))
+       (-non-nil)
+       (append process-environment env)))
 
-(defun org-sql--exec-postgres-command-nodb (args async)
+(defun org-sql--exec-mysql-command-nodb (fargs async)
+  (org-sql--with-config-keys (:defaults :defaults-extra :hostname :port
+                                        :username :password :args :env)
+      org-sql-db-config
+    (let ((all-args (append
+                     ;; either of these must be the first option if given
+                     (or (-some->> defaults
+                           (format "--defaults-file=%s")
+                           (list))
+                         (-some->> defaults-extra
+                           (format "--defaults-extra-file=%s")
+                           (list)))
+                     (-some->> hostname (list "-h"))
+                     (-some->> port (list "-P"))
+                     (-some->> username (list "-u"))
+                     ;; this makes the output tidy (no headers or extra output)
+                     '("-Ns")
+                     args
+                     fargs))
+          (process-environment (org-sql--append-process-environment env
+                                 "MYSQL_PWD" password)))
+      (org-sql--run-command org-sql--mysql-exe all-args async))))
+
+(defun org-sql--exec-postgres-command-nodb (fargs async)
   "Execute a postgres command with ARGS.
 CONFIG-KEYS is a list like `org-sql-db-config'."
-  (org-sql--with-config-keys (:hostname :port :username :password)
+  (org-sql--with-config-keys (:service-file :pass-file :hostname :port
+                                            :username :password :args :env)
       org-sql-db-config
-    (let* ((h (-some->> hostname (list "-h")))
-           (p (-some->> port (list "-p")))
-           (u (-some->> username (list "-U")))
-           (noprompt '("-w"))
-           (tidyout '("-qAt"))
-           (onlyerror "PGOPTIONS=-c client_min_messages=WARNING")
-           (process-environment
-            (if (not password) (cons onlyerror process-environment)
-              (append (list onlyerror (format "PGPASSWORD=%s" password))
-                      process-environment))))
-      (org-sql--run-command org-sql--psql-exe (append h p u noprompt tidyout args) async))))
+    (let ((all-args (append
+                     (-some->> hostname (list "-h"))
+                     (-some->> port (list "-p"))
+                     (-some->> username (list "-U"))
+                     ;; don't prompt for password
+                     '("-w")
+                     ;; make output tidy (tabular, quiet, and no alignment)
+                     '("-qAt")
+                     args
+                     fargs))
+          (process-environment (org-sql--append-process-environment env
+                                 "PGPASSWORD" password
+                                 "PGSERVICEFILE" service-file
+                                 "PGPASSFILE" pass-file
+                                 ;; suppress warning messages
+                                 "PGOPTIONS" "-c client_min_messages=WARNING")))
+      (org-sql--run-command org-sql--psql-exe all-args async))))
 
-(defun org-sql--exec-sqlserver-command-nodb (args async)
-  (org-sql--with-config-keys (:hostname :port :username :password)
+(defun org-sql--exec-sqlserver-command-nodb (fargs async)
+  (org-sql--with-config-keys (:server :username :password :args :env)
       org-sql-db-config
-    ;; TODO support more than just tcp connections
-    (let ((S (list "-S" (format "tcp:%s,%s" hostname port)))
-          (U (-some->> username (list "-U")))
-          (sep '("-s" "|"))
-          (no-headers '("-h" "-1"))
-          (process-environment
-           (if (not password) process-environment
-             (cons (format "SQLCMDPASSWORD=%s" password) process-environment))))
-      (org-sql--run-command org-sql--sqlserver-exe (append S U no-headers sep args) async))))
+    (let ((all-args (append
+                     (-some->> server (list "-S"))
+                     (-some->> username (list "-U"))
+                     ;; use pipe char as the separator
+                     '("-s" "|")
+                     ;; don't use headers
+                     '("-h" "-1")
+                     args
+                     fargs))
+          (process-environment (org-sql--append-process-environment env
+                                 "SQLCMDPASSWORD" password)))
+      (org-sql--run-command org-sql--sqlserver-exe all-args async))))
 
 (defun org-sql--exec-sqlite-command (args async)
   "Execute a sqlite command with ARGS.

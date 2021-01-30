@@ -587,24 +587,23 @@
   "MariaDB"
   (mysql :database "org_sql"
          :port "60100"
-         :hostname "localhost"
+         :hostname "127.0.0.1"
          :username "org_sql"
          :password "org_sql")
 
   "MySQL"
   (mysql :database "org_sql"
          :port "60200"
-         :hostname "localhost"
+         :hostname "127.0.0.1"
          :username "org_sql"
          :password "org_sql")
 
   ;; TODO add default schema
   "SQL Server: non-default schema"
   (sqlserver :database "org_sql"
-              :port "60300"
-              :schema "nondbo"
-              :hostname "localhost"
-              :username "org_sql"
-              :password "org_sql333###"))
+             :schema "nondbo"
+             :server "tcp:localhost,60300"
+             :username "org_sql"
+             :password "org_sql333###"))
 
 ;;; org-sql-test-stateful ends here
