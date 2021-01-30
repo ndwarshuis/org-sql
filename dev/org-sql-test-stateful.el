@@ -67,7 +67,15 @@
 (defun expect-db-has-table-contents (tbl-name &rest rows)
   (declare (indent 1))
   (let ((out (->> (org-sql-dump-table tbl-name))))
-    (expect out :to-equal rows)))
+    (->> (--zip-with (->> (--zip-with (if (functionp it)
+                                          (funcall it other)
+                                        (equal it other))
+                                      it other)
+                          (--all? (eq t it)))
+                     rows out)
+         (--all? (eq t it))
+         (expect))))
+    ;; (expect out :to-equal rows)))
 
 (defmacro describe-reset-db (header &rest body)
   (declare (indent 1))
@@ -210,6 +218,9 @@
          (expect (org-sql--sets-equal org-sql-table-names (org-sql-list-tables)
                                       :test #'equal))))))
 
+(defun org-sql-is-epoch (x)
+  (or (null x) (and (stringp x) (s-matches? "[0-9]+" x))))
+
 (defmacro describe-sql-update-spec (config)
   ;; ASSUME init/reset work
   `(describe "Update DB Spec"
@@ -343,7 +354,7 @@
          (it "test for file in tables"
            (expect-db-has-table-contents 'file_metadata
              `(,test-path "106e9f12c9e4ff3333425115d148fbd4" "1000" "1000"
-                          "1600315628" "1600315628" "-rw-r--r--"))))
+                          org-sql-is-epoch org-sql-is-epoch "-rw-r--r--"))))
        (describe "rename inserted file"
          ;; "rename" here means to point `org-sql-files' to an identical file
          ;; with a different name
@@ -355,7 +366,7 @@
          (it "test for file in tables"
            (expect-db-has-table-contents 'file_metadata
              `(,test-path "106e9f12c9e4ff3333425115d148fbd4" "1000" "1000"
-                          "1611105708" "1611105708" "-rw-r--r--")))))
+                          org-sql-is-epoch org-sql-is-epoch "-rw-r--r--")))))
 
      (describe-reset-db "deleted file"
        (it "update database"
