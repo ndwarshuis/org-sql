@@ -219,6 +219,7 @@
                                       :test #'equal))))))
 
 (defun org-sql-is-epoch (x)
+  (print x)
   (or (null x) (and (stringp x) (s-matches? "[0-9]+" x))))
 
 (defmacro describe-sql-update-spec (config)
