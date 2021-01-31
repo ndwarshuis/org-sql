@@ -771,8 +771,8 @@ list then join the cdr of IN with newlines."
                                           ":LOGBOOK:"
                                           clock
                                           ":END:")
-            `((clocks (,testing-hash 1 20 ,(org-ts-to-unixtime ts0)
-                                     ,(org-ts-to-unixtime ts1) nil))))))
+            `((clocks (1 1 ,(org-ts-to-unixtime ts0)
+                         ,(org-ts-to-unixtime ts1) nil))))))
 
       (it "single (open)"
         (let* ((ts "[2112-01-01 Fri 00:00]")
@@ -781,7 +781,7 @@ list then join the cdr of IN with newlines."
                                           ":LOGBOOK:"
                                           clock
                                           ":END:")
-            `((clocks (,testing-hash 1 20 ,(org-ts-to-unixtime ts) nil nil))))))
+            `((clocks (1 1 ,(org-ts-to-unixtime ts) nil nil))))))
 
       (let* ((ts "[2112-01-01 Fri 00:00]")
              (clock (format "CLOCK: %s" ts)))
@@ -792,12 +792,12 @@ list then join the cdr of IN with newlines."
                                               ":END:")
           "single (note - included)"
           ((org-log-note-clock-out t))
-          `((clocks (,testing-hash 1 20 ,(org-ts-to-unixtime ts) nil "random")))
+          `((clocks (1 1 ,(org-ts-to-unixtime ts) nil "random")))
 
           "single (note - excluded)"
           ((org-log-note-clock-out t)
            (org-sql-exclude-clock-notes t))
-          `((clocks (,testing-hash 1 20 ,(org-ts-to-unixtime ts) nil nil)))))
+          `((clocks (1 1 ,(org-ts-to-unixtime ts) nil nil)))))
 
       (it "multiple"
         (let* ((ts0 "[2112-01-01 Fri 00:00]")
@@ -809,8 +809,8 @@ list then join the cdr of IN with newlines."
                                           clock0
                                           clock1
                                           ":END:")
-            `((clocks (,testing-hash 1 50 ,(org-ts-to-unixtime ts1) nil nil)
-                      (,testing-hash 1 20 ,(org-ts-to-unixtime ts0) nil nil)))))))
+            `((clocks (2 1 ,(org-ts-to-unixtime ts1) nil nil)
+                      (1 1 ,(org-ts-to-unixtime ts0) nil nil)))))))
 
     (describe "items"
       (let* ((ts "[2112-01-01 Fri 00:00]")
@@ -950,7 +950,7 @@ list then join the cdr of IN with newlines."
                                                           clock
                                                           ":END:"
                                                           (format "- %s" header))
-            `((clocks (,testing-hash 1 20 ,(org-ts-to-unixtime ts0)
+            `((clocks (1 1 ,(org-ts-to-unixtime ts0)
                                      ,(org-ts-to-unixtime ts1) nil))
               (logbook_entries (,testing-hash 1 88 "done"
                                               ,(org-ts-to-unixtime ts)
@@ -969,9 +969,8 @@ list then join the cdr of IN with newlines."
                                                           " - this is a clock note"
                                                           ":END:"
                                                           (format "- %s" header))
-            `((clocks (,testing-hash 1 20 ,(org-ts-to-unixtime ts0)
-                                     ,(org-ts-to-unixtime ts1)
-                                     "this is a clock note"))
+            `((clocks (1 1 ,(org-ts-to-unixtime ts0)
+                         ,(org-ts-to-unixtime ts1) "this is a clock note"))
               (logbook_entries (,testing-hash 1 112 "done"
                                               ,(org-ts-to-unixtime ts)
                                               ,header nil))))))
@@ -987,8 +986,8 @@ list then join the cdr of IN with newlines."
                                                           ":LOGBOOK:"
                                                           clock
                                                           ":END:")
-            `((clocks (,testing-hash 1 58 ,(org-ts-to-unixtime ts0)
-                                     ,(org-ts-to-unixtime ts1) nil))
+            `((clocks (1 1 ,(org-ts-to-unixtime ts0)
+                         ,(org-ts-to-unixtime ts1) nil))
               (logbook_entries (,testing-hash 1 10 "done"
                                               ,(org-ts-to-unixtime ts)
                                               ,header nil)))))) 
@@ -1006,9 +1005,8 @@ list then join the cdr of IN with newlines."
                                                           clock
                                                           "- this is a clock note"
                                                           ":END:")
-            `((clocks (,testing-hash 1 58 ,(org-ts-to-unixtime ts0)
-                                     ,(org-ts-to-unixtime ts1)
-                                     "this is a clock note"))
+            `((clocks (1 1 ,(org-ts-to-unixtime ts0)
+                         ,(org-ts-to-unixtime ts1) "this is a clock note"))
               (logbook_entries (,testing-hash 1 10 "done"
                                               ,(org-ts-to-unixtime ts)
                                               ,header nil)))))))
@@ -1060,8 +1058,8 @@ list then join the cdr of IN with newlines."
                                           ":CLOCKING:"
                                           clock
                                           ":END:")
-            `((clocks (,testing-hash 1 21 ,(org-ts-to-unixtime ts0)
-                                     ,(org-ts-to-unixtime ts1) nil))))))
+            `((clocks (1 1 ,(org-ts-to-unixtime ts0)
+                         ,(org-ts-to-unixtime ts1) nil))))))
 
       (it "clock drawer (property)"
         (let* ((ts0 "[2112-01-01 Fri 00:00]")
@@ -1074,8 +1072,8 @@ list then join the cdr of IN with newlines."
                                           ":CLOCKING:"
                                           clock
                                           ":END:")
-            `((clocks (,testing-hash 1 69 ,(org-ts-to-unixtime ts0)
-                                     ,(org-ts-to-unixtime ts1) nil))))))
+            `((clocks (1 1 ,(org-ts-to-unixtime ts0)
+                         ,(org-ts-to-unixtime ts1) nil))))))
 
       (it "clock note (global)"
         (let* ((org-log-note-clock-out t)
@@ -1087,9 +1085,8 @@ list then join the cdr of IN with newlines."
                                           clock
                                           "- clock out note"
                                           ":END:")
-            `((clocks (,testing-hash 1 20 ,(org-ts-to-unixtime ts0)
-                                     ,(org-ts-to-unixtime ts1)
-                                     "clock out note"))))))
+            `((clocks (1 1 ,(org-ts-to-unixtime ts0)
+                         ,(org-ts-to-unixtime ts1) "clock out note"))))))
 
       (it "clock note (file)"
         (let* ((ts0 "[2112-01-01 Fri 00:00]")
@@ -1101,9 +1098,8 @@ list then join the cdr of IN with newlines."
                                           clock
                                           "- clock out note"
                                           ":END:")
-            `((clocks (,testing-hash 1 48 ,(org-ts-to-unixtime ts0)
-                                     ,(org-ts-to-unixtime ts1)
-                                     "clock out note")))))))))
+            `((clocks (1 1 ,(org-ts-to-unixtime ts0)
+                         ,(org-ts-to-unixtime ts1) "clock out note")))))))))
 
 (defun format-with (config type value)
   (funcall (org-sql--compile-mql-format-function config type) value))

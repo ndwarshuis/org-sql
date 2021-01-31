@@ -427,11 +427,9 @@ to store them. This is in addition to any properties specifified by
           (clocks
            (desc . "Each row stores one clock entry")
            (columns
-            ,(file-hash-col "clock")
-            ;; ,(headline-offset-col "clock" t)
+            (:clock_id :desc "id of this clock"
+                       :type integer)
             ,(headline-id-col "clock" t)
-            (:clock_offset :desc "offset of this clock"
-                           :type integer)
             (:time_start :desc "timestamp for the start of this clock"
                          :type integer)
             (:time_end :desc "timestamp for the end of this clock"
@@ -439,11 +437,9 @@ to store them. This is in addition to any properties specifified by
             (:clock_note :desc "the note entry beneath this clock"
                          :type text))
            (constraints
-            (primary :keys (:file_hash :clock_offset))
+            (primary :keys (:clock_id))
             (foreign :ref headlines
-                     ;; :keys (:file_hash :headline_offset)
                      :keys (:headline_id)
-                     ;; :parent-keys (:file_hash :headline_offset)
                      :parent-keys (:headline_id)
                      :on_delete cascade)))
 
@@ -1848,17 +1844,17 @@ NOTE-TEXT is either a string or nil representing the clock-note.
 HSTATE is a plist as returned by `org-sql--to-hstate'."
   (-let (((&plist :headline :file-hash) hstate)
          (value (org-ml-get-property :value clock)))
-    (org-sql--add-mql-insert acc clocks
-      :file_hash file-hash
-      :headline_id (org-sql--acc-get :headline-id acc)
-      :clock_offset (org-ml-get-property :begin clock)
-      :time_start (-some-> value
-                    (org-ml-timestamp-get-start-time)
-                    (org-ml-time-to-unixtime))
-      :time_end (-some-> value
-                  (org-ml-timestamp-get-end-time)
-                  (org-ml-time-to-unixtime))
-      :clock_note (unless org-sql-exclude-clock-notes note-text))))
+    (--> (org-sql--add-mql-insert acc clocks
+           :clock_id (org-sql--acc-get :clock-id acc) 
+           :headline_id (org-sql--acc-get :headline-id acc)
+           :time_start (-some-> value
+                         (org-ml-timestamp-get-start-time)
+                         (org-ml-time-to-unixtime))
+           :time_end (-some-> value
+                       (org-ml-timestamp-get-end-time)
+                       (org-ml-time-to-unixtime))
+           :clock_note (unless org-sql-exclude-clock-notes note-text))
+      (org-sql--acc-incr :clock-id it))))
 
 (defun org-sql--add-mql-insert-headline-logbook-clocks (acc hstate logbook)
   "Add MQL-inserts for LOGBOOK to ACC.
