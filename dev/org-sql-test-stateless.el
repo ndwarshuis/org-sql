@@ -813,6 +813,17 @@ list then join the cdr of IN with newlines."
                       (1 1 ,(org-ts-to-unixtime ts0) nil nil)))))))
 
     (describe "items"
+      (it "multiple"
+        (let* ((ts0 "[2112-01-01 Fri 00:00]")
+               (ts1 "[2112-01-01 Fri 01:00]")
+               (note0 (format "Note taken on %s" ts0))
+               (note1 (format "Note taken on %s" ts1)))
+          (expect-sql-tbls (logbook_entries) (list "* parent"
+                                                   (format "- %s" note0)
+                                                   (format "- %s" note1))
+            `((logbook_entries (2 1 "note" ,(org-ts-to-unixtime ts1) ,note1 nil)
+                               (1 1 "note" ,(org-ts-to-unixtime ts0) ,note0 nil))))))
+
       (let* ((ts "[2112-01-01 Fri 00:00]")
              (header (format "Note taken on %s" ts))
              (note "fancy note"))
@@ -821,7 +832,7 @@ list then join the cdr of IN with newlines."
                                                        (format "  %s" note))
           "note (included)"
           nil
-          `((logbook_entries (,testing-hash 1 10 "note" ,(org-ts-to-unixtime ts) ,header ,note)))
+          `((logbook_entries (1 1 "note" ,(org-ts-to-unixtime ts) ,header ,note)))
 
           "note (exclude)"
           ((org-sql-excluded-logbook-types '(note)))
@@ -834,8 +845,8 @@ list then join the cdr of IN with newlines."
                   (format "- %s" header))
           "state change (included)"
           nil
-          `((logbook_entries (,testing-hash 1 10 "state" ,(org-ts-to-unixtime ts) ,header nil))
-            (state_changes (,testing-hash 10 "TODO" "DONE")))
+          `((logbook_entries (1 1 "state" ,(org-ts-to-unixtime ts) ,header nil))
+            (state_changes (1 "TODO" "DONE")))
 
           "state change (excluded)"
           ((org-sql-excluded-logbook-types '(state)))
@@ -850,8 +861,8 @@ list then join the cdr of IN with newlines."
           "rescheduled (included)"
           nil
           `((timestamps (1 1 ,ts0 0 ,(org-ts-to-unixtime ts0) nil 1 nil))
-            (logbook_entries (,testing-hash 1 10 "reschedule" ,(org-ts-to-unixtime ts1) ,header nil))
-            (planning_changes (,testing-hash 10 1)))
+            (logbook_entries (1 1 "reschedule" ,(org-ts-to-unixtime ts1) ,header nil))
+            (planning_changes (1 1)))
 
           "rescheduled (excluded)"
           ((org-sql-excluded-logbook-types '(reschedule)))
@@ -866,10 +877,9 @@ list then join the cdr of IN with newlines."
           "redeadline (included)"
           nil
           `((timestamps (1 1 ,ts0 0 ,(org-ts-to-unixtime ts0) nil 1 nil))
-            (logbook_entries (,testing-hash 1 10 "redeadline"
-                                            ,(org-ts-to-unixtime ts1)
-                                            ,header nil))
-            (planning_changes (,testing-hash 10 1)))
+            (logbook_entries (1 1 "redeadline" ,(org-ts-to-unixtime ts1)
+                                ,header nil))
+            (planning_changes (1 1)))
 
           "redeadline (excluded)"
           ((org-sql-excluded-logbook-types '(redeadline)))
@@ -884,10 +894,9 @@ list then join the cdr of IN with newlines."
           "delschedule (included)"
           nil
           `((timestamps (1 1 ,ts0 0 ,(org-ts-to-unixtime ts0) nil 1 nil))
-            (logbook_entries (,testing-hash 1 10 "delschedule"
-                                            ,(org-ts-to-unixtime ts1) ,header
-                                            nil))
-            (planning_changes (,testing-hash 10 1)))
+            (logbook_entries (1 1 "delschedule" ,(org-ts-to-unixtime ts1)
+                                ,header nil))
+            (planning_changes (1 1)))
 
           "delschedule (excluded)"
           ((org-sql-excluded-logbook-types '(delschedule)))
@@ -902,10 +911,9 @@ list then join the cdr of IN with newlines."
           "deldeadline (included)"
           nil
           `((timestamps (1 1 ,ts0 0 ,(org-ts-to-unixtime ts0) nil 1 nil))
-            (logbook_entries (,testing-hash 1 10 "deldeadline"
-                                            ,(org-ts-to-unixtime ts1) ,header
-                                            nil))
-            (planning_changes (,testing-hash 10 1)))
+            (logbook_entries (1 1 "deldeadline" ,(org-ts-to-unixtime ts1)
+                                ,header nil))
+            (planning_changes (1 1)))
 
           "deldeadline (excluded)"
           ((org-sql-excluded-logbook-types '(deldeadline)))
@@ -917,9 +925,7 @@ list then join the cdr of IN with newlines."
                                                        (format "- %s" header))
           "refile (included)"
           nil
-          `((logbook_entries (,testing-hash 1 10 "refile"
-                                            ,(org-ts-to-unixtime ts)
-                                            ,header nil)))
+          `((logbook_entries (1 1 "refile" ,(org-ts-to-unixtime ts) ,header nil)))
 
           "refile (excluded)"
           ((org-sql-excluded-logbook-types '(refile)))
@@ -931,8 +937,7 @@ list then join the cdr of IN with newlines."
                                                        (format "- %s" header))
           "done (included)"
           nil
-          `((logbook_entries (,testing-hash 1 10 "done" ,(org-ts-to-unixtime ts)
-                                            ,header nil)))
+          `((logbook_entries (1 1 "done" ,(org-ts-to-unixtime ts) ,header nil)))
 
           "done (excluded)"
           ((org-sql-excluded-logbook-types '(done)))
@@ -952,9 +957,7 @@ list then join the cdr of IN with newlines."
                                                           (format "- %s" header))
             `((clocks (1 1 ,(org-ts-to-unixtime ts0)
                                      ,(org-ts-to-unixtime ts1) nil))
-              (logbook_entries (,testing-hash 1 88 "done"
-                                              ,(org-ts-to-unixtime ts)
-                                              ,header nil))))))
+              (logbook_entries (1 1 "done" ,(org-ts-to-unixtime ts) ,header nil))))))
 
       (it "clock + note + non-note"
         (let* ((org-log-note-clock-out t)
@@ -971,9 +974,7 @@ list then join the cdr of IN with newlines."
                                                           (format "- %s" header))
             `((clocks (1 1 ,(org-ts-to-unixtime ts0)
                          ,(org-ts-to-unixtime ts1) "this is a clock note"))
-              (logbook_entries (,testing-hash 1 112 "done"
-                                              ,(org-ts-to-unixtime ts)
-                                              ,header nil))))))
+              (logbook_entries (1 1 "done" ,(org-ts-to-unixtime ts) ,header nil))))))
 
       (it "non-note + clock"
         (let* ((ts "[2112-01-01 Fri 00:00]")
@@ -988,9 +989,7 @@ list then join the cdr of IN with newlines."
                                                           ":END:")
             `((clocks (1 1 ,(org-ts-to-unixtime ts0)
                          ,(org-ts-to-unixtime ts1) nil))
-              (logbook_entries (,testing-hash 1 10 "done"
-                                              ,(org-ts-to-unixtime ts)
-                                              ,header nil)))))) 
+              (logbook_entries (1 1 "done" ,(org-ts-to-unixtime ts) ,header nil)))))) 
 
       (it "non-note + clock + clock note"
         (let* ((org-log-note-clock-out t)
@@ -1007,9 +1006,7 @@ list then join the cdr of IN with newlines."
                                                           ":END:")
             `((clocks (1 1 ,(org-ts-to-unixtime ts0)
                          ,(org-ts-to-unixtime ts1) "this is a clock note"))
-              (logbook_entries (,testing-hash 1 10 "done"
-                                              ,(org-ts-to-unixtime ts)
-                                              ,header nil)))))))
+              (logbook_entries (1 1 "done" ,(org-ts-to-unixtime ts) ,header nil)))))))
 
     (describe "non-default drawer configs"
       (it "log drawer (global)"
@@ -1020,9 +1017,7 @@ list then join the cdr of IN with newlines."
                                                    ":LOGGING:"
                                                    (format "- %s" header)
                                                    ":END:")
-            `((logbook_entries (,testing-hash 1 20 "done"
-                                              ,(org-ts-to-unixtime ts)
-                                              ,header nil))))))
+            `((logbook_entries (1 1 "done" ,(org-ts-to-unixtime ts) ,header nil))))))
 
       (it "log drawer (file)"
         (let* ((ts "[2112-01-01 Fri 00:00]")
@@ -1032,9 +1027,7 @@ list then join the cdr of IN with newlines."
                                                    ":LOGBOOK:"
                                                    (format "- %s" header)
                                                    ":END:")
-            `((logbook_entries (,testing-hash 1 41 "done"
-                                              ,(org-ts-to-unixtime ts)
-                                              ,header nil))))))
+            `((logbook_entries (1 1 "done" ,(org-ts-to-unixtime ts) ,header nil))))))
       (it "log drawer (property)"
         (let* ((ts "[2112-01-01 Fri 00:00]")
                (header (format "CLOSING NOTE %s" ts)))
@@ -1045,9 +1038,7 @@ list then join the cdr of IN with newlines."
                                                    ":LOGGING:"
                                                    (format "- %s" header)
                                                    ":END:")
-            `((logbook_entries (,testing-hash 1 65 "done"
-                                              ,(org-ts-to-unixtime ts)
-                                              ,header nil))))))
+            `((logbook_entries (1 1 "done" ,(org-ts-to-unixtime ts) ,header nil))))))
 
       (it "clock drawer (global)"
         (let* ((org-clock-into-drawer "CLOCKING")

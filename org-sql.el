@@ -146,11 +146,16 @@ to store them. This is in addition to any properties specifified by
           (mql-col "id of this timestamp"
                    "id of the timestamp for this %s"
                    :timestamp_id '(:type integer) object notnull))
-         (entry-offset-col
-          (&optional object)
-          (mql-col "offset of this logbook entry"
-                   "offset of the entry with this logbook %s"
-                   :entry_offset '(:type integer) object nil)))
+         (entry-id-col
+          (&optional object notnull)
+          (mql-col "id of this entry"
+                   "id of the entry for this %s"
+                   :entry_id '(:type integer) object notnull)))
+         ;; (entry-offset-col
+         ;;  (&optional object)
+         ;;  (mql-col "offset of this logbook entry"
+         ;;           "offset of the entry with this logbook %s"
+         ;;           :entry_offset '(:type integer) object nil)))
       (defconst org-sql--mql-tables
         `((file_hashes
            (desc . "Each row describes one org file (which may have multiple filepaths)")
@@ -446,10 +451,8 @@ to store them. This is in addition to any properties specifified by
           (logbook_entries
            (desc . "Each row stores one logbook entry (except for clocks)")
            (columns
-            ,(file-hash-col "logbook entry")
-            ;; ,(headline-offset-col "logbook entry" t)
+            ,(entry-id-col)
             ,(headline-id-col "logbook entry" t)
-            ,(entry-offset-col)
             (:entry_type :desc "type of this entry (see `org-log-note-headlines')"
                          :type text)
             (:time_logged :desc "timestamp for when this entry was taken"
@@ -459,19 +462,16 @@ to store them. This is in addition to any properties specifified by
             (:note :desc "the text of this entry underneath the header"
                    :type text))
            (constraints
-            (primary :keys (:file_hash :entry_offset))
+            (primary :keys (:entry_id))
             (foreign :ref headlines
-                     ;; :keys (:file_hash :headline_offset)
                      :keys (:headline_id)
-                     ;; :parent-keys (:file_hash :headline_offset)
                      :parent-keys (:headline_id)
                      :on_delete cascade)))
 
           (state_changes
            (desc . "Each row stores additional metadata for a state change logbook entry")
            (columns
-            ,(file-hash-col "state change")
-            ,(entry-offset-col "state change")
+            ,(entry-id-col "state change")
             (:state_old :desc "former todo state keyword"
                         :type text
                         :constraints (notnull))
@@ -479,29 +479,28 @@ to store them. This is in addition to any properties specifified by
                         :type text
                         :constraints (notnull)))
            (constraints
-            (primary :keys (:file_hash :entry_offset))
+            (primary :keys (:entry_id))
             (foreign :ref logbook_entries
-                     :keys (:file_hash :entry_offset)
-                     :parent-keys (:file_hash :entry_offset)
+                     :keys (:entry_id)
+                     :parent-keys (:entry_id)
                      :on_delete cascade)))
 
           (planning_changes
            (desc . "Each row stores additional metadata for a planning change logbook entry")
            (columns
-            ,(file-hash-col "planning change")
-            ,(entry-offset-col "planning change")
+            ,(entry-id-col "planning change")
             (:timestamp_id :desc "id of the former timestamp"
                            :type integer
                            :constraints (notnull)))
            (constraints
-            (primary :keys (:file_hash :entry_offset))
+            (primary :keys (:entry_id))
             (foreign :ref timestamps
                      :keys (:timestamp_id)
                      :parent-keys (:timestamp_id))
                      ;; :on_delete cascade)
             (foreign :ref logbook_entries
-                     :keys (:file_hash :entry_offset)
-                     :parent-keys (:file_hash :entry_offset)
+                     :keys (:entry_id)
+                     :parent-keys (:entry_id)
                      :on_delete cascade)))
 
           (links
@@ -1470,7 +1469,7 @@ CONFIG is the `org-sql-db-config' list."
   (list :inserts (-clone org-sql--empty-mql-bulk-insert)
         :headline-id 1
         :timestamp-id 1
-        :logbook-entry-id 1
+        :entry-id 1
         :property-id 1
         :clock-id 1))
 
@@ -1781,10 +1780,8 @@ to NOTE-TEXT; otherwise just as (CLOCK)."
                                 :ts))
           entry))
     (org-sql--add-mql-insert acc logbook_entries
-      :file_hash file-hash
-      ;; :headline_offset headline-offset
+      :entry_id (org-sql--acc-get :entry-id acc)
       :headline_id (org-sql--acc-get :headline-id acc)
-      :entry_offset entry-offset
       :entry_type (symbol-name entry-type)
       :time_logged (-some->> ts
                      (org-ml-timestamp-get-start-time)
@@ -1797,8 +1794,7 @@ to NOTE-TEXT; otherwise just as (CLOCK)."
   (-let (((&plist :entry-offset :file-hash :old-state :new-state) (cdr entry)))
     (--> (org-sql--add-mql-insert-headline-logbook-item acc entry)
          (org-sql--add-mql-insert it state_changes
-           :file_hash file-hash
-           :entry_offset entry-offset
+           :entry_id (org-sql--acc-get :entry-id acc)
            :state_old old-state
            :state_new new-state))))
 
@@ -1809,8 +1805,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
     (--> (org-sql--add-mql-insert-headline-logbook-item acc entry)
          (org-sql--add-mql-insert-timestamp it hstate old-ts)
          (org-sql--add-mql-insert it planning_changes
-           :file_hash file-hash
-           :entry_offset entry-offset
+           :entry_id (org-sql--acc-get :entry-id acc)
            :timestamp_id (org-sql--acc-get :timestamp-id acc))
          (org-sql--acc-incr :timestamp-id it))))
 
@@ -1836,7 +1831,7 @@ returned by `org-sql--to-hstate'."
               (org-sql--add-mql-insert-headline-logbook-item acc entry))))))
       (->> (org-ml-logbook-get-items logbook)
            (--map (org-sql--item-to-entry hstate it))
-           (-reduce-from #'add-entry acc)))))
+           (--reduce-from (org-sql--acc-incr :entry-id (add-entry acc it)) acc)))))
 
 (defun org-sql--add-mql-insert-clock (acc hstate clock note-text)
   "Add MQL-insert for CLOCK to ACC.
@@ -1845,7 +1840,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
   (-let (((&plist :headline :file-hash) hstate)
          (value (org-ml-get-property :value clock)))
     (--> (org-sql--add-mql-insert acc clocks
-           :clock_id (org-sql--acc-get :clock-id acc) 
+           :clock_id (org-sql--acc-get :clock-id acc)
            :headline_id (org-sql--acc-get :headline-id acc)
            :time_start (-some-> value
                          (org-ml-timestamp-get-start-time)
