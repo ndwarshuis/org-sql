@@ -110,9 +110,9 @@ to store them. This is in addition to any properties specifified by
          '(:tag :desc "the text value of this tag"
                 :type varchar
                 :length 32))
-        (property-offset-col
-         '(:property_offset :desc "offset of this property"
-                            :type integer))
+        (property-id-col
+         '(:property_id :desc "id of this property"
+                        :type integer))
         (modifier-allowed-units '(hour day week month year)))
     (cl-flet*
         ((mql-col
@@ -377,7 +377,7 @@ to store them. This is in addition to any properties specifified by
            (desc . "Each row stores one property")
            (columns
             ,(file-hash-col "property")
-            ,property-offset-col
+            ,property-id-col
             (:key_text :desc "this property's key"
                        :type text
                        :constraints (notnull))
@@ -385,45 +385,42 @@ to store them. This is in addition to any properties specifified by
                        :type text
                        :constraints (notnull)))
            (constraints
-            (primary :keys (:file_hash :property_offset))
+            (primary :keys (:property_id))
             (foreign :ref file_hashes
                      :keys (:file_hash)
                      :parent-keys (:file_hash)
                      :on_delete cascade)))
 
+          ;; TODO what is the point of this table now?
           (file_properties
            (desc . "Each row stores a property at the file level")
            (columns
             ,(file-hash-col "property")
-            ,property-offset-col)
+            ,property-id-col)
            (constraints
-            (primary :keys (:file_hash :property_offset))
+            (primary :keys (:property_id))
             ;; (foreign :ref file_hashes
             ;;          :keys (:file_hash)
             ;;          :parent-keys (:file_hash)
             ;;          :on_delete cascade)
             (foreign :ref properties
-                     :keys (:file_hash :property_offset)
-                     :parent-keys (:file_hash :property_offset)
+                     :keys (:property_id)
+                     :parent-keys (:property_id)
                      :on_delete cascade)))
 
           (headline_properties
            (desc . "Each row stores a property at the headline level")
            (columns
-            ,(file-hash-col "property")
-            ;; ,(headline-offset-col "property" t)
             ,(headline-id-col "property" t)
-            ,property-offset-col)
+            ,property-id-col)
            (constraints
-            (primary :keys (:file_hash :property_offset))
+            (primary :keys (:property_id))
             (foreign :ref properties
-                     :keys (:file_hash :property_offset)
-                     :parent-keys (:file_hash :property_offset))
+                     :keys (:property_id)
+                     :parent-keys (:property_id))
                      ;; :on_delete cascade)
             (foreign :ref headlines
-                     ;; :keys (:file_hash :headline_offset)
                      :keys (:headline_id)
-                     ;; :parent-keys (:file_hash :headline_offset)
                      :parent-keys (:headline_id)
                      :on_delete cascade)))
           
@@ -1892,13 +1889,13 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
             (let ((property-offset (org-ml-get-property :begin np)))
               (--> (org-sql--add-mql-insert acc properties
                      :file_hash file-hash
-                     :property_offset property-offset
+                     :property_id (org-sql--acc-get :property-id acc)
                      :key_text (org-ml-get-property :key np)
                      :val_text (org-ml-get-property :value np))
                    (org-sql--add-mql-insert it headline_properties
                      :headline_id (org-sql--acc-get :headline-id acc)
-                     :file_hash file-hash
-                     :property_offset property-offset)))))
+                     :property_id (org-sql--acc-get :property-id acc))
+                   (org-sql--acc-incr :property-id it)))))
         (->> (org-ml-headline-get-node-properties headline)
              (-remove #'is-ignored)
              (-reduce-from #'add-property acc))))))
@@ -2163,12 +2160,13 @@ FSTATE is a list given by `org-sql--to-fstate'."
                                    (s-split-up-to " " it 1))))
             (--> (org-sql--add-mql-insert acc properties
                    :file_hash file-hash
-                   :property_offset offset
+                   :property_id (org-sql--acc-get :property-id acc)
                    :key_text key
                    :val_text value)
                  (org-sql--add-mql-insert it file_properties
                    :file_hash file-hash
-                   :property_offset offset)))))
+                   :property_id (org-sql--acc-get :property-id acc))
+                 (org-sql--acc-incr :property-id it)))))
       (->> (--filter (org-ml-is-type 'keyword it) top-section)
            (--filter (equal (org-ml-get-property :key it) "PROPERTY"))
            (-reduce-from #'add-property acc)))))

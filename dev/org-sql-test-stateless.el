@@ -737,8 +737,8 @@ list then join the cdr of IN with newlines."
                 ":PROPERTIES:"
                 ":key: val"
                 ":END:")
-        `((properties (,testing-hash 23 "key" "val"))
-          (headline_properties (,testing-hash 1 23)))))
+        `((properties (,testing-hash 1 "key" "val"))
+          (headline_properties (1 1)))))
 
     (it "multiple"
       (expect-sql-tbls (properties headline_properties)
@@ -747,10 +747,10 @@ list then join the cdr of IN with newlines."
                 ":p1: ragtime dandies"
                 ":p2: this time its personal"
                 ":END:")
-        `((properties (,testing-hash 44 "p2" "this time its personal")
-                      (,testing-hash 23 "p1" "ragtime dandies"))
-          (headline_properties (,testing-hash 1 44)
-                               (,testing-hash 1 23)))))
+        `((properties (,testing-hash 2 "p2" "this time its personal")
+                      (,testing-hash 1 "p1" "ragtime dandies"))
+          (headline_properties (1 2)
+                               (1 1)))))
 
     ;; TODO add inherited properties once they exist
 
