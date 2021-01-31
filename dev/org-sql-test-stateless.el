@@ -143,7 +143,7 @@ list then join the cdr of IN with newlines."
                                           ,log-note-headings '("TODO" "DONE")
                                           lb-config testing-size testing-lines
                                           nil))
-              (hstate (org-sql--to-hstate fstate headline))
+              (hstate (org-sql--to-hstate 1 fstate headline))
               (entry (->> (org-sql--item-to-entry hstate item)
                           (props-to-string (list :ts
                                                  :ts-active
@@ -496,18 +496,18 @@ list then join the cdr of IN with newlines."
       (expect-sql "* headline"
         `(,testing-hashes-mql
           ,testing-metadata-mql
-          (headlines (,testing-hash 1 "headline" nil nil nil nil nil 0 0 nil))
-          (headline_closures (,testing-hash 1 1 0)))))
+          (headlines (1 ,testing-hash "headline" nil nil nil nil nil 0 0 nil))
+          (headline_closures (1 1 0)))))
 
     (it "two"
       (expect-sql (list "* headline"
                         "* another headline")
         `(,testing-hashes-mql
           ,testing-metadata-mql
-          (headlines (,testing-hash 12 "another headline" nil nil nil nil nil 0 0 nil)
-                     (,testing-hash 1 "headline" nil nil nil nil nil 0 0 nil))
-          (headline_closures (,testing-hash 12 12 0)
-                             (,testing-hash 1 1 0)))))
+          (headlines (2 ,testing-hash "another headline" nil nil nil nil nil 0 0 nil)
+                     (1 ,testing-hash "headline" nil nil nil nil nil 0 0 nil))
+          (headline_closures (2 2 0)
+                             (1 1 0)))))
 
     (it "fancy"
       (expect-sql (list "* TODO [#A] COMMENT another headline [1/2]"
@@ -518,10 +518,10 @@ list then join the cdr of IN with newlines."
         `(,testing-hashes-mql
           ,testing-metadata-mql
           (headlines
-           (,testing-hash 1 "another headline [1/2]" "TODO" 30 "A" fraction 0.5
+           (1 ,testing-hash "another headline [1/2]" "TODO" 30 "A" fraction 0.5
                           0 1 "this /should/ appear\n"))
           (headline_closures
-           (,testing-hash 1 1 0)))))
+           (1 1 0)))))
 
     (expect-sql-tbls-multi (file_hashes file_metadata headlines headline_closures)
         (list "* headline"
@@ -539,25 +539,25 @@ list then join the cdr of IN with newlines."
           (= 2 (org-ml-get-property :level h)))))
       `(,testing-hashes-mql
         ,testing-metadata-mql
-        (headlines (,testing-hash 1 "headline" nil nil nil nil nil 0 0 nil))
-        (headline_closures (,testing-hash 1 1 0)))
+        (headlines (1 ,testing-hash "headline" nil nil nil nil nil 0 0 nil))
+        (headline_closures (1 1 0)))
       
       "nested (no predicate)"
       nil
       `(,testing-hashes-mql
         ,testing-metadata-mql
-        (headlines (,testing-hash 12 "nested headline" nil nil nil nil nil 0 0 nil)
-                   (,testing-hash 1 "headline" nil nil nil nil nil 0 0 nil))
-        (headline_closures (,testing-hash 12 12 0)
-                           (,testing-hash 12 1 1)
-                           (,testing-hash 1 1 0))))
+        (headlines (2 ,testing-hash "nested headline" nil nil nil nil nil 0 0 nil)
+                   (1 ,testing-hash "headline" nil nil nil nil nil 0 0 nil))
+        (headline_closures (2 2 0)
+                           (2 1 1)
+                           (1 1 0))))
 
     (it "archived"
       (expect-sql "* headline :ARCHIVE:"
         `(,testing-hashes-mql
           ,testing-metadata-mql
-          (headlines (,testing-hash 1 "headline" nil nil nil nil nil 1 0 nil))
-          (headline_closures (,testing-hash 1 1 0))))))
+          (headlines (1 ,testing-hash "headline" nil nil nil nil nil 1 0 nil))
+          (headline_closures (1 1 0))))))
 
   (describe "planning entries"
     (let ((ts0 "<2112-01-01 Thu>")
@@ -571,16 +571,16 @@ list then join the cdr of IN with newlines."
         `((timestamps (,testing-hash 1 23 ,ts0 1 ,(org-ts-to-unixtime ts0) nil 0 nil)
                       (,testing-hash 1 50 ,ts1 1 ,(org-ts-to-unixtime ts1) nil 0 nil)
                       (,testing-hash 1 75 ,ts2 0 ,(org-ts-to-unixtime ts2) nil 0 nil))
-          (planning_entries (,testing-hash 1 scheduled 23)
-                            (,testing-hash 1 deadline 50)
-                            (,testing-hash 1 closed 75)))
+          (planning_entries (1 ,testing-hash scheduled 23)
+                            (1 ,testing-hash deadline 50)
+                            (1 ,testing-hash closed 75)))
 
         "multiple (exclude some)"
         ((org-sql-excluded-headline-planning-types '(:closed)))
         `((timestamps (,testing-hash 1 23 ,ts0 1 ,(org-ts-to-unixtime ts0) nil 0 nil)
                       (,testing-hash 1 50 ,ts1 1 ,(org-ts-to-unixtime ts1) nil 0 nil))
-          (planning_entries (,testing-hash 1 scheduled 23)
-                            (,testing-hash 1 deadline 50)))
+          (planning_entries (1 ,testing-hash scheduled 23)
+                            (1 ,testing-hash deadline 50)))
 
         "multiple (exclude all)"
         ((org-sql-excluded-headline-planning-types '(:closed :scheduled :deadline)))
@@ -591,12 +591,12 @@ list then join the cdr of IN with newlines."
                                                  "* headline :twotag:")
       "multiple (included)"
       nil
-      `((headline_tags (,testing-hash 21 "twotag" 0)
-                       (,testing-hash 1 "onetag" 0)))
+      `((headline_tags (2 "twotag" 0)
+                       (1 "onetag" 0)))
 
       "multiple (exclude one)"
       ((org-sql-excluded-tags '("onetag")))
-      `((headline_tags (,testing-hash 21 "twotag" 0)))
+      `((headline_tags (2 "twotag" 0)))
 
       "multiple (exclude all)"
       ((org-sql-excluded-tags 'all))
@@ -606,7 +606,7 @@ list then join the cdr of IN with newlines."
       (setq org-sql-use-tag-inheritance t)
       (expect-sql-tbls (headline_tags) (list "* parent :onetag:"
                                              "** nested")
-        `((headline_tags (,testing-hash 1 "onetag" 0)))))
+        `((headline_tags (1 "onetag" 0)))))
 
     (expect-sql-tbls-multi (headline_tags) (list "* parent"
                                                  ":PROPERTIES:"
@@ -614,7 +614,7 @@ list then join the cdr of IN with newlines."
                                                  ":END:")
       "inherited (included)"
       nil
-      `((headline_tags (,testing-hash 1 "sometag" 1)))
+      `((headline_tags (1 "sometag" 1)))
 
       "inherited (excluded)"
       ((org-sql-exclude-inherited-tags t))
@@ -691,7 +691,7 @@ list then join the cdr of IN with newlines."
         (expect-sql-tbls (timestamps) (list "* parent"
                                             "** child"
                                             ts)
-          `((timestamps (,testing-hash 10 19 ,ts 1 ,(org-ts-to-unixtime ts) nil 0 nil))))))
+          `((timestamps (,testing-hash 2 19 ,ts 1 ,(org-ts-to-unixtime ts) nil 0 nil))))))
     
     (it "content (ranged)"
       (let* ((ts0 "<2112-01-01 Thu>")
@@ -723,7 +723,7 @@ list then join the cdr of IN with newlines."
       (expect-sql-tbls (links) (list "* parent"
                                      "** child"
                                      "https://example.com")
-        `((links (,testing-hash 10 19 "//example.com" "" "https")))))
+        `((links (,testing-hash 2 19 "//example.com" "" "https")))))
     
     (it "with description"
       (expect-sql-tbls (links) (list "* parent"
@@ -1038,7 +1038,7 @@ list then join the cdr of IN with newlines."
                                                    ":LOGBOOK:"
                                                    (format "- %s" header)
                                                    ":END:")
-            `((logbook_entries (,testing-hash 22 41 "done"
+            `((logbook_entries (,testing-hash 1 41 "done"
                                               ,(org-ts-to-unixtime ts)
                                               ,header nil))))))
       (it "log drawer (property)"
@@ -1105,7 +1105,7 @@ list then join the cdr of IN with newlines."
                                           clock
                                           "- clock out note"
                                           ":END:")
-            `((clocks (,testing-hash 29 48 ,(org-ts-to-unixtime ts0)
+            `((clocks (,testing-hash 1 48 ,(org-ts-to-unixtime ts0)
                                      ,(org-ts-to-unixtime ts1)
                                      "clock out note")))))))))
 

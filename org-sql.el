@@ -131,6 +131,11 @@ to store them. This is in addition to any properties specifified by
           (mql-col "offset of this headline"
                    "offset of the headline with this %s"
                    :headline_offset '(:type integer) object notnull))
+         (headline-id-col
+          (&optional object notnull)
+          (mql-col "id of this headline"
+                   "id of the headline for this %s"
+                   :headline_id '(:type integer) object notnull))
          (timestamp-offset-col
           (&optional object notnull)
           (mql-col "offset of this timestamp"
@@ -189,8 +194,9 @@ to store them. This is in addition to any properties specifified by
           (headlines
            (desc . "Each row stores one headline in a given org file and its metadata")
            (columns
+            ,(headline-id-col)
             ,(file-hash-col "headline")
-            ,(headline-offset-col)
+            ;; ,(headline-offset-col)
             (:headline_text :desc "raw text of the headline"
                             :type text
                             :constraints (notnull))
@@ -214,7 +220,8 @@ to store them. This is in addition to any properties specifified by
             (:content :desc "the headline contents"
                       :type text))
            (constraints
-            (primary :keys (:file_hash :headline_offset))
+            ;; (primary :keys (:file_hash :headline_offset))
+            (primary :keys (:headline_id))
             (foreign :ref file_hashes
                      :keys (:file_hash)
                      :parent-keys (:file_hash)
@@ -223,27 +230,36 @@ to store them. This is in addition to any properties specifified by
           (headline_closures
            (desc . "Each row stores the ancestor and depth of a headline relationship (eg closure table)")
            (columns
-            ,(file-hash-col "headline")
-            ,(headline-offset-col)
-            (:parent_offset :desc "offset of this headline's parent"
-                            :type integer)
+            ;; ,(file-hash-col "headline")
+            ;; ,(headline-offset-col)
+            ,(headline-id-col)
+            ;; (:parent_offset :desc "offset of this headline's parent"
+            ;;                 :type integer)
+            (:parent_id :desc "id of this headline's parent"
+                        :type integer)
             (:depth :desc "levels between this headline and the referred parent"
                     :type integer))
            (constraints
-            (primary :keys (:file_hash :headline_offset :parent_offset))
+            ;; (primary :keys (:file_hash :headline_offset :parent_offset))
+            (primary :keys (:headline_id :parent_id))
             (foreign :ref headlines
-                     :keys (:file_hash :headline_offset)
-                     :parent-keys (:file_hash :headline_offset)
+                     ;; :keys (:file_hash :headline_offset)
+                     :keys (:headline_id)
+                     ;; :parent-keys (:file_hash :headline_offset)
+                     :parent-keys (:headline_id)
                      :on_delete cascade)
             (foreign :ref headlines
-                     :keys (:file_hash :parent_offset)
-                     :parent-keys (:file_hash :headline_offset))))
+                     ;; :keys (:file_hash :parent_offset)
+                     :keys (:parent_id)
+                     ;; :parent-keys (:file_hash :headline_offset))))
+                     :parent-keys (:headline_id))))
 
           (timestamps
            (desc . "Each row stores one timestamp")
            (columns
             ,(file-hash-col "timestamp")
-            ,(headline-offset-col "timestamp" t)
+            ;; ,(headline-offset-col "timestamp" t)
+            ,(headline-id-col "timestamp" t)
             ,(timestamp-offset-col)
             (:raw_value :desc "text representation of this timestamp"
                         :type text
@@ -264,8 +280,10 @@ to store them. This is in addition to any properties specifified by
            (constraints
             (primary :keys (:file_hash :timestamp_offset))
             (foreign :ref headlines
-                     :keys (:file_hash :headline_offset)
-                     :parent-keys (:file_hash :headline_offset)
+                     ;; :keys (:file_hash :headline_offset)
+                     :keys (:headline_id)
+                     ;; :parent-keys (:file_hash :headline_offset)
+                     :parent-keys (:headline_id)
                      :on_delete cascade)))
 
           (timestamp_warnings
@@ -311,15 +329,17 @@ to store them. This is in addition to any properties specifified by
           (planning_entries
            (desc . "Each row stores the metadata for headline planning timestamps.")
            (columns
+            ,(headline-id-col "planning entry")
             ,(file-hash-col "planning entry")
-            ,(headline-offset-col "planning entry")
+            ;; ,(headline-offset-col "planning entry")
             (:planning_type :desc "the type of this planning entry"
                             :type enum
                             :length 9
                             :allowed (closed scheduled deadline))
             ,(timestamp-offset-col "planning entry" t))
            (constraints
-            (primary :keys (:file_hash :headline_offset :planning_type))
+            ;; (primary :keys (:file_hash :headline_offset :planning_type))
+            (primary :keys (:headline_id :planning_type))
             (foreign :ref timestamps
                      :keys (:file_hash :timestamp_offset)
                      :parent-keys (:file_hash :timestamp_offset)
@@ -340,17 +360,21 @@ to store them. This is in addition to any properties specifified by
           (headline_tags
            (desc . "Each row stores one tag")
            (columns
-            ,(file-hash-col "tag")
-            ,(headline-offset-col "tag")
+            ;; ,(file-hash-col "tag")
+            ;; ,(headline-offset-col "tag")
+            ,(headline-id-col "tag")
             ,tag-col
             (:is_inherited :desc "true if this tag is from the ITAGS property"
                            :type boolean
                            :constraints (notnull)))
            (constraints
-            (primary :keys (:file_hash :headline_offset :tag :is_inherited))
+            ;; (primary :keys (:file_hash :headline_offset :tag :is_inherited))
+            (primary :keys (:headline_id :tag :is_inherited))
             (foreign :ref headlines
-                     :keys (:file_hash :headline_offset)
-                     :parent-keys (:file_hash :headline_offset)
+                     ;; :keys (:file_hash :headline_offset)
+                     :keys (:headline_id)
+                     ;; :parent-keys (:file_hash :headline_offset)
+                     :parent-keys (:headline_id)
                      :on_delete cascade)))
 
           (properties
@@ -391,7 +415,8 @@ to store them. This is in addition to any properties specifified by
            (desc . "Each row stores a property at the headline level")
            (columns
             ,(file-hash-col "property")
-            ,(headline-offset-col "property" t)
+            ;; ,(headline-offset-col "property" t)
+            ,(headline-id-col "property" t)
             ,property-offset-col)
            (constraints
             (primary :keys (:file_hash :property_offset))
@@ -400,15 +425,18 @@ to store them. This is in addition to any properties specifified by
                      :parent-keys (:file_hash :property_offset))
                      ;; :on_delete cascade)
             (foreign :ref headlines
-                     :keys (:file_hash :headline_offset)
-                     :parent-keys (:file_hash :headline_offset)
+                     ;; :keys (:file_hash :headline_offset)
+                     :keys (:headline_id)
+                     ;; :parent-keys (:file_hash :headline_offset)
+                     :parent-keys (:headline_id)
                      :on_delete cascade)))
           
           (clocks
            (desc . "Each row stores one clock entry")
            (columns
             ,(file-hash-col "clock")
-            ,(headline-offset-col "clock" t)
+            ;; ,(headline-offset-col "clock" t)
+            ,(headline-id-col "clock" t)
             (:clock_offset :desc "offset of this clock"
                            :type integer)
             (:time_start :desc "timestamp for the start of this clock"
@@ -420,15 +448,18 @@ to store them. This is in addition to any properties specifified by
            (constraints
             (primary :keys (:file_hash :clock_offset))
             (foreign :ref headlines
-                     :keys (:file_hash :headline_offset)
-                     :parent-keys (:file_hash :headline_offset)
+                     ;; :keys (:file_hash :headline_offset)
+                     :keys (:headline_id)
+                     ;; :parent-keys (:file_hash :headline_offset)
+                     :parent-keys (:headline_id)
                      :on_delete cascade)))
 
           (logbook_entries
            (desc . "Each row stores one logbook entry (except for clocks)")
            (columns
             ,(file-hash-col "logbook entry")
-            ,(headline-offset-col "logbook entry" t)
+            ;; ,(headline-offset-col "logbook entry" t)
+            ,(headline-id-col "logbook entry" t)
             ,(entry-offset-col)
             (:entry_type :desc "type of this entry (see `org-log-note-headlines')"
                          :type text)
@@ -441,8 +472,10 @@ to store them. This is in addition to any properties specifified by
            (constraints
             (primary :keys (:file_hash :entry_offset))
             (foreign :ref headlines
-                     :keys (:file_hash :headline_offset)
-                     :parent-keys (:file_hash :headline_offset)
+                     ;; :keys (:file_hash :headline_offset)
+                     :keys (:headline_id)
+                     ;; :parent-keys (:file_hash :headline_offset)
+                     :parent-keys (:headline_id)
                      :on_delete cascade)))
 
           (state_changes
@@ -486,7 +519,8 @@ to store them. This is in addition to any properties specifified by
            (desc . "Each row stores one link")
            (columns
             ,(file-hash-col "link")
-            ,(headline-offset-col "link" t)
+            ;; ,(headline-offset-col "link" t)
+            ,(headline-id-col "link" t)
             (:link_offset :desc "file offset of this link"
                           :type integer)
             (:link_path :desc "target of this link (eg url, file path, etc)"
@@ -500,8 +534,10 @@ to store them. This is in addition to any properties specifified by
            (constraints
             (primary :keys (:file_hash :link_offset))
             (foreign :ref headlines
-                     :keys (:file_hash :headline_offset)
-                     :parent-keys (:file_hash :headline_offset)
+                     ;; :keys (:file_hash :headline_offset)
+                     :keys (:headline_id)
+                     ;; :parent-keys (:file_hash :headline_offset)
+                     :parent-keys (:headline_id)
                      :on_delete cascade))))
       "Org-SQL database schema represented in internal meta query
     language (MQL, basically a giant list)"))))
@@ -1013,7 +1049,7 @@ If not present, return the current value of CLOCK-INTO-DRAWER."
        (org-sql--map-plist :clock-into-drawer
          (org-sql--headline-get-clock-into-drawer it headline))))
 
-(defun org-sql--to-hstate (fstate headline)
+(defun org-sql--to-hstate (headline-id fstate headline)
   "Return new hstate set from FSTATE and HEADLINE.
 
 An HSTATE represents the current headline being processed and
@@ -1027,14 +1063,16 @@ will include the follwing keys/values:
     (list :file-hash h
           :lb-config (org-sql--headline-update-supercontents-config c headline)
           :log-note-matcher m
-          :headline headline)))
+          :headline headline
+          :parent-ids (list headline-id))))
 
-(defun org-sql--update-hstate (hstate headline)
+(defun org-sql--update-hstate (headline-id hstate headline)
   "Return a new HSTATE updated with information from HEADLINE.
 Only the :lb-config and :headline keys will be changed."
   (->> (org-sql--replace-in-plist :headline headline hstate)
        (org-sql--map-plist :lb-config
-         (org-sql--headline-update-supercontents-config it headline))))
+         (org-sql--headline-update-supercontents-config it headline))
+       (org-sql--map-plist :parent-ids (cons headline-id it))))
 
 ;; (defun org-sql--to-hashpathpair (disk-path db-path file-hash)
 ;;   "Return a plist representing org file status.
@@ -1441,11 +1479,20 @@ CONFIG is the `org-sql-db-config' list."
 
 (defun org-sql--init-acc ()
   (list :inserts (-clone org-sql--empty-mql-bulk-insert)
-        :header-id 0
-        :timestamp-id 0
-        :logbook-entry-id 0
-        :property-id 0
-        :clock-id 0))
+        :headline-id 1
+        :timestamp-id 1
+        :logbook-entry-id 1
+        :property-id 1
+        :clock-id 1))
+
+(defun org-sql--acc-get (key acc)
+  (plist-get acc key))
+
+(defun org-sql--acc-incr (key acc)
+  (plist-put acc key (1+ (plist-get acc key))))
+
+(defun org-sql--acc-reset (key acc)
+  (plist-put acc key 0))
 
 (defun org-sql--format-insert-statements (config path-hashpathpairs file-fstates)
   ;; (let* ((acc (-clone org-sql--empty-mql-bulk-insert))
@@ -1746,7 +1793,8 @@ to NOTE-TEXT; otherwise just as (CLOCK)."
           entry))
     (org-sql--add-mql-insert acc logbook_entries
       :file_hash file-hash
-      :headline_offset headline-offset
+      ;; :headline_offset headline-offset
+      :headline_id (org-sql--acc-get :headline-id acc)
       :entry_offset entry-offset
       :entry_type (symbol-name entry-type)
       :time_logged (-some->> ts
@@ -1808,7 +1856,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
          (value (org-ml-get-property :value clock)))
     (org-sql--add-mql-insert acc clocks
       :file_hash file-hash
-      :headline_offset (org-ml-get-property :begin headline)
+      :headline_id (org-sql--acc-get :headline-id acc)
       :clock_offset (org-ml-get-property :begin clock)
       :time_start (-some-> value
                     (org-ml-timestamp-get-start-time)
@@ -1851,8 +1899,8 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
                      :key_text (org-ml-get-property :key np)
                      :val_text (org-ml-get-property :value np))
                    (org-sql--add-mql-insert it headline_properties
+                     :headline_id (org-sql--acc-get :headline-id acc)
                      :file_hash file-hash
-                     :headline_offset headline-offset
                      :property_offset property-offset)))))
         (->> (org-ml-headline-get-node-properties headline)
              (-remove #'is-ignored)
@@ -1868,8 +1916,9 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
           ((add-tag
             (acc tag inherited)
             (org-sql--add-mql-insert acc headline_tags
-              :file_hash file-hash
-              :headline_offset offset
+              ;; :file_hash file-hash
+              ;; :headline_offset offset
+              :headline_id (org-sql--acc-get :headline-id acc)
               :tag tag
               :is_inherited (if inherited 1 0)))
            (filter-ignored
@@ -1898,7 +1947,8 @@ returned by `org-sql--to-hstate'."
             (acc link)
             (org-sql--add-mql-insert acc links
               :file_hash file-hash
-              :headline_offset offset
+              ;; :headline_offset offset
+              :headline_id (org-sql--acc-get :headline-id acc)
               :link_offset (org-ml-get-property :begin link)
               :link_path (org-ml-get-property :path link)
               :link_text (->> (org-ml-get-children link)
@@ -1950,7 +2000,8 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
       (--> acc
         (org-sql--add-mql-insert it timestamps
           :file_hash file-hash
-          :headline_offset headline-offset
+          ;; :headline_offset headline-offset
+          :headline_id (org-sql--acc-get :headline-id acc)
           :timestamp_offset (org-ml-get-property :begin timestamp)
           :is_active (if (org-ml-timestamp-is-active timestamp) 1 0)
           :time_start (org-ml-time-to-unixtime start)
@@ -1991,7 +2042,8 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
                     (--> (org-sql--add-mql-insert-timestamp acc hstate ts)
                          (org-sql--add-mql-insert it planning_entries
                            :file_hash file-hash
-                           :headline_offset offset
+                           ;; :headline_offset offset
+                           :headline_id (org-sql--acc-get :headline-id acc)
                            :planning_type (->> (symbol-name type)
                                                (s-chop-prefix ":")
                                                (intern))
@@ -2005,21 +2057,24 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
 (defun org-sql--add-mql-insert-headline-closures (acc hstate)
   "Add MQL-insert for parent closures from the current headline to ACC.
 HSTATE is a plist as returned by `org-sql--to-hstate'."
-  (-let* (((&plist :headline :file-hash) hstate)
-          (offset (org-ml-get-property :begin headline)))
+  (-let* (((&plist :headline :file-hash :parent-ids) hstate)
+          (offset (org-ml-get-property :begin headline))
+          (headline-id (org-sql--acc-get :headline-id acc)))
     (cl-flet
         ((add-closure
-          (acc parent-offset depth)
+          (acc parent-id depth)
           (org-sql--add-mql-insert acc headline_closures
-            :file_hash file-hash
-            :headline_offset offset
-            :parent_offset parent-offset
+            :headline_id headline-id
+            :parent_id parent-id
             :depth depth)))
-      (->> (org-sql--headline-get-path headline)
-           (reverse)
-           (--map-indexed (list it it-index))
+      (->> (--map-indexed (list it it-index) parent-ids)
            (reverse)
            (--reduce-from (apply #'add-closure acc it) acc)))))
+      ;; (->> (org-sql--headline-get-path headline)
+      ;;      (reverse)
+      ;;      (--map-indexed (list it it-index))
+      ;;      (reverse)
+      ;;      (--reduce-from (apply #'add-closure acc it) acc)))))
 
 (defun org-sql--add-mql-insert-headline (acc hstate)
   "Add MQL-insert the current headline's metadata to ACC.
@@ -2043,8 +2098,9 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
                                   (`(,p) `(,p percent))))
             (contents (org-ml-supercontents-get-contents supercontents)))
       (--> (org-sql--add-mql-insert acc headlines
+             :headline_id (org-sql--acc-get :headline-id acc)
              :file_hash file-hash
-             :headline_offset (org-ml-get-property :begin headline)
+             ;; :headline_offset (org-ml-get-property :begin headline)
              :headline_text (org-ml-get-property :raw-value headline)
              :keyword (org-ml-get-property :todo-keyword headline)
              :effort (-> (org-ml-headline-get-node-property "Effort" headline)
@@ -2057,13 +2113,15 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
              :is_commented (if (org-ml-get-property :commentedp headline) 1 0)
              :content (-some->> (-map #'org-ml-to-string contents)
                         (s-join "")))
-           (org-sql--add-mql-insert-headline-planning it hstate)
-           (org-sql--add-mql-insert-headline-tags it hstate)
-           (org-sql--add-mql-insert-headline-properties it hstate)
-           (org-sql--add-mql-insert-headline-timestamps it hstate contents)
-           (org-sql--add-mql-insert-headline-links it hstate contents)
-           (org-sql--add-mql-insert-headline-logbook-clocks it hstate logbook)
-           (org-sql--add-mql-insert-headline-logbook-items it hstate logbook)))))
+        (org-sql--add-mql-insert-headline-planning it hstate)
+        (org-sql--add-mql-insert-headline-tags it hstate)
+        (org-sql--add-mql-insert-headline-properties it hstate)
+        (org-sql--add-mql-insert-headline-timestamps it hstate contents)
+        (org-sql--add-mql-insert-headline-links it hstate contents)
+        (org-sql--add-mql-insert-headline-logbook-clocks it hstate logbook)
+        (org-sql--add-mql-insert-headline-logbook-items it hstate logbook)
+        (org-sql--add-mql-insert-headline-closures it hstate)
+        (org-sql--acc-incr :headline-id it)))))
 
 (defun org-sql--add-mql-insert-headlines (acc fstate)
   "Add MQL-insert headlines in FSTATE to ACC.
@@ -2072,14 +2130,14 @@ FSTATE is a list given by `org-sql--to-fstate'."
     (cl-labels
         ((add-headline
           (acc hstate hl)
-          (let ((sub (org-ml-headline-get-subheadlines hl))
-                (hstate* (if hstate (org-sql--update-hstate hstate hl)
-                           (org-sql--to-hstate fstate hl))))
+          (let* ((sub (org-ml-headline-get-subheadlines hl))
+                 (headline-id (org-sql--acc-get :headline-id acc))
+                 (hstate* (if hstate (org-sql--update-hstate headline-id hstate hl)
+                            (org-sql--to-hstate headline-id fstate hl))))
             (if (and org-sql-exclude-headline-predicate
                      (funcall org-sql-exclude-headline-predicate hl))
                 acc
               (--> (org-sql--add-mql-insert-headline acc hstate*)
-                (org-sql--add-mql-insert-headline-closures it hstate*)
                 (--reduce-from (add-headline acc hstate* it) it sub))))))
       (--reduce-from (add-headline acc nil it) acc headlines))))
 
