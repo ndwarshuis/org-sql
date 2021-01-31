@@ -877,7 +877,7 @@ PLIST is a property list of the columns and values to insert."
   (declare (indent 2))
   (let ((ordered-values (org-sql--mql-order-columns tbl-name plist)))
     ;; WARNING this has side effects (but is super fast because of it)
-    `(let ((tbl (assq ',tbl-name ,acc)))
+    `(let ((tbl (assq ',tbl-name (plist-get ,acc :inserts))))
        (setcdr tbl (cons (list ,@ordered-values) (cdr tbl)))
        ,acc)))
 
@@ -1439,13 +1439,23 @@ CONFIG is the `org-sql-db-config' list."
              (s-join ",")
              (format "DELETE FROM %s WHERE file_hash IN (%s);" tbl-name*)))))
 
+(defun org-sql--init-acc ()
+  (list :inserts (-clone org-sql--empty-mql-bulk-insert)
+        :header-id 0
+        :timestamp-id 0
+        :logbook-entry-id 0
+        :property-id 0
+        :clock-id 0))
+
 (defun org-sql--format-insert-statements (config path-hashpathpairs file-fstates)
-  (let* ((acc (-clone org-sql--empty-mql-bulk-insert))
+  ;; (let* ((acc (-clone org-sql--empty-mql-bulk-insert))
+  (let* ((acc (org-sql--init-acc))
          (acc* (--reduce-from (org-sql--fstate-to-mql-insert acc it) acc file-fstates)))
-    (->> path-hashpathpairs
+    (--> path-hashpathpairs
          ;; TODO this caaaddddaaddar stuff is confusing AF...
-         (--reduce-from (org-sql--add-mql-insert-file-metadata* acc (cadr it) (car it) (cddr it)) acc*)
-         (org-sql--format-mql-bulk-inserts config))))
+         (--reduce-from (org-sql--add-mql-insert-file-metadata* acc (cadr it) (car it) (cddr it)) acc* it)
+         (plist-get it :inserts)
+         (org-sql--format-mql-bulk-inserts config it))))
 
 ;;; SQL string -> SQL string formatting functions
 
