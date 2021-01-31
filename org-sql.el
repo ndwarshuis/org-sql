@@ -126,21 +126,11 @@ to store them. This is in addition to any properties specifified by
                    "hash (MD5) of the org-tree with this %s"
                    :file_hash `(:type char :length ,file_hash-char-length)
                    object notnull))
-         ;; (headline-offset-col
-         ;;  (&optional object notnull)
-         ;;  (mql-col "offset of this headline"
-         ;;           "offset of the headline with this %s"
-         ;;           :headline_offset '(:type integer) object notnull))
          (headline-id-col
           (&optional object notnull)
           (mql-col "id of this headline"
                    "id of the headline for this %s"
                    :headline_id '(:type integer) object notnull))
-         ;; (timestamp-offset-col
-         ;;  (&optional object notnull)
-         ;;  (mql-col "offset of this timestamp"
-         ;;           "offset of the timestamp with this %s"
-         ;;           :timestamp_offset '(:type integer) object notnull))
          (timestamp-id-col
           (&optional object notnull)
           (mql-col "id of this timestamp"
@@ -151,11 +141,6 @@ to store them. This is in addition to any properties specifified by
           (mql-col "id of this entry"
                    "id of the entry for this %s"
                    :entry_id '(:type integer) object notnull)))
-         ;; (entry-offset-col
-         ;;  (&optional object)
-         ;;  (mql-col "offset of this logbook entry"
-         ;;           "offset of the entry with this logbook %s"
-         ;;           :entry_offset '(:type integer) object nil)))
       (defconst org-sql--mql-tables
         `((file_hashes
            (desc . "Each row describes one org file (which may have multiple filepaths)")
@@ -206,7 +191,6 @@ to store them. This is in addition to any properties specifified by
            (columns
             ,(headline-id-col)
             ,(file-hash-col "headline")
-            ;; ,(headline-offset-col)
             (:headline_text :desc "raw text of the headline"
                             :type text
                             :constraints (notnull))
@@ -230,7 +214,6 @@ to store them. This is in addition to any properties specifified by
             (:content :desc "the headline contents"
                       :type text))
            (constraints
-            ;; (primary :keys (:file_hash :headline_offset))
             (primary :keys (:headline_id))
             (foreign :ref file_hashes
                      :keys (:file_hash)
@@ -240,28 +223,19 @@ to store them. This is in addition to any properties specifified by
           (headline_closures
            (desc . "Each row stores the ancestor and depth of a headline relationship (eg closure table)")
            (columns
-            ;; ,(file-hash-col "headline")
-            ;; ,(headline-offset-col)
             ,(headline-id-col)
-            ;; (:parent_offset :desc "offset of this headline's parent"
-            ;;                 :type integer)
             (:parent_id :desc "id of this headline's parent"
                         :type integer)
             (:depth :desc "levels between this headline and the referred parent"
                     :type integer))
            (constraints
-            ;; (primary :keys (:file_hash :headline_offset :parent_offset))
             (primary :keys (:headline_id :parent_id))
             (foreign :ref headlines
-                     ;; :keys (:file_hash :headline_offset)
                      :keys (:headline_id)
-                     ;; :parent-keys (:file_hash :headline_offset)
                      :parent-keys (:headline_id)
                      :on_delete cascade)
             (foreign :ref headlines
-                     ;; :keys (:file_hash :parent_offset)
                      :keys (:parent_id)
-                     ;; :parent-keys (:file_hash :headline_offset))))
                      :parent-keys (:headline_id))))
 
           (timestamps
@@ -361,20 +335,15 @@ to store them. This is in addition to any properties specifified by
           (headline_tags
            (desc . "Each row stores one tag")
            (columns
-            ;; ,(file-hash-col "tag")
-            ;; ,(headline-offset-col "tag")
             ,(headline-id-col "tag")
             ,tag-col
             (:is_inherited :desc "true if this tag is from the ITAGS property"
                            :type boolean
                            :constraints (notnull)))
            (constraints
-            ;; (primary :keys (:file_hash :headline_offset :tag :is_inherited))
             (primary :keys (:headline_id :tag :is_inherited))
             (foreign :ref headlines
-                     ;; :keys (:file_hash :headline_offset)
                      :keys (:headline_id)
-                     ;; :parent-keys (:file_hash :headline_offset)
                      :parent-keys (:headline_id)
                      :on_delete cascade)))
 
@@ -506,11 +475,9 @@ to store them. This is in addition to any properties specifified by
           (links
            (desc . "Each row stores one link")
            (columns
-            ,(file-hash-col "link")
-            ;; ,(headline-offset-col "link" t)
+            (:link_id :desc "id of this link"
+                      :type integer)
             ,(headline-id-col "link" t)
-            (:link_offset :desc "file offset of this link"
-                          :type integer)
             (:link_path :desc "target of this link (eg url, file path, etc)"
                         :type text
                         :constraints (notnull))
@@ -520,11 +487,9 @@ to store them. This is in addition to any properties specifified by
                         :type text
                         :constraints (notnull)))
            (constraints
-            (primary :keys (:file_hash :link_offset))
+            (primary :keys (:link_id))
             (foreign :ref headlines
-                     ;; :keys (:file_hash :headline_offset)
                      :keys (:headline_id)
-                     ;; :parent-keys (:file_hash :headline_offset)
                      :parent-keys (:headline_id)
                      :on_delete cascade))))
       "Org-SQL database schema represented in internal meta query
@@ -1470,6 +1435,7 @@ CONFIG is the `org-sql-db-config' list."
         :headline-id 1
         :timestamp-id 1
         :entry-id 1
+        :link-id 1
         :property-id 1
         :clock-id 1))
 
@@ -1791,7 +1757,7 @@ to NOTE-TEXT; otherwise just as (CLOCK)."
 
 (defun org-sql--add-mql-insert-state-change (acc entry)
   "Add MQL-insert for state change ENTRY to ACC."
-  (-let (((&plist :entry-offset :file-hash :old-state :new-state) (cdr entry)))
+  (-let (((&plist :entry-offset :old-state :new-state) (cdr entry)))
     (--> (org-sql--add-mql-insert-headline-logbook-item acc entry)
          (org-sql--add-mql-insert it state_changes
            :entry_id (org-sql--acc-get :entry-id acc)
@@ -1801,7 +1767,7 @@ to NOTE-TEXT; otherwise just as (CLOCK)."
 (defun org-sql--add-mql-insert-planning-change (acc hstate entry)
   "Add MQL-insert for planning change ENTRY to ACC.
 HSTATE is a plist as returned by `org-sql--to-hstate'."
-  (-let (((&plist :entry-offset :file-hash :headline-offset :old-ts) (cdr entry)))
+  (-let (((&plist :entry-offset :headline-offset :old-ts) (cdr entry)))
     (--> (org-sql--add-mql-insert-headline-logbook-item acc entry)
          (org-sql--add-mql-insert-timestamp it hstate old-ts)
          (org-sql--add-mql-insert it planning_changes
@@ -1815,7 +1781,7 @@ LOGBOOK is the logbook value of the supercontents list returned
 by `org-ml-headline-get-supercontents'. HSTATE is a plist as
 returned by `org-sql--to-hstate'."
   ;; TODO what about unknown stuff?
-  (-let (((&plist :headline :file-hash) hstate))
+  (-let (((&plist :headline) hstate))
     (cl-flet
         ((add-entry
           (acc entry)
@@ -1837,7 +1803,7 @@ returned by `org-sql--to-hstate'."
   "Add MQL-insert for CLOCK to ACC.
 NOTE-TEXT is either a string or nil representing the clock-note.
 HSTATE is a plist as returned by `org-sql--to-hstate'."
-  (-let (((&plist :headline :file-hash) hstate)
+  (-let (((&plist :headline) hstate)
          (value (org-ml-get-property :value clock)))
     (--> (org-sql--add-mql-insert acc clocks
            :clock_id (org-sql--acc-get :clock-id acc)
@@ -1869,24 +1835,22 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
     ;; TODO only do this once
     (-let* ((ignore-list (append org-sql--ignored-properties-default
                                  org-sql-excluded-properties))
-            ((&plist :headline :file-hash) hstate)
-            (headline-offset (org-ml-get-property :begin headline)))
+            ((&plist :headline :file-hash) hstate))
       (cl-flet
           ((is-ignored
             (node-property)
             (member (org-ml-get-property :key node-property) ignore-list))
            (add-property
             (acc np)
-            (let ((property-offset (org-ml-get-property :begin np)))
-              (--> (org-sql--add-mql-insert acc properties
-                     :file_hash file-hash
-                     :property_id (org-sql--acc-get :property-id acc)
-                     :key_text (org-ml-get-property :key np)
-                     :val_text (org-ml-get-property :value np))
-                   (org-sql--add-mql-insert it headline_properties
-                     :headline_id (org-sql--acc-get :headline-id acc)
-                     :property_id (org-sql--acc-get :property-id acc))
-                   (org-sql--acc-incr :property-id it)))))
+            (--> (org-sql--add-mql-insert acc properties
+                   :file_hash file-hash
+                   :property_id (org-sql--acc-get :property-id acc)
+                   :key_text (org-ml-get-property :key np)
+                   :val_text (org-ml-get-property :value np))
+              (org-sql--add-mql-insert it headline_properties
+                :headline_id (org-sql--acc-get :headline-id acc)
+                :property_id (org-sql--acc-get :property-id acc))
+              (org-sql--acc-incr :property-id it))))
         (->> (org-ml-headline-get-node-properties headline)
              (-remove #'is-ignored)
              (-reduce-from #'add-property acc))))))
@@ -1895,14 +1859,11 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
   "Add MQL-insert for each tag in the current headline to ACC.
 HSTATE is a plist as returned by `org-sql--to-hstate'."
   (if (eq 'all org-sql-excluded-tags) acc
-    (-let* (((&plist :headline :file-hash) hstate)
-            (offset (org-ml-get-property :begin headline)))
+    (-let (((&plist :headline) hstate))
       (cl-flet
           ((add-tag
             (acc tag inherited)
             (org-sql--add-mql-insert acc headline_tags
-              ;; :file_hash file-hash
-              ;; :headline_offset offset
               :headline_id (org-sql--acc-get :headline-id acc)
               :tag tag
               :is_inherited (if inherited 1 0)))
@@ -1922,28 +1883,25 @@ CONTENTS is a list corresponding to that returned by
 `org-ml-headline-get-supercontents'. HSTATE is a plist as
 returned by `org-sql--to-hstate'."
   (if (eq 'all org-sql-excluded-link-types) acc
-    (-let* (((&plist :headline :file-hash) hstate)
-            (offset (org-ml-get-property :begin headline))
+    (-let* (((&plist :headline) hstate)
             (links (->> (--mapcat (org-ml-match '(:any * link) it) contents)
                         (--remove (member (org-ml-get-property :type it)
                                           org-sql-excluded-link-types)))))
       (cl-flet
           ((add-link
             (acc link)
-            (org-sql--add-mql-insert acc links
-              :file_hash file-hash
-              ;; :headline_offset offset
-              :headline_id (org-sql--acc-get :headline-id acc)
-              :link_offset (org-ml-get-property :begin link)
-              :link_path (org-ml-get-property :path link)
-              :link_text (->> (org-ml-get-children link)
-                              (-map #'org-ml-to-string)
-                              (s-join ""))
-              :link_type (org-ml-get-property :type link))))
+            (--> (org-sql--add-mql-insert acc links
+                   :link_id (org-sql--acc-get :link-id acc)
+                   :headline_id (org-sql--acc-get :headline-id acc)
+                   :link_path (org-ml-get-property :path link)
+                   :link_text (->> (org-ml-get-children link)
+                                   (-map #'org-ml-to-string)
+                                   (s-join ""))
+                   :link_type (org-ml-get-property :type link))
+              (org-sql--acc-incr :link-id it))))
         (-reduce-from #'add-link acc links)))))
 
-(defmacro org-sql--add-mql-insert-timestamp-mod (acc modifier-type file-hash
-                                                     timestamp)
+(defmacro org-sql--add-mql-insert-timestamp-mod (acc modifier-type timestamp)
   (declare (indent 2))
   (-let (((tbl-name value-col unit-col type-col type-prop value-prop unit-prop)
           (cl-case modifier-type
@@ -1979,8 +1937,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
         (when time (if (org-ml-time-is-long time) 1 0))))
     (-let* ((start (org-ml-timestamp-get-start-time timestamp))
             (end (org-ml-timestamp-get-end-time timestamp))
-            ((&plist :headline :file-hash) hstate)
-            (headline-offset (org-ml-get-property :begin headline)))
+            ((&plist :headline) hstate))
       (--> acc
         (org-sql--add-mql-insert it timestamps
           :timestamp_id (org-sql--acc-get :timestamp-id acc)
@@ -1991,8 +1948,8 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
           :time_end (-some-> end (org-ml-time-to-unixtime))
           :end_is_long (get-resolution end)
           :raw_value (org-ml-get-property :raw-value timestamp))
-        (org-sql--add-mql-insert-timestamp-mod it warning file-hash timestamp)
-        (org-sql--add-mql-insert-timestamp-mod it repeater file-hash timestamp)))))
+        (org-sql--add-mql-insert-timestamp-mod it warning timestamp)
+        (org-sql--add-mql-insert-timestamp-mod it repeater timestamp)))))
 
 (defun org-sql--add-mql-insert-headline-timestamps (acc hstate contents)
   "Add MQL-insert for each timestamp in the current headline to ACC.
@@ -2005,8 +1962,7 @@ returned by `org-sql--to-hstate'."
                         (--map `(:type ',it) it)
                         `(:any * (:and timestamp (:or ,@it)))))
         (-let* (((&plist :headline) hstate)
-                (timestamps (--mapcat (org-ml-match pattern it) contents))
-                (headline-offset (org-ml-get-property :begin headline)))
+                (timestamps (--mapcat (org-ml-match pattern it) contents)))
           (--reduce-from (->> (org-sql--add-mql-insert-timestamp acc hstate it)
                               (org-sql--acc-incr :timestamp-id))
                          acc timestamps))
@@ -2015,32 +1971,30 @@ returned by `org-sql--to-hstate'."
 (defun org-sql--add-mql-insert-headline-planning (acc hstate)
   "Add MQL-insert for each planning timestamp in the current headline to ACC.
 HSTATE is a plist as returned by `org-sql--to-hstate'."
-  (-let (((&plist :headline :file-hash) hstate))
+  (-let (((&plist :headline) hstate))
     (-if-let (planning (org-ml-headline-get-planning headline))
-        (let ((offset (org-ml-get-property :begin headline)))
-          (cl-flet
-              ((add-planning-maybe
-                (acc type)
-                (-if-let (ts (org-ml-get-property type planning))
-                    (--> (org-sql--add-mql-insert-timestamp acc hstate ts)
-                         (org-sql--add-mql-insert it planning_entries
-                           :headline_id (org-sql--acc-get :headline-id acc)
-                           :planning_type (->> (symbol-name type)
-                                               (s-chop-prefix ":")
-                                               (intern))
-                           :timestamp_id (org-sql--acc-get :timestamp-id acc))
-                         (org-sql--acc-incr :timestamp-id it))
-                  acc)))
-            (--> '(:closed :deadline :scheduled)
-                 (-difference it org-sql-excluded-headline-planning-types)
-                 (-reduce-from #'add-planning-maybe acc it))))
+        (cl-flet
+            ((add-planning-maybe
+              (acc type)
+              (-if-let (ts (org-ml-get-property type planning))
+                  (--> (org-sql--add-mql-insert-timestamp acc hstate ts)
+                    (org-sql--add-mql-insert it planning_entries
+                      :headline_id (org-sql--acc-get :headline-id acc)
+                      :planning_type (->> (symbol-name type)
+                                          (s-chop-prefix ":")
+                                          (intern))
+                      :timestamp_id (org-sql--acc-get :timestamp-id acc))
+                    (org-sql--acc-incr :timestamp-id it))
+                acc)))
+          (--> '(:closed :deadline :scheduled)
+            (-difference it org-sql-excluded-headline-planning-types)
+            (-reduce-from #'add-planning-maybe acc it)))
       acc)))
 
 (defun org-sql--add-mql-insert-headline-closures (acc hstate)
   "Add MQL-insert for parent closures from the current headline to ACC.
 HSTATE is a plist as returned by `org-sql--to-hstate'."
-  (-let* (((&plist :headline :file-hash :parent-ids) hstate)
-          (offset (org-ml-get-property :begin headline))
+  (-let* (((&plist :headline :parent-ids) hstate)
           (headline-id (org-sql--acc-get :headline-id acc)))
     (cl-flet
         ((add-closure
@@ -2052,11 +2006,6 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
       (->> (--map-indexed (list it it-index) parent-ids)
            (reverse)
            (--reduce-from (apply #'add-closure acc it) acc)))))
-      ;; (->> (org-sql--headline-get-path headline)
-      ;;      (reverse)
-      ;;      (--map-indexed (list it it-index))
-      ;;      (reverse)
-      ;;      (--reduce-from (apply #'add-closure acc it) acc)))))
 
 (defun org-sql--add-mql-insert-headline (acc hstate)
   "Add MQL-insert the current headline's metadata to ACC.
@@ -2082,7 +2031,6 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
       (--> (org-sql--add-mql-insert acc headlines
              :headline_id (org-sql--acc-get :headline-id acc)
              :file_hash file-hash
-             ;; :headline_offset (org-ml-get-property :begin headline)
              :headline_text (org-ml-get-property :raw-value headline)
              :keyword (org-ml-get-property :todo-keyword headline)
              :effort (-> (org-ml-headline-get-node-property "Effort" headline)
@@ -2146,8 +2094,7 @@ FSTATE is a list given by `org-sql--to-fstate'."
     (cl-flet
         ((add-property
           (acc keyword)
-          (-let ((offset (org-ml-get-property :begin keyword))
-                 ((key value) (--> (org-ml-get-property :value keyword)
+          (-let (((key value) (--> (org-ml-get-property :value keyword)
                                    (s-split-up-to " " it 1))))
             (--> (org-sql--add-mql-insert acc properties
                    :file_hash file-hash
