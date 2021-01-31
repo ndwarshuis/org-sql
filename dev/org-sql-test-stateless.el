@@ -568,19 +568,19 @@ list then join the cdr of IN with newlines."
                 (format "SCHEDULED: %s DEADLINE: %s CLOSED: %s" ts0 ts1 ts2))
         "multiple (included)"
         nil
-        `((timestamps (,testing-hash 1 23 ,ts0 1 ,(org-ts-to-unixtime ts0) nil 0 nil)
-                      (,testing-hash 1 50 ,ts1 1 ,(org-ts-to-unixtime ts1) nil 0 nil)
-                      (,testing-hash 1 75 ,ts2 0 ,(org-ts-to-unixtime ts2) nil 0 nil))
-          (planning_entries (1 ,testing-hash scheduled 23)
-                            (1 ,testing-hash deadline 50)
-                            (1 ,testing-hash closed 75)))
+        `((timestamps (3 1 ,ts0 1 ,(org-ts-to-unixtime ts0) nil 0 nil)
+                      (2 1 ,ts1 1 ,(org-ts-to-unixtime ts1) nil 0 nil)
+                      (1 1 ,ts2 0 ,(org-ts-to-unixtime ts2) nil 0 nil))
+          (planning_entries (1 scheduled 3)
+                            (1 deadline 2)
+                            (1 closed 1)))
 
         "multiple (exclude some)"
         ((org-sql-excluded-headline-planning-types '(:closed)))
-        `((timestamps (,testing-hash 1 23 ,ts0 1 ,(org-ts-to-unixtime ts0) nil 0 nil)
-                      (,testing-hash 1 50 ,ts1 1 ,(org-ts-to-unixtime ts1) nil 0 nil))
-          (planning_entries (1 ,testing-hash scheduled 23)
-                            (1 ,testing-hash deadline 50)))
+        `((timestamps (2 1  ,ts0 1 ,(org-ts-to-unixtime ts0) nil 0 nil)
+                      (1 1 ,ts1 1 ,(org-ts-to-unixtime ts1) nil 0 nil))
+          (planning_entries (1 scheduled 2)
+                            (1 deadline 1)))
 
         "multiple (exclude all)"
         ((org-sql-excluded-headline-planning-types '(:closed :scheduled :deadline)))
@@ -641,14 +641,14 @@ list then join the cdr of IN with newlines."
              (planning (format "CLOSED: %s" ts)))
         (expect-sql-tbls (timestamps) (list "* parent"
                                             planning)
-          `((timestamps (,testing-hash 1 18 ,ts 1 ,(org-ts-to-unixtime ts) nil 0 nil))))))
+          `((timestamps (1 1 ,ts 1 ,(org-ts-to-unixtime ts) nil 0 nil))))))
 
     (it "closed (long)"
       (let* ((ts "<2112-01-01 Thu 00:00>")
              (planning (format "CLOSED: %s" ts)))
         (expect-sql-tbls (timestamps) (list "* parent"
                                             planning)
-          `((timestamps (,testing-hash 1 18 ,ts 1 ,(org-ts-to-unixtime ts) nil 1 nil))))))
+          `((timestamps (1 1 ,ts 1 ,(org-ts-to-unixtime ts) nil 1 nil))))))
 
     (it "deadline (repeater)"
       (let* ((ts "<2112-01-01 Thu +2d>")
@@ -656,8 +656,8 @@ list then join the cdr of IN with newlines."
         (expect-sql-tbls (timestamps timestamp_modifiers timestamp_repeaters)
                          (list "* parent"
                                planning)
-          `((timestamps (,testing-hash 1 20 ,ts 1 ,(org-ts-to-unixtime ts) nil 0 nil))
-            (timestamp_repeaters (,testing-hash 20 2 day cumulate))))))
+          `((timestamps (1 1 ,ts 1 ,(org-ts-to-unixtime ts) nil 0 nil))
+            (timestamp_repeaters (1 2 day cumulate))))))
 
     (it "deadline (warning)"
       (let* ((ts "<2112-01-01 Thu -2d>")
@@ -665,8 +665,8 @@ list then join the cdr of IN with newlines."
         (expect-sql-tbls (timestamps timestamp_modifiers timestamp_warnings)
                          (list "* parent"
                                planning)
-          `((timestamps (,testing-hash 1 20 ,ts 1 ,(org-ts-to-unixtime ts) nil 0 nil))
-            (timestamp_warnings (,testing-hash 20 2 day all))))))
+          `((timestamps (1 1 ,ts 1 ,(org-ts-to-unixtime ts) nil 0 nil))
+            (timestamp_warnings (1 2 day all))))))
 
     (let* ((ts1 "<2112-01-01 Thu>")
            (ts2 "[2112-01-02 Fri]"))
@@ -675,12 +675,12 @@ list then join the cdr of IN with newlines."
                                                 ts2)
         "multiple content (included)"
         nil
-        `((timestamps (,testing-hash 1 27 ,ts2 0 ,(org-ts-to-unixtime ts2) nil 0 nil)
-                      (,testing-hash 1 10 ,ts1 1 ,(org-ts-to-unixtime ts1) nil 0 nil)))
+        `((timestamps (2 1 ,ts2 0 ,(org-ts-to-unixtime ts2) nil 0 nil)
+                      (1 1 ,ts1 1 ,(org-ts-to-unixtime ts1) nil 0 nil)))
 
         "multiple content (exclude some)"
         ((org-sql-excluded-contents-timestamp-types '(inactive)))
-        `((timestamps (,testing-hash 1 10 ,ts1 1 ,(org-ts-to-unixtime ts1) nil 0 nil)))
+        `((timestamps (1 1 ,ts1 1 ,(org-ts-to-unixtime ts1) nil 0 nil)))
 
         "multiple content (exclude all)"
         ((org-sql-excluded-contents-timestamp-types 'all))
@@ -691,7 +691,7 @@ list then join the cdr of IN with newlines."
         (expect-sql-tbls (timestamps) (list "* parent"
                                             "** child"
                                             ts)
-          `((timestamps (,testing-hash 2 19 ,ts 1 ,(org-ts-to-unixtime ts) nil 0 nil))))))
+          `((timestamps (1 2 ,ts 1 ,(org-ts-to-unixtime ts) nil 0 nil))))))
     
     (it "content (ranged)"
       (let* ((ts0 "<2112-01-01 Thu>")
@@ -699,8 +699,8 @@ list then join the cdr of IN with newlines."
              (ts (format "%s--%s" ts0 ts1)))
         (expect-sql-tbls (timestamps) (list "* parent"
                                             ts)
-          `((timestamps (,testing-hash 1 10 ,ts 1 ,(org-ts-to-unixtime ts0)
-                                       ,(org-ts-to-unixtime ts1) 0 0)))))))
+          `((timestamps (1 1 ,ts 1 ,(org-ts-to-unixtime ts0)
+                           ,(org-ts-to-unixtime ts1) 0 0)))))))
 
   (describe "links"
     (expect-sql-tbls-multi (links) (list "* parent"
@@ -849,11 +849,9 @@ list then join the cdr of IN with newlines."
                   (format "- %s" header))
           "rescheduled (included)"
           nil
-          `((timestamps (,testing-hash 1 30 ,ts0 0 ,(org-ts-to-unixtime ts0) nil
-                                       1 nil))
-            (logbook_entries (,testing-hash 1 10 "reschedule"
-                                            ,(org-ts-to-unixtime ts1) ,header nil))
-            (planning_changes (,testing-hash 10 30)))
+          `((timestamps (1 1 ,ts0 0 ,(org-ts-to-unixtime ts0) nil 1 nil))
+            (logbook_entries (,testing-hash 1 10 "reschedule" ,(org-ts-to-unixtime ts1) ,header nil))
+            (planning_changes (,testing-hash 10 1)))
 
           "rescheduled (excluded)"
           ((org-sql-excluded-logbook-types '(reschedule)))
@@ -867,12 +865,11 @@ list then join the cdr of IN with newlines."
                   (format "- %s" header))
           "redeadline (included)"
           nil
-          `((timestamps (,testing-hash 1 31 ,ts0 0 ,(org-ts-to-unixtime ts0)
-                                       nil 1 nil))
+          `((timestamps (1 1 ,ts0 0 ,(org-ts-to-unixtime ts0) nil 1 nil))
             (logbook_entries (,testing-hash 1 10 "redeadline"
                                             ,(org-ts-to-unixtime ts1)
                                             ,header nil))
-            (planning_changes (,testing-hash 10 31)))
+            (planning_changes (,testing-hash 10 1)))
 
           "redeadline (excluded)"
           ((org-sql-excluded-logbook-types '(redeadline)))
@@ -886,11 +883,11 @@ list then join the cdr of IN with newlines."
                   (format "- %s" header))
           "delschedule (included)"
           nil
-          `((timestamps (,testing-hash 1 32 ,ts0 0 ,(org-ts-to-unixtime ts0) nil 1 nil))
+          `((timestamps (1 1 ,ts0 0 ,(org-ts-to-unixtime ts0) nil 1 nil))
             (logbook_entries (,testing-hash 1 10 "delschedule"
                                             ,(org-ts-to-unixtime ts1) ,header
                                             nil))
-            (planning_changes (,testing-hash 10 32)))
+            (planning_changes (,testing-hash 10 1)))
 
           "delschedule (excluded)"
           ((org-sql-excluded-logbook-types '(delschedule)))
@@ -904,12 +901,11 @@ list then join the cdr of IN with newlines."
                   (format "- %s" header))
           "deldeadline (included)"
           nil
-          `((timestamps (,testing-hash 1 35 ,ts0 0 ,(org-ts-to-unixtime ts0)
-                                       nil 1 nil))
+          `((timestamps (1 1 ,ts0 0 ,(org-ts-to-unixtime ts0) nil 1 nil))
             (logbook_entries (,testing-hash 1 10 "deldeadline"
                                             ,(org-ts-to-unixtime ts1) ,header
                                             nil))
-            (planning_changes (,testing-hash 10 35)))
+            (planning_changes (,testing-hash 10 1)))
 
           "deldeadline (excluded)"
           ((org-sql-excluded-logbook-types '(deldeadline)))

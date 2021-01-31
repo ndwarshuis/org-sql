@@ -126,21 +126,26 @@ to store them. This is in addition to any properties specifified by
                    "hash (MD5) of the org-tree with this %s"
                    :file_hash `(:type char :length ,file_hash-char-length)
                    object notnull))
-         (headline-offset-col
-          (&optional object notnull)
-          (mql-col "offset of this headline"
-                   "offset of the headline with this %s"
-                   :headline_offset '(:type integer) object notnull))
+         ;; (headline-offset-col
+         ;;  (&optional object notnull)
+         ;;  (mql-col "offset of this headline"
+         ;;           "offset of the headline with this %s"
+         ;;           :headline_offset '(:type integer) object notnull))
          (headline-id-col
           (&optional object notnull)
           (mql-col "id of this headline"
                    "id of the headline for this %s"
                    :headline_id '(:type integer) object notnull))
-         (timestamp-offset-col
+         ;; (timestamp-offset-col
+         ;;  (&optional object notnull)
+         ;;  (mql-col "offset of this timestamp"
+         ;;           "offset of the timestamp with this %s"
+         ;;           :timestamp_offset '(:type integer) object notnull))
+         (timestamp-id-col
           (&optional object notnull)
-          (mql-col "offset of this timestamp"
-                   "offset of the timestamp with this %s"
-                   :timestamp_offset '(:type integer) object notnull))
+          (mql-col "id of this timestamp"
+                   "id of the timestamp for this %s"
+                   :timestamp_id '(:type integer) object notnull))
          (entry-offset-col
           (&optional object)
           (mql-col "offset of this logbook entry"
@@ -257,10 +262,8 @@ to store them. This is in addition to any properties specifified by
           (timestamps
            (desc . "Each row stores one timestamp")
            (columns
-            ,(file-hash-col "timestamp")
-            ;; ,(headline-offset-col "timestamp" t)
+            ,(timestamp-id-col)
             ,(headline-id-col "timestamp" t)
-            ,(timestamp-offset-col)
             (:raw_value :desc "text representation of this timestamp"
                         :type text
                         :constraints (notnull))
@@ -278,19 +281,16 @@ to store them. This is in addition to any properties specifified by
             (:end_is_long :desc "true if the end time is in long format"
                           :type boolean))
            (constraints
-            (primary :keys (:file_hash :timestamp_offset))
+            (primary :keys (:timestamp_id))
             (foreign :ref headlines
-                     ;; :keys (:file_hash :headline_offset)
                      :keys (:headline_id)
-                     ;; :parent-keys (:file_hash :headline_offset)
                      :parent-keys (:headline_id)
                      :on_delete cascade)))
 
           (timestamp_warnings
            (desc . "Each row stores specific information for a timestamp warning")
            (columns
-            ,(file-hash-col "warning")
-            ,(timestamp-offset-col "warning")
+            ,(timestamp-id-col "warning")
             (:warning_value :desc "shift of this warning"
                              :type integer)
             (:warning_unit :desc "unit of this warning"
@@ -300,17 +300,16 @@ to store them. This is in addition to any properties specifified by
                            :type enum
                            :allowed (all first)))
            (constraints
-            (primary :keys (:file_hash :timestamp_offset))
+            (primary :keys (:timestamp_id))
             (foreign :ref timestamps
-                     :keys (:file_hash :timestamp_offset)
-                     :parent-keys (:file_hash :timestamp_offset)
+                     :keys (:timestamp_id)
+                     :parent-keys (:timestamp_id)
                      :on_delete cascade)))
           
           (timestamp_repeaters
            (desc . "Each row stores specific information for a timestamp repeater")
            (columns
-            ,(file-hash-col "repeater")
-            ,(timestamp-offset-col "repeater")
+            ,(timestamp-id-col "repeater")
             (:repeater_value :desc "shift of this repeater"
                              :type integer)
             (:repeater_unit :desc "unit of this repeater"
@@ -320,29 +319,26 @@ to store them. This is in addition to any properties specifified by
                            :type enum
                            :allowed (catch-up restart cumulate)))
            (constraints
-            (primary :keys (:file_hash :timestamp_offset))
+            (primary :keys (:timestamp_id))
             (foreign :ref timestamps
-                     :keys (:file_hash :timestamp_offset)
-                     :parent-keys (:file_hash :timestamp_offset)
+                     :keys (:timestamp_id)
+                     :parent-keys (:timestamp_id)
                      :on_delete cascade)))
 
           (planning_entries
            (desc . "Each row stores the metadata for headline planning timestamps.")
            (columns
             ,(headline-id-col "planning entry")
-            ,(file-hash-col "planning entry")
-            ;; ,(headline-offset-col "planning entry")
             (:planning_type :desc "the type of this planning entry"
                             :type enum
                             :length 9
                             :allowed (closed scheduled deadline))
-            ,(timestamp-offset-col "planning entry" t))
+            ,(timestamp-id-col "planning entry" t))
            (constraints
-            ;; (primary :keys (:file_hash :headline_offset :planning_type))
             (primary :keys (:headline_id :planning_type))
             (foreign :ref timestamps
-                     :keys (:file_hash :timestamp_offset)
-                     :parent-keys (:file_hash :timestamp_offset)
+                     :keys (:timestamp_id)
+                     :parent-keys (:timestamp_id)
                      :on_delete cascade)))
 
           (file_tags
@@ -501,14 +497,14 @@ to store them. This is in addition to any properties specifified by
            (columns
             ,(file-hash-col "planning change")
             ,(entry-offset-col "planning change")
-            (:timestamp_offset :desc "offset of the former timestamp"
-                               :type integer
-                               :constraints (notnull)))
+            (:timestamp_id :desc "id of the former timestamp"
+                           :type integer
+                           :constraints (notnull)))
            (constraints
             (primary :keys (:file_hash :entry_offset))
             (foreign :ref timestamps
-                     :keys (:file_hash :timestamp_offset)
-                     :parent-keys (:file_hash :timestamp_offset))
+                     :keys (:timestamp_id)
+                     :parent-keys (:timestamp_id))
                      ;; :on_delete cascade)
             (foreign :ref logbook_entries
                      :keys (:file_hash :entry_offset)
@@ -1822,7 +1818,8 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
          (org-sql--add-mql-insert it planning_changes
            :file_hash file-hash
            :entry_offset entry-offset
-           :timestamp_offset (org-ml-get-property :begin old-ts)))))
+           :timestamp_id (org-sql--acc-get :timestamp-id acc))
+         (org-sql--acc-incr :timestamp-id it))))
 
 (defun org-sql--add-mql-insert-headline-logbook-items (acc hstate logbook)
   "Add MQL-inserts for LOGBOOK to ACC.
@@ -1979,8 +1976,7 @@ returned by `org-sql--to-hstate'."
             (t (error "Unknown modifier type: %s" modifier-type)))))
     `(-if-let (type (org-ml-get-property ,type-prop ,timestamp))
          (org-sql--add-mql-insert ,acc ,tbl-name
-           :file_hash ,file-hash
-           :timestamp_offset (org-ml-get-property :begin ,timestamp)
+           :timestamp_id (org-sql--acc-get :timestamp-id acc)
            ,value-col (org-ml-get-property ,value-prop ,timestamp)
            ,unit-col (org-ml-get-property ,unit-prop ,timestamp)
            ,type-col type)
@@ -1999,10 +1995,8 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
             (headline-offset (org-ml-get-property :begin headline)))
       (--> acc
         (org-sql--add-mql-insert it timestamps
-          :file_hash file-hash
-          ;; :headline_offset headline-offset
+          :timestamp_id (org-sql--acc-get :timestamp-id acc)
           :headline_id (org-sql--acc-get :headline-id acc)
-          :timestamp_offset (org-ml-get-property :begin timestamp)
           :is_active (if (org-ml-timestamp-is-active timestamp) 1 0)
           :time_start (org-ml-time-to-unixtime start)
           :start_is_long (get-resolution start)
@@ -2025,7 +2019,8 @@ returned by `org-sql--to-hstate'."
         (-let* (((&plist :headline) hstate)
                 (timestamps (--mapcat (org-ml-match pattern it) contents))
                 (headline-offset (org-ml-get-property :begin headline)))
-          (--reduce-from (org-sql--add-mql-insert-timestamp acc hstate it)
+          (--reduce-from (->> (org-sql--add-mql-insert-timestamp acc hstate it)
+                              (org-sql--acc-incr :timestamp-id))
                          acc timestamps))
       acc)))
 
@@ -2041,13 +2036,12 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
                 (-if-let (ts (org-ml-get-property type planning))
                     (--> (org-sql--add-mql-insert-timestamp acc hstate ts)
                          (org-sql--add-mql-insert it planning_entries
-                           :file_hash file-hash
-                           ;; :headline_offset offset
                            :headline_id (org-sql--acc-get :headline-id acc)
                            :planning_type (->> (symbol-name type)
                                                (s-chop-prefix ":")
                                                (intern))
-                           :timestamp_offset (org-ml-get-property :begin ts)))
+                           :timestamp_id (org-sql--acc-get :timestamp-id acc))
+                         (org-sql--acc-incr :timestamp-id it))
                   acc)))
             (--> '(:closed :deadline :scheduled)
                  (-difference it org-sql-excluded-headline-planning-types)
