@@ -941,7 +941,7 @@ If not present, return the current value of CLOCK-OUT-NOTES."
   (org-sql--top-section-get-binary-startup
    "lognoteclock-out" "nolognoteclock-out" clock-out-notes top-section))
 
-(defun org-sql--to-fstate (file-hash paths-with-attributes log-note-headings
+(defun org-sql--to-tree-config (file-hash paths-with-attributes log-note-headings
                                      todo-keywords lb-config size lines tree)
   "Return a plist representing the state of an org buffer.
 The plist will include:
@@ -1002,8 +1002,8 @@ If not present, return the current value of CLOCK-INTO-DRAWER."
        (org-sql--map-plist :clock-into-drawer
          (org-sql--headline-get-clock-into-drawer it headline))))
 
-(defun org-sql--to-hstate (headline-id fstate headline)
-  "Return new hstate set from FSTATE and HEADLINE.
+(defun org-sql--to-hstate (headline-id tree-config headline)
+  "Return new hstate set from TREE-CONFIG and HEADLINE.
 
 An HSTATE represents the current headline being processed and
 will include the follwing keys/values:
@@ -1012,7 +1012,7 @@ will include the follwing keys/values:
 - `:log-note-matcher': a list of log-note-matchers for this org
   file as returned by `org-sql--build-log-note-heading-matchers'
 - `:headline' the current headline node."
-  (-let (((&plist :file-hash h :lb-config c :log-note-matcher m) fstate))
+  (-let (((&plist :file-hash h :lb-config c :log-note-matcher m) tree-config))
     (list :file-hash h
           :lb-config (org-sql--headline-update-supercontents-config c headline)
           :log-note-matcher m
@@ -1401,7 +1401,7 @@ CONFIG is the `org-sql-db-config' list."
                       "*")))
     (format "SELECT %s FROM %s;" columns* tbl-name*)))
 
-;; hashpathpairs/fstate -> SQL statements
+;; hashpathpairs/tree-config -> SQL statements
 
 (defun org-sql--format-path-delete-statement (config hashpathpairs)
   (when hashpathpairs
@@ -1448,10 +1448,10 @@ CONFIG is the `org-sql-db-config' list."
 (defun org-sql--acc-reset (key acc)
   (plist-put acc key 0))
 
-(defun org-sql--format-insert-statements (config path-hashpathpairs file-fstates)
+(defun org-sql--format-insert-statements (config path-hashpathpairs file-tree-configs)
   ;; (let* ((acc (-clone org-sql--empty-mql-bulk-insert))
   (let* ((acc (org-sql--init-acc))
-         (acc* (--reduce-from (org-sql--fstate-to-mql-insert acc it) acc file-fstates)))
+         (acc* (--reduce-from (org-sql--tree-config-to-mql-insert acc it) acc file-tree-configs)))
     (--> path-hashpathpairs
          ;; TODO this caaaddddaaddar stuff is confusing AF...
          (--reduce-from (org-sql--add-mql-insert-file-metadata* acc (cadr it) (car it) (cddr it)) acc* it)
@@ -2053,17 +2053,17 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
         (org-sql--add-mql-insert-headline-closures it hstate)
         (org-sql--acc-incr :headline-id it)))))
 
-(defun org-sql--add-mql-insert-headlines (acc fstate)
-  "Add MQL-insert headlines in FSTATE to ACC.
-FSTATE is a list given by `org-sql--to-fstate'."
-  (-let (((&plist :headlines) fstate))
+(defun org-sql--add-mql-insert-headlines (acc tree-config)
+  "Add MQL-insert headlines in TREE-CONFIG to ACC.
+TREE-CONFIG is a list given by `org-sql--to-tree-config'."
+  (-let (((&plist :headlines) tree-config))
     (cl-labels
         ((add-headline
           (acc hstate hl)
           (let* ((sub (org-ml-headline-get-subheadlines hl))
                  (headline-id (org-sql--acc-get :headline-id acc))
                  (hstate* (if hstate (org-sql--update-hstate headline-id hstate hl)
-                            (org-sql--to-hstate headline-id fstate hl))))
+                            (org-sql--to-hstate headline-id tree-config hl))))
             (if (and org-sql-exclude-headline-predicate
                      (funcall org-sql-exclude-headline-predicate hl))
                 acc
@@ -2071,10 +2071,10 @@ FSTATE is a list given by `org-sql--to-fstate'."
                 (--reduce-from (add-headline acc hstate* it) it sub))))))
       (--reduce-from (add-headline acc nil it) acc headlines))))
 
-(defun org-sql--add-mql-insert-file-tags (acc fstate)
+(defun org-sql--add-mql-insert-file-tags (acc tree-config)
   "Add MQL-insert for each file tag in file to ACC.
-FSTATE is a list given by `org-sql--to-fstate'."
-  (-let (((&plist :file-hash :top-section) fstate))
+TREE-CONFIG is a list given by `org-sql--to-tree-config'."
+  (-let (((&plist :file-hash :top-section) tree-config))
     (cl-flet
         ((add-tag
           (acc tag)
@@ -2087,10 +2087,10 @@ FSTATE is a list given by `org-sql--to-fstate'."
            (-uniq)
            (-reduce-from #'add-tag acc)))))
 
-(defun org-sql--add-mql-insert-file-properties (acc fstate)
+(defun org-sql--add-mql-insert-file-properties (acc tree-config)
   "Add MQL-insert for each file property in file to ACC.
-FSTATE is a list given by `org-sql--to-fstate'."
-  (-let (((&plist :file-hash :top-section) fstate))
+TREE-CONFIG is a list given by `org-sql--to-tree-config'."
+  (-let (((&plist :file-hash :top-section) tree-config))
     (cl-flet
         ((add-property
           (acc keyword)
@@ -2109,10 +2109,10 @@ FSTATE is a list given by `org-sql--to-fstate'."
            (--filter (equal (org-ml-get-property :key it) "PROPERTY"))
            (-reduce-from #'add-property acc)))))
 
-(defun org-sql--add-mql-insert-file-hash (acc fstate)
-  "Add MQL-insert for file in FSTATE to ACC.
-FSTATE is a list given by `org-sql--to-fstate'."
-  (-let (((&plist :file-hash :size :lines) fstate))
+(defun org-sql--add-mql-insert-file-hash (acc tree-config)
+  "Add MQL-insert for file in TREE-CONFIG to ACC.
+TREE-CONFIG is a list given by `org-sql--to-tree-config'."
+  (-let (((&plist :file-hash :size :lines) tree-config))
     (org-sql--add-mql-insert acc file_hashes
       :file_hash file-hash
       :tree_size size
@@ -2132,22 +2132,22 @@ FSTATE is a list given by `org-sql--to-fstate'."
                                  (round))
     :file_modes (file-attribute-modes attrs)))
 
-(defun org-sql--add-mql-insert-file-metadata (acc fstate)
-  "Add MQL-insert for file in FSTATE to ACC.
-FSTATE is a list given by `org-sql--to-fstate'."
-  (-let (((&plist :paths-with-attributes :file-hash) fstate))
+(defun org-sql--add-mql-insert-file-metadata (acc tree-config)
+  "Add MQL-insert for file in TREE-CONFIG to ACC.
+TREE-CONFIG is a list given by `org-sql--to-tree-config'."
+  (-let (((&plist :paths-with-attributes :file-hash) tree-config))
     (--reduce-from (org-sql--add-mql-insert-file-metadata* acc (car it) file-hash (cdr it))
                    acc paths-with-attributes)))
 
-(defun org-sql--fstate-to-mql-insert (acc fstate)
-  "Return all MQL-inserts for FSTATE.
-FSTATE is a list given by `org-sql--to-fstate'."
+(defun org-sql--tree-config-to-mql-insert (acc tree-config)
+  "Return all MQL-inserts for TREE-CONFIG.
+TREE-CONFIG is a list given by `org-sql--to-tree-config'."
   (-> acc
-      (org-sql--add-mql-insert-file-hash fstate)
-      (org-sql--add-mql-insert-file-metadata fstate)
-      (org-sql--add-mql-insert-file-properties fstate)
-      (org-sql--add-mql-insert-file-tags fstate)
-      (org-sql--add-mql-insert-headlines fstate)))
+      (org-sql--add-mql-insert-file-hash tree-config)
+      (org-sql--add-mql-insert-file-metadata tree-config)
+      (org-sql--add-mql-insert-file-properties tree-config)
+      (org-sql--add-mql-insert-file-tags tree-config)
+      (org-sql--add-mql-insert-headlines tree-config)))
 
 ;; (defun org-sql--hashpathpair-to-mql-delete (file-hash)
 ;;   (org-sql--mql-delete file_hashes (:file_hash file-hash)))
@@ -2253,9 +2253,9 @@ Return a cons cell like (RETURNCODE . OUTPUT)."
 ;;     ;; (process-send-string proc (concat payload "\n"))
 ;;     ;; (process-send-eof proc)))
     
-;;; hashpathpair -> fstate
+;;; hashpathpair -> tree-config
 
-(defun org-sql--hashpathpair-get-fstate (file-hash file-paths)
+(defun org-sql--hashpathpair-get-tree-config (file-hash file-paths)
   (let ((paths-with-attributes (--map (cons it (file-attributes it 'integer)) file-paths)))
     ;; just pick the first file path to open
     (with-current-buffer (find-file-noselect (car file-paths) t)
@@ -2268,7 +2268,7 @@ Return a cons cell like (RETURNCODE . OUTPUT)."
             (lines (save-excursion
                      (goto-char (point-max))
                      (line-number-at-pos))))
-        (org-sql--to-fstate file-hash paths-with-attributes
+        (org-sql--to-tree-config file-hash paths-with-attributes
                             org-log-note-headings todo-keywords lb-config
                             size lines tree)))))
 
@@ -2323,7 +2323,7 @@ state as the orgfiles on disk."
     (list (org-sql--format-path-delete-statement org-sql-db-config pd)
           (org-sql--format-file-delete-statement org-sql-db-config fd)
           (->> (org-sql--group-hashpathpairs-by-hash fi)
-               (--map (org-sql--hashpathpair-get-fstate (car it) (cdr it)))
+               (--map (org-sql--hashpathpair-get-tree-config (car it) (cdr it)))
                (org-sql--format-insert-statements org-sql-db-config pi*)))))
          ;; (org-sql--format-sql-transaction org-sql-db-config))))
 

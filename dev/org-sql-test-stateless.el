@@ -87,10 +87,10 @@ list then join the cdr of IN with newlines."
         ;; (acc (-clone org-sql--empty-mql-bulk-insert)))
         (acc (org-sql--init-acc)))
     (--> (org-ml-parse-this-buffer)
-         (org-sql--to-fstate testing-hash paths-with-attributes
+         (org-sql--to-tree-config testing-hash paths-with-attributes
                              org-log-note-headings '("TODO" "DONE")
                              lb-config testing-size testing-lines it)
-         (org-sql--fstate-to-mql-insert acc it)
+         (org-sql--tree-config-to-mql-insert acc it)
          (plist-get it :inserts)
          (-filter #'cdr it))))
 
@@ -139,11 +139,11 @@ list then join the cdr of IN with newlines."
                                :clock-out-notes org-log-note-clock-out))
               (paths-with-attributes
                (list (cons testing-filepath testing-attributes)))
-              (fstate (org-sql--to-fstate testing-hash paths-with-attributes
+              (tree-config (org-sql--to-tree-config testing-hash paths-with-attributes
                                           ,log-note-headings '("TODO" "DONE")
                                           lb-config testing-size testing-lines
                                           nil))
-              (hstate (org-sql--to-hstate 1 fstate headline))
+              (hstate (org-sql--to-hstate 1 tree-config headline))
               (entry (->> (org-sql--item-to-entry hstate item)
                           (props-to-string (list :ts
                                                  :ts-active
