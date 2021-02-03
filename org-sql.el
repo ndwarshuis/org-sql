@@ -184,7 +184,7 @@ to store them. This is in addition to any properties specifified by
                      :keys (:file_hash)
                      :parent-keys (:file_hash)
                      ;; TODO this 'on_delete' is not lispy because it has a '_'
-                     :on_delete cascade)))
+                     :on-delete cascade)))
 
           (headlines
            (desc . "Each row stores one headline in a given org file and its metadata")
@@ -218,7 +218,7 @@ to store them. This is in addition to any properties specifified by
             (foreign :ref file_hashes
                      :keys (:file_hash)
                      :parent-keys (:file_hash)
-                     :on_delete cascade)))
+                     :on-delete cascade)))
 
           (headline_closures
            (desc . "Each row stores the ancestor and depth of a headline relationship (eg closure table)")
@@ -233,7 +233,7 @@ to store them. This is in addition to any properties specifified by
             (foreign :ref headlines
                      :keys (:headline_id)
                      :parent-keys (:headline_id)
-                     :on_delete cascade)
+                     :on-delete cascade)
             (foreign :ref headlines
                      :keys (:parent_id)
                      :parent-keys (:headline_id))))
@@ -264,7 +264,7 @@ to store them. This is in addition to any properties specifified by
             (foreign :ref headlines
                      :keys (:headline_id)
                      :parent-keys (:headline_id)
-                     :on_delete cascade)))
+                     :on-delete cascade)))
 
           (timestamp_warnings
            (desc . "Each row stores specific information for a timestamp warning")
@@ -283,7 +283,7 @@ to store them. This is in addition to any properties specifified by
             (foreign :ref timestamps
                      :keys (:timestamp_id)
                      :parent-keys (:timestamp_id)
-                     :on_delete cascade)))
+                     :on-delete cascade)))
           
           (timestamp_repeaters
            (desc . "Each row stores specific information for a timestamp repeater")
@@ -302,7 +302,7 @@ to store them. This is in addition to any properties specifified by
             (foreign :ref timestamps
                      :keys (:timestamp_id)
                      :parent-keys (:timestamp_id)
-                     :on_delete cascade)))
+                     :on-delete cascade)))
 
           (planning_entries
            (desc . "Each row stores the metadata for headline planning timestamps.")
@@ -318,7 +318,7 @@ to store them. This is in addition to any properties specifified by
             (foreign :ref timestamps
                      :keys (:timestamp_id)
                      :parent-keys (:timestamp_id)
-                     :on_delete cascade)))
+                     :on-delete cascade)))
 
           (file_tags
            (desc . "Each row stores one tag at the file level")
@@ -330,7 +330,7 @@ to store them. This is in addition to any properties specifified by
             (foreign :ref file_hashes
                      :keys (:file_hash)
                      :parent-keys (:file_hash)
-                     :on_delete cascade)))
+                     :on-delete cascade)))
 
           (headline_tags
            (desc . "Each row stores one tag")
@@ -345,7 +345,7 @@ to store them. This is in addition to any properties specifified by
             (foreign :ref headlines
                      :keys (:headline_id)
                      :parent-keys (:headline_id)
-                     :on_delete cascade)))
+                     :on-delete cascade)))
 
           (properties
            (desc . "Each row stores one property")
@@ -363,7 +363,7 @@ to store them. This is in addition to any properties specifified by
             (foreign :ref file_hashes
                      :keys (:file_hash)
                      :parent-keys (:file_hash)
-                     :on_delete cascade)))
+                     :on-delete cascade)))
 
           ;; TODO what is the point of this table now?
           (file_properties
@@ -376,11 +376,11 @@ to store them. This is in addition to any properties specifified by
             ;; (foreign :ref file_hashes
             ;;          :keys (:file_hash)
             ;;          :parent-keys (:file_hash)
-            ;;          :on_delete cascade)
+            ;;          :on-delete cascade)
             (foreign :ref properties
                      :keys (:property_id)
                      :parent-keys (:property_id)
-                     :on_delete cascade)))
+                     :on-delete cascade)))
 
           (headline_properties
            (desc . "Each row stores a property at the headline level")
@@ -392,11 +392,11 @@ to store them. This is in addition to any properties specifified by
             (foreign :ref properties
                      :keys (:property_id)
                      :parent-keys (:property_id))
-                     ;; :on_delete cascade)
+                     ;; :on-delete cascade)
             (foreign :ref headlines
                      :keys (:headline_id)
                      :parent-keys (:headline_id)
-                     :on_delete cascade)))
+                     :on-delete cascade)))
           
           (clocks
            (desc . "Each row stores one clock entry")
@@ -415,7 +415,7 @@ to store them. This is in addition to any properties specifified by
             (foreign :ref headlines
                      :keys (:headline_id)
                      :parent-keys (:headline_id)
-                     :on_delete cascade)))
+                     :on-delete cascade)))
 
           (logbook_entries
            (desc . "Each row stores one logbook entry (except for clocks)")
@@ -435,7 +435,7 @@ to store them. This is in addition to any properties specifified by
             (foreign :ref headlines
                      :keys (:headline_id)
                      :parent-keys (:headline_id)
-                     :on_delete cascade)))
+                     :on-delete cascade)))
 
           (state_changes
            (desc . "Each row stores additional metadata for a state change logbook entry")
@@ -452,7 +452,7 @@ to store them. This is in addition to any properties specifified by
             (foreign :ref logbook_entries
                      :keys (:entry_id)
                      :parent-keys (:entry_id)
-                     :on_delete cascade)))
+                     :on-delete cascade)))
 
           (planning_changes
            (desc . "Each row stores additional metadata for a planning change logbook entry")
@@ -466,11 +466,11 @@ to store them. This is in addition to any properties specifified by
             (foreign :ref timestamps
                      :keys (:timestamp_id)
                      :parent-keys (:timestamp_id))
-                     ;; :on_delete cascade)
+                     ;; :on-delete cascade)
             (foreign :ref logbook_entries
                      :keys (:entry_id)
                      :parent-keys (:entry_id)
-                     :on_delete cascade)))
+                     :on-delete cascade)))
 
           (links
            (desc . "Each row stores one link")
@@ -491,7 +491,7 @@ to store them. This is in addition to any properties specifified by
             (foreign :ref headlines
                      :keys (:headline_id)
                      :parent-keys (:headline_id)
-                     :on_delete cascade))))
+                     :on-delete cascade))))
       "Org-SQL database schema represented in internal meta query
     language (MQL, basically a giant list)"))))
 
@@ -1299,7 +1299,7 @@ foreign key constraint. CONFIG is the `org-sql-db-config' list."
                (format "PRIMARY KEY (%s)"))))
        (format-foreign
         (keyvals)
-        (-let* (((&plist :ref :keys :parent-keys :on_delete) keyvals)
+        (-let* (((&plist :ref :keys :parent-keys :on-delete) keyvals)
                 (ref* (org-sql--format-mql-table-name config ref))
                 (keys* (->> keys (-map #'org-sql--format-mql-column-name) (s-join ",")))
                 (parent-keys* (->> parent-keys
