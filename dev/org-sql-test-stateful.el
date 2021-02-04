@@ -503,6 +503,7 @@
      (after-all
        (org-sql-send-sql "DROP TABLE IF EXISTS fake_init_table;")
        (org-sql-send-sql "DROP TABLE IF EXISTS fake_update_table;")
+       (org-sql-send-sql "DROP TABLE IF EXISTS save_something;")
        (setq org-sql-db-config `,config))
 
      (describe-reset-db "update hook"
@@ -537,7 +538,16 @@
        (it "fake init table should not exist"
          (expect (not (member "fake_init_table" (org-sql-list-tables)))))
        (it "fake update table should not exist"
-         (expect (not (member "fake_update_table" (org-sql-list-tables))))))))
+         (expect (not (member "fake_update_table" (org-sql-list-tables)))))
+       (it "reset database"
+         (setq org-sql-db-config
+               (append ',config
+                       (list
+                        :pre-reset-hooks
+                        `((sql "CREATE TABLE save_something (x INTEGER);")))))
+         (expect-exit-success (org-sql-reset-db)))
+       (it "reset table should exist"
+         (expect (member "save_something" (org-sql-list-tables)))))))
 
 (defmacro describe-io-spec (unique-name config)
   (declare (indent 1))

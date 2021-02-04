@@ -1307,7 +1307,7 @@ foreign key constraint. CONFIG is the `org-sql-db-config' list."
                                    (s-join ",")))
                 (foreign-str (format "FOREIGN KEY (%s) REFERENCES %s (%s)"
                                      keys* ref* parent-keys*))
-                (on-delete* (-some--> on_delete
+                (on-delete* (-some--> on-delete
                               (cl-case it
                                 (no-action "NO ACTION")
                                 (cascade "CASCADE"))
@@ -2472,12 +2472,14 @@ The database connection will be handled transparently."
   (->> (org-sql--format-sql-transaction org-sql-db-config statements)
        (org-sql-send-sql)))
 
-(defun org-sql--send-transaction-with-hook (key trans-stmts)
-  (-let* (((in-trans after-trans) (org-sql--pull-hook key))
-          (ts (->> (append trans-stmts in-trans)
+(defun org-sql--send-transaction-with-hook (pre-key post-key trans-stmts)
+  (-let* (((pre-in-trans before-trans) (-some-> pre-key (org-sql--pull-hook)))
+          ((post-in-trans after-trans) (-some-> post-key (org-sql--pull-hook)))
+          (ts (->> (append pre-in-trans trans-stmts post-in-trans)
                    (org-sql--format-sql-transaction org-sql-db-config)))
-          (is (s-join "" after-trans)))
-    (org-sql--send-sql* (concat ts is) org-sql-async)))
+          (bs (-some->> before-trans (s-join "")))
+          (as (-some->> after-trans (s-join ""))))
+    (org-sql--send-sql* (concat bs ts as) org-sql-async)))
 
 ;;;
 ;;; Public API
@@ -2694,19 +2696,19 @@ The database connection will be handled transparently."
     (sqlite
      (org-sql-create-db)))
   (->> (org-sql--format-mql-schema org-sql-db-config org-sql--mql-tables)
-       (org-sql--send-transaction-with-hook :post-init-hooks)))
+       (org-sql--send-transaction-with-hook nil :post-init-hooks)))
 
 (defun org-sql-update-db ()
   (let ((inhibit-message t))
     (org-save-all-org-buffers))
   (->> (org-sql--get-transactions)
-       (org-sql--send-transaction-with-hook :post-update-hooks)))
+       (org-sql--send-transaction-with-hook nil :post-update-hooks)))
 
 (defun org-sql-clear-db ()
   (->> (org-sql--format-mql-table-name org-sql-db-config 'file_hashes)
        (format "DELETE FROM %s;")
        (list)
-       (org-sql--send-transaction-with-hook :post-clear-hooks)))
+       (org-sql--send-transaction-with-hook nil :post-clear-hooks)))
 
 (defun org-sql-reset-db ()
   (org-sql--case-mode org-sql-db-config
@@ -2722,7 +2724,7 @@ The database connection will be handled transparently."
         (init-stmts
          (org-sql--format-mql-schema org-sql-db-config org-sql--mql-tables)))
     (->> (append drop-tbl-stmts init-stmts)
-         (org-sql--send-transaction-with-hook :post-init-hooks))))
+         (org-sql--send-transaction-with-hook :pre-reset-hooks :post-init-hooks))))
 
 ;;; interactive functions
 
