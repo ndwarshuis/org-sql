@@ -85,7 +85,7 @@ This is only used in combination with `org-replace-escapes'")
 (defconst org-sql--entry-keys
   (append
    (-map #'car org-sql--log-note-keys)
-   '(:file-hash :headline-offset :entry-offset :note-text :header-text :old-ts :new-ts))
+   '(:file-hash :note-text :header-text :old-ts :new-ts))
   "Valid keys that may be used in logbook entry lists.")
 
 (defconst org-sql--ignored-properties-default
@@ -1648,7 +1648,6 @@ whose keys are a subset of `org-sql--entry-keys'."
 See `org-sql--to-entry' for the meaning of the returned list.
 HSTATE is a list given by `org-sql--to-hstate'."
   (-let* (((&plist :file-hash :headline) hstate)
-          (headline-offset (org-ml-get-property :begin headline))
           ((header-node . rest) (org-sql--split-item item))
           (header-offset (org-ml-get-property :begin header-node))
           (header-text (org-ml-to-trimmed-string header-node))
@@ -1681,8 +1680,6 @@ HSTATE is a list given by `org-sql--to-hstate'."
             (new-ts (get-timestamp-node new-state)))
         (org-sql--to-entry type
           :file-hash file-hash
-          :entry-offset (org-ml-get-property :begin item)
-          :headline-offset headline-offset
           :header-text header-text
           :note-text note-text
           :user (get-substring user)
@@ -1721,13 +1718,7 @@ to NOTE-TEXT; otherwise just as (CLOCK)."
 
 (defun org-sql--add-mql-insert-headline-logbook-item (acc entry)
   "Add MQL-insert for item ENTRY to ACC."
-  (-let (((entry-type . (&plist :entry-offset
-                                :header-text
-                                :note-text
-                                :headline-offset
-                                :file-hash
-                                :ts))
-          entry))
+  (-let (((entry-type . (&plist :header-text :note-text :file-hash :ts)) entry))
     (org-sql--add-mql-insert acc logbook_entries
       :entry_id (org-sql--acc-get :entry-id acc)
       :headline_id (org-sql--acc-get :headline-id acc)
@@ -1740,7 +1731,7 @@ to NOTE-TEXT; otherwise just as (CLOCK)."
 
 (defun org-sql--add-mql-insert-state-change (acc entry)
   "Add MQL-insert for state change ENTRY to ACC."
-  (-let (((&plist :entry-offset :old-state :new-state) (cdr entry)))
+  (-let (((&plist :old-state :new-state) (cdr entry)))
     (--> (org-sql--add-mql-insert-headline-logbook-item acc entry)
          (org-sql--add-mql-insert it state_changes
            :entry_id (org-sql--acc-get :entry-id acc)
@@ -1750,7 +1741,7 @@ to NOTE-TEXT; otherwise just as (CLOCK)."
 (defun org-sql--add-mql-insert-planning-change (acc hstate entry)
   "Add MQL-insert for planning change ENTRY to ACC.
 HSTATE is a plist as returned by `org-sql--to-hstate'."
-  (-let (((&plist :entry-offset :headline-offset :old-ts) (cdr entry)))
+  (-let (((&plist :old-ts) (cdr entry)))
     (--> (org-sql--add-mql-insert-headline-logbook-item acc entry)
          (org-sql--add-mql-insert-timestamp it hstate old-ts)
          (org-sql--add-mql-insert it planning_changes

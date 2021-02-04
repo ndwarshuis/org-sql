@@ -166,8 +166,6 @@ list then join the cdr of IN with newlines."
                                    "  fancy note")
         org-log-note-headings
       `(none :file-hash ,testing-hash
-             :entry-offset 1
-             :headline-offset 1
              :header-text "logbook item"
              :note-text "fancy note"
              :user nil
@@ -187,8 +185,6 @@ list then join the cdr of IN with newlines."
       (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
           org-log-note-headings
         `(state :file-hash ,testing-hash
-                :entry-offset 1
-                :headline-offset 1
                 :header-text ,h
                 :note-text "fancy note"
                 :user nil
@@ -208,8 +204,6 @@ list then join the cdr of IN with newlines."
       (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
           org-log-note-headings
         `(refile :file-hash ,testing-hash
-                 :entry-offset 1
-                 :headline-offset 1
                  :header-text ,h
                  :note-text "fancy note"
                  :user nil
@@ -229,8 +223,6 @@ list then join the cdr of IN with newlines."
       (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
           org-log-note-headings
         `(note :file-hash ,testing-hash
-               :entry-offset 1
-               :headline-offset 1
                :header-text ,h
                :note-text "fancy note"
                :user nil
@@ -250,8 +242,6 @@ list then join the cdr of IN with newlines."
       (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
           org-log-note-headings
         `(done :file-hash ,testing-hash
-               :entry-offset 1
-               :headline-offset 1
                :header-text ,h
                :note-text "fancy note"
                :user nil
@@ -272,8 +262,6 @@ list then join the cdr of IN with newlines."
       (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
           org-log-note-headings
         `(reschedule :file-hash ,testing-hash
-                     :entry-offset 1
-                     :headline-offset 1
                      :header-text ,h
                      :note-text "fancy note"
                      :user nil
@@ -294,8 +282,6 @@ list then join the cdr of IN with newlines."
       (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
           org-log-note-headings
         `(delschedule :file-hash ,testing-hash
-                      :entry-offset 1
-                      :headline-offset 1
                       :header-text ,h
                       :note-text "fancy note"
                       :user nil
@@ -316,8 +302,6 @@ list then join the cdr of IN with newlines."
       (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
           org-log-note-headings
         `(redeadline :file-hash ,testing-hash
-                     :entry-offset 1
-                     :headline-offset 1
                      :header-text ,h
                      :note-text "fancy note"
                      :user nil
@@ -338,8 +322,6 @@ list then join the cdr of IN with newlines."
       (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
           org-log-note-headings
         `(deldeadline :file-hash ,testing-hash
-                      :entry-offset 1
-                      :headline-offset 1
                       :header-text ,h
                       :note-text "fancy note"
                       :user nil
@@ -359,8 +341,6 @@ list then join the cdr of IN with newlines."
       (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
           '((user . "User %u is the best user"))
         `(user :file-hash ,testing-hash
-               :entry-offset 1
-               :headline-offset 1
                :header-text ,h
                :note-text "fancy note"
                :user ,user
@@ -382,8 +362,6 @@ list then join the cdr of IN with newlines."
       (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
           '((userfull . "User %u is the best user"))
         `(userfull :file-hash ,testing-hash
-                   :entry-offset 1
-                   :headline-offset 1
                    :header-text ,h
                    :note-text "fancy note"
                    :user ,userfull
@@ -403,8 +381,6 @@ list then join the cdr of IN with newlines."
       (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
           '((activets . "I'm active now: %T"))
         `(activets :file-hash ,testing-hash
-                   :entry-offset 1
-                   :headline-offset 1
                    :header-text ,h
                    :note-text "fancy note"
                    :user nil
@@ -424,8 +400,6 @@ list then join the cdr of IN with newlines."
       (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
           '((shortts . "Life feels short now: %d"))
         `(shortts :file-hash ,testing-hash
-                  :entry-offset 1
-                  :headline-offset 1
                   :header-text ,h
                   :note-text "fancy note"
                   :user nil
@@ -445,8 +419,6 @@ list then join the cdr of IN with newlines."
       (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
           '((shortts . "Life feels short now: %D"))
         `(shortts :file-hash ,testing-hash
-                  :entry-offset 1
-                  :headline-offset 1
                   :header-text ,h
                   :note-text "fancy note"
                   :user nil
@@ -467,8 +439,6 @@ list then join the cdr of IN with newlines."
       (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
           '((fakeclock . "Fake clock: %S--%s"))
         `(fakeclock :file-hash ,testing-hash
-                    :entry-offset 1
-                    :headline-offset 1
                     :header-text ,h
                     :note-text "fancy note"
                     :user nil
