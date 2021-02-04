@@ -883,10 +883,8 @@ PLIST is a property list of the columns and values to insert."
 (defmacro org-sql--map-plist (key form plist)
   "Return PLIST modified with FORM applied to KEY's value."
   (declare (indent 1))
-  `(->> (-partition 2 ,plist)
-        (--map-when (eq (car it) ,key)
-                    (list (car it) (let ((it (cadr it))) ,form)))
-        (-flatten-n 1)))
+  `(let ((it (plist-get ,plist ,key)))
+     (plist-put ,plist ,key ,form)))
 
 (defun org-sql--replace-in-plist (key rep plist)
   "Return PLIST with value of KEY replaced by REP."
@@ -1005,6 +1003,7 @@ will include the follwing keys/values:
 (defun org-sql--update-hstate (headline-id hstate headline)
   "Return a new HSTATE updated with information from HEADLINE.
 Only the :lb-config and :headline keys will be changed."
+  ;; TODO plist-put won't work here
   (->> (org-sql--replace-in-plist :headline headline hstate)
        (org-sql--map-plist :lb-config
          (org-sql--headline-update-supercontents-config it headline))
