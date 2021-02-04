@@ -365,23 +365,6 @@ to store them. This is in addition to any properties specifified by
                      :parent-keys (:file_hash)
                      :on-delete cascade)))
 
-          ;; TODO what is the point of this table now?
-          (file_properties
-           (desc . "Each row stores a property at the file level")
-           (columns
-            ,(file-hash-col "property")
-            ,property-id-col)
-           (constraints
-            (primary :keys (:property_id))
-            ;; (foreign :ref file_hashes
-            ;;          :keys (:file_hash)
-            ;;          :parent-keys (:file_hash)
-            ;;          :on-delete cascade)
-            (foreign :ref properties
-                     :keys (:property_id)
-                     :parent-keys (:property_id)
-                     :on-delete cascade)))
-
           (headline_properties
            (desc . "Each row stores a property at the headline level")
            (columns
@@ -2101,9 +2084,6 @@ TREE-CONFIG is a list given by `org-sql--to-tree-config'."
                    :property_id (org-sql--acc-get :property-id acc)
                    :key_text key
                    :val_text value)
-                 (org-sql--add-mql-insert it file_properties
-                   :file_hash file-hash
-                   :property_id (org-sql--acc-get :property-id acc))
                  (org-sql--acc-incr :property-id it)))))
       (->> (--filter (org-ml-is-type 'keyword it) top-section)
            (--filter (equal (org-ml-get-property :key it) "PROPERTY"))

@@ -758,8 +758,7 @@ list then join the cdr of IN with newlines."
       (expect-sql-tbls (properties file_properties)
           (list "#+PROPERTY: FOO bar"
                 "* parent")
-        `((properties (,testing-hash 1 "FOO" "bar"))
-          (file_properties (,testing-hash 1))))))
+        `((properties (,testing-hash 1 "FOO" "bar"))))))
 
   (describe "logbook"
     (describe "clocks"
@@ -1161,7 +1160,7 @@ list then join the cdr of IN with newlines."
                        :keys (:inttwo)
                        :parent-keys (:int)
                        ;; :on_update cascade
-                       :on_delete cascade))))))
+                       :on-delete cascade))))))
 
   ;; TODO use function to make this list, but the one now has hardcoded
   ;; schema checking
