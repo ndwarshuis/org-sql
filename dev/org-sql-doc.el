@@ -90,7 +90,7 @@
 (defun org-sql-doc-format-type (mql-column)
   (let ((sqlite-type (org-sql--format-mql-schema-type '(sqlite) "" mql-column))
         (postgres-type
-         (--> (org-sql--format-mql-schema-type '(postgres) "" mql-column)
+         (--> (org-sql--format-mql-schema-type '(pgsql) "" mql-column)
               (if (s-starts-with? "enum" it) "ENUM" it))))
     (format "%s / %s" sqlite-type postgres-type)))
 

@@ -135,7 +135,8 @@ Each row describes one org file (which may have multiple filepaths)
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
 | file_hash | x |  |  | TEXT / TEXT | hash (MD5) of this org-tree |
-| size |  |  |  | INTEGER / INTEGER | size of the org file in bytes |
+| tree_size |  |  |  | INTEGER / INTEGER | number of characters of the org tree |
+| tree_lines |  |  |  | INTEGER / INTEGER | number of lines in the org file |
 
 ### file_metadata
 
@@ -145,6 +146,11 @@ Each row stores filesystem metadata for one tracked org file
 |  -  |  -  |  -  |  -  |  -  |  -  |
 | file_path | x |  |  | TEXT / TEXT | path to org file |
 | file_hash |  | file_hash - file_hashes |  | TEXT / TEXT | hash (MD5) of the org-tree with this path |
+| file_uid |  |  |  | INTEGER / INTEGER | UID of the file |
+| file_gid |  |  |  | INTEGER / INTEGER | GID of the file |
+| file_modification_time |  |  |  | INTEGER / INTEGER | time of the file's last modification |
+| file_attr_change_time |  |  |  | INTEGER / INTEGER | time of the file's last attribute change |
+| file_modes |  |  |  | TEXT / TEXT | permission mode bits for the file |
 
 ### headlines
 
@@ -152,12 +158,14 @@ Each row stores one headline in a given org file and its metadata
 
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_hash | x | file_hash - file_hashes |  | TEXT / TEXT | hash (MD5) of the org-tree with this headline |
-| headline_offset | x |  |  | INTEGER / INTEGER | offset of this headline |
+| headline_id | x |  |  | INTEGER / INTEGER | id of this headline |
+| file_hash |  | file_hash - file_hashes | x | TEXT / TEXT | hash (MD5) of the org-tree with this headline |
 | headline_text |  |  |  | TEXT / TEXT | raw text of the headline |
 | keyword |  |  | x | TEXT / TEXT | the TODO state keyword |
 | effort |  |  | x | INTEGER / INTEGER | the value of the Effort property in minutes |
 | priority |  |  | x | TEXT / TEXT | character value of the priority |
+| stats_cookie_type |  |  | x | TEXT / ENUM | type of the statistics cookie (`fraction`, or `percent`) |
+| stats_cookie_value |  |  | x | REAL / REAL | value of the statistics cookie |
 | is_archived |  |  |  | INTEGER / BOOLEAN | true if the headline has an archive tag |
 | is_commented |  |  |  | INTEGER / BOOLEAN | true if the headline has a comment keyword |
 | content |  |  | x | TEXT / TEXT | the headline contents |
@@ -168,9 +176,8 @@ Each row stores the ancestor and depth of a headline relationship (eg closure ta
 
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_hash | x | file_hash - headlines, file_hash - headlines |  | TEXT / TEXT | hash (MD5) of the org-tree with this headline |
-| headline_offset | x | headline_offset - headlines |  | INTEGER / INTEGER | offset of this headline |
-| parent_offset | x | headline_offset - headlines |  | INTEGER / INTEGER | offset of this headline's parent |
+| headline_id | x | headline_id - headlines |  | INTEGER / INTEGER | id of this headline |
+| parent_id | x | headline_id - headlines |  | INTEGER / INTEGER | id of this headline's parent |
 | depth |  |  | x | INTEGER / INTEGER | levels between this headline and the referred parent |
 
 ### timestamps
@@ -179,9 +186,8 @@ Each row stores one timestamp
 
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_hash | x | file_hash - headlines |  | TEXT / TEXT | hash (MD5) of the org-tree with this timestamp |
-| headline_offset |  | headline_offset - headlines |  | INTEGER / INTEGER | offset of the headline with this timestamp |
-| timestamp_offset | x |  |  | INTEGER / INTEGER | offset of this timestamp |
+| timestamp_id | x |  |  | INTEGER / INTEGER | id of this timestamp |
+| headline_id |  | headline_id - headlines |  | INTEGER / INTEGER | id of the headline for this timestamp |
 | raw_value |  |  |  | TEXT / TEXT | text representation of this timestamp |
 | is_active |  |  |  | INTEGER / BOOLEAN | true if the timestamp is active |
 | time_start |  |  |  | INTEGER / INTEGER | the start time (or only time) of this timestamp |
@@ -195,8 +201,7 @@ Each row stores specific information for a timestamp warning
 
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_hash | x | file_hash - timestamps |  | TEXT / TEXT | hash (MD5) of the org-tree with this warning |
-| timestamp_offset | x | timestamp_offset - timestamps |  | INTEGER / INTEGER | offset of the timestamp with this warning |
+| timestamp_id | x | timestamp_id - timestamps |  | INTEGER / INTEGER | id of the timestamp for this warning |
 | warning_value |  |  | x | INTEGER / INTEGER | shift of this warning |
 | warning_unit |  |  | x | TEXT / ENUM | unit of this warning (`hour`, `day`, `week`, `month`, or `year`) |
 | warning_type |  |  | x | TEXT / ENUM | type of this warning (`all`, or `first`) |
@@ -207,8 +212,7 @@ Each row stores specific information for a timestamp repeater
 
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_hash | x | file_hash - timestamps |  | TEXT / TEXT | hash (MD5) of the org-tree with this repeater |
-| timestamp_offset | x | timestamp_offset - timestamps |  | INTEGER / INTEGER | offset of the timestamp with this repeater |
+| timestamp_id | x | timestamp_id - timestamps |  | INTEGER / INTEGER | id of the timestamp for this repeater |
 | repeater_value |  |  | x | INTEGER / INTEGER | shift of this repeater |
 | repeater_unit |  |  | x | TEXT / ENUM | unit of this repeater (`hour`, `day`, `week`, `month`, or `year`) |
 | repeater_type |  |  | x | TEXT / ENUM | type of this repeater (`catch-up`, `restart`, or `cumulate`) |
@@ -219,10 +223,9 @@ Each row stores the metadata for headline planning timestamps.
 
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_hash | x | file_hash - timestamps |  | TEXT / TEXT | hash (MD5) of the org-tree with this planning entry |
-| headline_offset | x |  |  | INTEGER / INTEGER | offset of the headline with this planning entry |
+| headline_id | x |  |  | INTEGER / INTEGER | id of the headline for this planning entry |
 | planning_type | x |  |  | TEXT / ENUM | the type of this planning entry (`closed`, `scheduled`, or `deadline`) |
-| timestamp_offset |  | timestamp_offset - timestamps |  | INTEGER / INTEGER | offset of the timestamp with this planning entry |
+| timestamp_id |  | timestamp_id - timestamps |  | INTEGER / INTEGER | id of the timestamp for this planning entry |
 
 ### file_tags
 
@@ -239,8 +242,7 @@ Each row stores one tag
 
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_hash | x | file_hash - headlines |  | TEXT / TEXT | hash (MD5) of the org-tree with this tag |
-| headline_offset | x | headline_offset - headlines |  | INTEGER / INTEGER | offset of the headline with this tag |
+| headline_id | x | headline_id - headlines |  | INTEGER / INTEGER | id of the headline for this tag |
 | tag | x |  |  | TEXT / TEXT | the text value of this tag |
 | is_inherited | x |  |  | INTEGER / BOOLEAN | true if this tag is from the ITAGS property |
 
@@ -250,19 +252,10 @@ Each row stores one property
 
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_hash | x | file_hash - file_hashes |  | TEXT / TEXT | hash (MD5) of the org-tree with this property |
-| property_offset | x |  |  | INTEGER / INTEGER | offset of this property |
+| file_hash |  | file_hash - file_hashes | x | TEXT / TEXT | hash (MD5) of the org-tree with this property |
+| property_id | x |  |  | INTEGER / INTEGER | id of this property |
 | key_text |  |  |  | TEXT / TEXT | this property's key |
 | val_text |  |  |  | TEXT / TEXT | this property's value |
-
-### file_properties
-
-Each row stores a property at the file level
-
-| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
-|  -  |  -  |  -  |  -  |  -  |  -  |
-| file_hash | x | file_hash - properties |  | TEXT / TEXT | hash (MD5) of the org-tree with this property |
-| property_offset | x | property_offset - properties |  | INTEGER / INTEGER | offset of this property |
 
 ### headline_properties
 
@@ -270,9 +263,8 @@ Each row stores a property at the headline level
 
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_hash | x | file_hash - properties, file_hash - headlines |  | TEXT / TEXT | hash (MD5) of the org-tree with this property |
-| headline_offset |  | headline_offset - headlines |  | INTEGER / INTEGER | offset of the headline with this property |
-| property_offset | x | property_offset - properties |  | INTEGER / INTEGER | offset of this property |
+| headline_id |  | headline_id - headlines |  | INTEGER / INTEGER | id of the headline for this property |
+| property_id | x | property_id - properties |  | INTEGER / INTEGER | id of this property |
 
 ### clocks
 
@@ -280,9 +272,8 @@ Each row stores one clock entry
 
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_hash | x | file_hash - headlines |  | TEXT / TEXT | hash (MD5) of the org-tree with this clock |
-| headline_offset |  | headline_offset - headlines |  | INTEGER / INTEGER | offset of the headline with this clock |
-| clock_offset | x |  |  | INTEGER / INTEGER | offset of this clock |
+| clock_id | x |  |  | INTEGER / INTEGER | id of this clock |
+| headline_id |  | headline_id - headlines |  | INTEGER / INTEGER | id of the headline for this clock |
 | time_start |  |  | x | INTEGER / INTEGER | timestamp for the start of this clock |
 | time_end |  |  | x | INTEGER / INTEGER | timestamp for the end of this clock |
 | clock_note |  |  | x | TEXT / TEXT | the note entry beneath this clock |
@@ -293,9 +284,8 @@ Each row stores one logbook entry (except for clocks)
 
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_hash | x | file_hash - headlines |  | TEXT / TEXT | hash (MD5) of the org-tree with this logbook entry |
-| headline_offset |  | headline_offset - headlines |  | INTEGER / INTEGER | offset of the headline with this logbook entry |
-| entry_offset | x |  |  | INTEGER / INTEGER | offset of this logbook entry |
+| entry_id | x |  |  | INTEGER / INTEGER | id of this entry |
+| headline_id |  | headline_id - headlines |  | INTEGER / INTEGER | id of the headline for this logbook entry |
 | entry_type |  |  | x | TEXT / TEXT | type of this entry (see `org-log-note-headlines`) |
 | time_logged |  |  | x | INTEGER / INTEGER | timestamp for when this entry was taken |
 | header |  |  | x | TEXT / TEXT | the first line of this entry (usually standardized) |
@@ -307,8 +297,7 @@ Each row stores additional metadata for a state change logbook entry
 
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_hash | x | file_hash - logbook_entries |  | TEXT / TEXT | hash (MD5) of the org-tree with this state change |
-| entry_offset | x | entry_offset - logbook_entries |  | INTEGER / INTEGER | offset of the entry with this logbook state change |
+| entry_id | x | entry_id - logbook_entries |  | INTEGER / INTEGER | id of the entry for this state change |
 | state_old |  |  |  | TEXT / TEXT | former todo state keyword |
 | state_new |  |  |  | TEXT / TEXT | updated todo state keyword |
 
@@ -318,9 +307,8 @@ Each row stores additional metadata for a planning change logbook entry
 
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_hash | x | file_hash - timestamps, file_hash - logbook_entries |  | TEXT / TEXT | hash (MD5) of the org-tree with this planning change |
-| entry_offset | x | entry_offset - logbook_entries |  | INTEGER / INTEGER | offset of the entry with this logbook planning change |
-| timestamp_offset |  | timestamp_offset - timestamps |  | INTEGER / INTEGER | offset of the former timestamp |
+| entry_id | x | entry_id - logbook_entries |  | INTEGER / INTEGER | id of the entry for this planning change |
+| timestamp_id |  | timestamp_id - timestamps |  | INTEGER / INTEGER | id of the former timestamp |
 
 ### links
 
@@ -328,9 +316,8 @@ Each row stores one link
 
 | Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
 |  -  |  -  |  -  |  -  |  -  |  -  |
-| file_hash | x | file_hash - headlines |  | TEXT / TEXT | hash (MD5) of the org-tree with this link |
-| headline_offset |  | headline_offset - headlines |  | INTEGER / INTEGER | offset of the headline with this link |
-| link_offset | x |  |  | INTEGER / INTEGER | file offset of this link |
+| link_id | x |  |  | INTEGER / INTEGER | id of this link |
+| headline_id |  | headline_id - headlines |  | INTEGER / INTEGER | id of the headline for this link |
 | link_path |  |  |  | TEXT / TEXT | target of this link (eg url, file path, etc) |
 | link_text |  |  | x | TEXT / TEXT | text of this link |
 | link_type |  |  |  | TEXT / TEXT | type of this link (eg http, mu4e, file, etc) |
