@@ -1205,52 +1205,57 @@ separated by SEP."
   "Return SQL string for the type of MQL-COLUMN.
 CONFIG is the `org-sql-db-config' list and TBL-NAME is the name
 of the table."
-  (-let* (((column-name . (&plist :type :type-id)) mql-column)
-          (column-name* (org-sql--format-mql-column-name column-name)))
-    ;; TODO use nvarchar(max) for text and just nvarchar in sql server
-    (org-sql--case-type type
-      (boolean
-       (org-sql--case-mode config
-         ((mysql pgsql) "BOOLEAN")
-         (sqlite "INTEGER")
-         (sqlserver "BIT")))
-      (char
-       (org-sql--case-mode config
-         ((mysql sqlserver)
-          (-let (((&plist :length) (cdr mql-column)))
-            (if length (format "CHAR(%s)" length) "CHAR")))
-         ;; pgsql should use TEXT here because (according to the docs) "there
-         ;; is no performance difference among char/varchar/text except for the
-         ;; length-checking"
-         ((pgsql sqlite) "TEXT")))
-      (enum
-       (org-sql--case-mode config
-         (mysql (->> (plist-get (cdr mql-column) :allowed)
-                     (--map (format "'%s'" it))
-                     (s-join ",")
-                     (format "ENUM(%s)")))
-         (pgsql (if type-id type-id
-                  (->> (format "enum_%s_%s" tbl-name column-name*)
-                       (org-sql--format-mql-enum-name config))))
-         (sqlite "TEXT")
-         (sqlserver (-if-let (length (plist-get (cdr mql-column) :length))
-                        (format "VARCHAR(%s)" length)
-                      "TEXT"))))
-      (integer
-       "INTEGER")
-      (real
-       (org-sql--case-mode config
-         (mysql "FLOAT")
-         ((pgsql sqlite sqlserver) "REAL")))
-      (text
-       "TEXT")
-      (varchar
-       (org-sql--case-mode config
-         ((mysql sqlserver)
-          (-let (((&plist :length) (cdr mql-column)))
-            (if length (format "VARCHAR(%s)" length) "VARCHAR")))
-         ;; see above why pgsql uses TEXT here
-         ((pgsql sqlite) "TEXT"))))))
+  (cl-flet
+      ((fmt-varchar
+        (mql-column len-fmt max-str)
+        (-let (((&plist :length) (cdr mql-column)))
+          (if length (format len-fmt length) max-str))))
+    (-let (((column-name . (&plist :type :type-id)) mql-column))
+      (org-sql--case-type type
+        (boolean
+         (org-sql--case-mode config
+           ((mysql pgsql) "BOOLEAN")
+           (sqlite "INTEGER")
+           (sqlserver "BIT")))
+        (char
+         (org-sql--case-mode config
+           ((mysql sqlserver)
+            (-let (((&plist :length) (cdr mql-column)))
+              (if length (format "CHAR(%s)" length) "CHAR")))
+           ;; pgsql should use TEXT here because (according to the docs) "there
+           ;; is no performance difference among char/varchar/text except for
+           ;; the length-checking"
+           ((pgsql sqlite) "TEXT")))
+        (enum
+         (org-sql--case-mode config
+           (mysql (->> (plist-get (cdr mql-column) :allowed)
+                       (--map (format "'%s'" it))
+                       (s-join ",")
+                       (format "ENUM(%s)")))
+           (pgsql (if type-id type-id
+                    (->> (org-sql--format-mql-column-name column-name)
+                         (format "enum_%s_%s" tbl-name)
+                         (org-sql--format-mql-enum-name config))))
+           (sqlite "TEXT")
+           (sqlserver (-if-let (length (plist-get (cdr mql-column) :length))
+                          (format "VARCHAR(%s)" length)
+                        "TEXT"))))
+        (integer
+         "INTEGER")
+        (real
+         (org-sql--case-mode config
+           (mysql "FLOAT")
+           ((pgsql sqlite sqlserver) "REAL")))
+        (text
+         (org-sql--case-mode config
+           ((mysql pgsql sqlite) "TEXT")
+           (sqlserver "NVARCHAR(MAX)")))
+        (varchar
+         (org-sql--case-mode config
+           (mysql (fmt-varchar mql-column "VARCHAR(%s)" "VARCHAR"))
+           ;; see above why pgsql uses TEXT here
+           ((pgsql sqlite) "TEXT")
+           (sqlserver (fmt-varchar mql-column "NVARCHAR(%s)" "NVARCHAR(MAX)"))))))))
 
 (defun org-sql--format-mql-schema-columns (config tbl-name mql-columns)
   "Return SQL string for MQL-COLUMNS.
