@@ -1075,6 +1075,7 @@ The returned function will depend on the MODE and TYPE."
                     (format "'%s'")))))))
     `(lambda (it) (if it ,formatter-form "NULL"))))
 
+
 (defun org-sql--get-column-formatter (config tbl-name column-name)
   (let ((column (->> org-sql--mql-tables
                      (alist-get tbl-name)
@@ -1082,37 +1083,13 @@ The returned function will depend on the MODE and TYPE."
                      (alist-get column-name))))
     (org-sql--compile-mql-format-function config (plist-get column :type))))
 
-;; (defun org-sql--compile-mql-schema-formatter-alist (config mql-table)
-;;   "Return an alist of formatting functions for MQL-TABLES.
-;; MODE is the SQL mode. The alist will mirror MSL schema except that the
-;; car for each column will be a formatting function."
-;;   (cl-flet
-;;       ((get-type-function
-;;         (mql-column)
-;;         (-let* (((name . (&plist :type)) mql-column))
-;;           (cons name (org-sql--compile-mql-format-function config type)))))
-;;     (-let* (((tbl-name . (&alist 'columns)) mql-table)
-;;             (tbl-name* (org-sql--format-mql-table-name config tbl-name)))
-;;       (cons tbl-name (list :table-name tbl-name*
-;;                            :column-formatters (-map #'get-type-function columns))))))
+(defun org-sql--get-column-formatters (config tbl-name)
+  (->> org-sql--mql-tables
+       (alist-get tbl-name)
+       (alist-get 'columns)
+       (--map (org-sql--compile-mql-format-function config (plist-get (cdr it) :type)))))
 
 ;; helper functions
-
-(defun org-sql--format-mql-plist (formatter-list sep plist)
-  "Format a PLIST to a SQL-compliant string.
-FORMATTER-ALIST is an alist of formatting functions matching the keys
-in PLIST (whose keys in turn should match columns in the schema).
-The keys and values will be formatted like \"key=val\" and
-separated by SEP."
-  (let ((keys (->> (-slice plist 0 nil 2)
-                   (-map #'org-sql--format-mql-column-name)))
-        (vals (->> (-partition 2 plist)
-                   (--map (funcall
-                           (->> (plist-get formatter-list :column-formatters)
-                                (alist-get (car it)))
-                           (cadr it))))))
-    (-some->> (--zip-with (format "%s=%s" it other) keys vals)
-      (s-join sep))))
 
 (defun org-sql--format-mql-column-name (column-name)
   "Return SQL string representation of COLUMN-NAME."
@@ -1367,9 +1344,7 @@ CONFIG is the `org-sql-db-config' list."
                           (--map (org-sql--format-mql-column-name (car it)))
                           (s-join ",")))
             ;; ASSUME these will be in the right order
-            (formatters (--map (->> (plist-get (cdr it) :type)
-                                    (org-sql--compile-mql-format-function config))
-                               mql-columns)))
+            (formatters (org-sql--get-column-formatters config tbl-name)))
       (->> (--map (format-row formatters it) rows)
            (s-join ",")
            (format "INSERT INTO %s (%s) VALUES %s;" tbl-name* columns*)))))
