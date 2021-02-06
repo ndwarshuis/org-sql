@@ -70,8 +70,8 @@ list then join the cdr of IN with newlines."
                          (round))
                    ,(file-attribute-modes testing-attributes))))
 
-(defconst testing-file_hashes
-  `(file_hashes (,testing-hash ,testing-size ,testing-lines)))
+(defconst testing-tree_hashes
+  `(tree_hashes (,testing-hash ,testing-size ,testing-lines)))
 
 (defmacro expect-sql* (in tbl res-form)
   `(progn
@@ -164,7 +164,7 @@ list then join the cdr of IN with newlines."
     (expect-sql-logbook-item (list "- logbook item \\\\"
                                    "  fancy note")
         org-log-note-headings
-      `(none :file-hash ,testing-hash
+      `(none :tree-hash ,testing-hash
              :header-text "logbook item"
              :note-text "fancy note"
              :user nil
@@ -183,7 +183,7 @@ list then join the cdr of IN with newlines."
            (h (format "State \"DONE\" from \"TODO\" %s" ts)))
       (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
           org-log-note-headings
-        `(state :file-hash ,testing-hash
+        `(state :tree-hash ,testing-hash
                 :header-text ,h
                 :note-text "fancy note"
                 :user nil
@@ -202,7 +202,7 @@ list then join the cdr of IN with newlines."
            (h (format "Refiled on %s" ts)))
       (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
           org-log-note-headings
-        `(refile :file-hash ,testing-hash
+        `(refile :tree-hash ,testing-hash
                  :header-text ,h
                  :note-text "fancy note"
                  :user nil
@@ -221,7 +221,7 @@ list then join the cdr of IN with newlines."
            (h (format "Note taken on %s" ts)))
       (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
           org-log-note-headings
-        `(note :file-hash ,testing-hash
+        `(note :tree-hash ,testing-hash
                :header-text ,h
                :note-text "fancy note"
                :user nil
@@ -240,7 +240,7 @@ list then join the cdr of IN with newlines."
            (h (format "CLOSING NOTE %s" ts)))
       (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
           org-log-note-headings
-        `(done :file-hash ,testing-hash
+        `(done :tree-hash ,testing-hash
                :header-text ,h
                :note-text "fancy note"
                :user nil
@@ -260,7 +260,7 @@ list then join the cdr of IN with newlines."
            (h (format "Rescheduled from \"%s\" on %s" ts0 ts)))
       (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
           org-log-note-headings
-        `(reschedule :file-hash ,testing-hash
+        `(reschedule :tree-hash ,testing-hash
                      :header-text ,h
                      :note-text "fancy note"
                      :user nil
@@ -280,7 +280,7 @@ list then join the cdr of IN with newlines."
            (h (format "Not scheduled, was \"%s\" on %s" ts0 ts)))
       (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
           org-log-note-headings
-        `(delschedule :file-hash ,testing-hash
+        `(delschedule :tree-hash ,testing-hash
                       :header-text ,h
                       :note-text "fancy note"
                       :user nil
@@ -300,7 +300,7 @@ list then join the cdr of IN with newlines."
            (h (format "New deadline from \"%s\" on %s" ts0 ts)))
       (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
           org-log-note-headings
-        `(redeadline :file-hash ,testing-hash
+        `(redeadline :tree-hash ,testing-hash
                      :header-text ,h
                      :note-text "fancy note"
                      :user nil
@@ -320,7 +320,7 @@ list then join the cdr of IN with newlines."
            (h (format "Removed deadline, was \"%s\" on %s" ts0 ts)))
       (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
           org-log-note-headings
-        `(deldeadline :file-hash ,testing-hash
+        `(deldeadline :tree-hash ,testing-hash
                       :header-text ,h
                       :note-text "fancy note"
                       :user nil
@@ -339,7 +339,7 @@ list then join the cdr of IN with newlines."
            (h (format "User %s is the best user" user)))
       (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
           '((user . "User %u is the best user"))
-        `(user :file-hash ,testing-hash
+        `(user :tree-hash ,testing-hash
                :header-text ,h
                :note-text "fancy note"
                :user ,user
@@ -360,7 +360,7 @@ list then join the cdr of IN with newlines."
            (h (format "User %s is the best user" userfull)))
       (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
           '((userfull . "User %u is the best user"))
-        `(userfull :file-hash ,testing-hash
+        `(userfull :tree-hash ,testing-hash
                    :header-text ,h
                    :note-text "fancy note"
                    :user ,userfull
@@ -379,7 +379,7 @@ list then join the cdr of IN with newlines."
            (h (format "I'm active now: %s" ts)))
       (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
           '((activets . "I'm active now: %T"))
-        `(activets :file-hash ,testing-hash
+        `(activets :tree-hash ,testing-hash
                    :header-text ,h
                    :note-text "fancy note"
                    :user nil
@@ -398,7 +398,7 @@ list then join the cdr of IN with newlines."
            (h (format "Life feels short now: %s" ts)))
       (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
           '((shortts . "Life feels short now: %d"))
-        `(shortts :file-hash ,testing-hash
+        `(shortts :tree-hash ,testing-hash
                   :header-text ,h
                   :note-text "fancy note"
                   :user nil
@@ -417,7 +417,7 @@ list then join the cdr of IN with newlines."
            (h (format "Life feels short now: %s" ts)))
       (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
           '((shortts . "Life feels short now: %D"))
-        `(shortts :file-hash ,testing-hash
+        `(shortts :tree-hash ,testing-hash
                   :header-text ,h
                   :note-text "fancy note"
                   :user nil
@@ -437,7 +437,7 @@ list then join the cdr of IN with newlines."
            (h (format "Fake clock: \"%s\"--\"%s\"" ts0 ts1)))
       (expect-sql-logbook-item (list (format "- %s \\\\" h) "  fancy note")
           '((fakeclock . "Fake clock: %S--%s"))
-        `(fakeclock :file-hash ,testing-hash
+        `(fakeclock :tree-hash ,testing-hash
                     :header-text ,h
                     :note-text "fancy note"
                     :user nil
@@ -461,7 +461,7 @@ list then join the cdr of IN with newlines."
   (describe "headlines"
     (it "single"
       (expect-sql "* headline"
-        `(,testing-file_hashes
+        `(,testing-tree_hashes
           ,testing-file_metadata
           (headlines (1 ,testing-hash "headline" nil nil nil nil nil 0 0 nil))
           (headline_closures (1 1 0)))))
@@ -469,7 +469,7 @@ list then join the cdr of IN with newlines."
     (it "two"
       (expect-sql (list "* headline"
                         "* another headline")
-        `(,testing-file_hashes
+        `(,testing-tree_hashes
           ,testing-file_metadata
           (headlines (2 ,testing-hash "another headline" nil nil nil nil nil 0 0 nil)
                      (1 ,testing-hash "headline" nil nil nil nil nil 0 0 nil))
@@ -482,7 +482,7 @@ list then join the cdr of IN with newlines."
                         ":Effort: 0:30"
                         ":END:"
                         "this /should/ appear")
-        `(,testing-file_hashes
+        `(,testing-tree_hashes
           ,testing-file_metadata
           (headlines
            (1 ,testing-hash "another headline [1/2]" "TODO" 30 "A" fraction 0.5
@@ -490,28 +490,28 @@ list then join the cdr of IN with newlines."
           (headline_closures
            (1 1 0)))))
 
-    (expect-sql-tbls-multi (file_hashes file_metadata headlines headline_closures)
+    (expect-sql-tbls-multi (tree_hashes file_metadata headlines headline_closures)
         (list "* headline"
               "** nested headline")
       "nested (predicate applied to parent)"
       ((org-sql-exclude-headline-predicate
         (lambda (h)
           (= 1 (org-ml-get-property :level h)))))
-      `(,testing-file_hashes
+      `(,testing-tree_hashes
         ,testing-file_metadata)
 
       "nested (predicate applied to child)"
       ((org-sql-exclude-headline-predicate
         (lambda (h)
           (= 2 (org-ml-get-property :level h)))))
-      `(,testing-file_hashes
+      `(,testing-tree_hashes
         ,testing-file_metadata
         (headlines (1 ,testing-hash "headline" nil nil nil nil nil 0 0 nil))
         (headline_closures (1 1 0)))
       
       "nested (no predicate)"
       nil
-      `(,testing-file_hashes
+      `(,testing-tree_hashes
         ,testing-file_metadata
         (headlines (2 ,testing-hash "nested headline" nil nil nil nil nil 0 0 nil)
                    (1 ,testing-hash "headline" nil nil nil nil nil 0 0 nil))
@@ -521,7 +521,7 @@ list then join the cdr of IN with newlines."
 
     (it "archived"
       (expect-sql "* headline :ARCHIVE:"
-        `(,testing-file_hashes
+        `(,testing-tree_hashes
           ,testing-file_metadata
           (headlines (1 ,testing-hash "headline" nil nil nil nil nil 1 0 nil))
           (headline_closures (1 1 0))))))

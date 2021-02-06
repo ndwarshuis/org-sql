@@ -233,7 +233,7 @@
          (let ((org-sql-files (list (f-join test-files "foo1.org"))))
            (expect-exit-success (org-sql-update-db))))
        (expect-db-has-tables ,config
-         (file_hashes . 1)
+         (tree_hashes . 1)
          (file_metadata . 1)
          (headlines . 1)
          (headline_closures . 1)
@@ -256,7 +256,7 @@
                (org-sql-async t))
            (expect-exit-success (org-sql-update-db))))
        (expect-db-has-tables ,config
-         (file_hashes . 1)
+         (tree_hashes . 1)
          (file_metadata . 1)
          (headlines . 1)
          (headline_closures . 1)
@@ -279,7 +279,7 @@
                                     (f-join test-files "foo3.org"))))
            (expect-exit-success (org-sql-update-db))))
        (expect-db-has-tables ,config
-         (file_hashes . 2)
+         (tree_hashes . 2)
          (file_metadata . 2)
          (headlines . 2)
          (headline_closures . 2)
@@ -302,7 +302,7 @@
                                     (f-join test-files "foo2.org"))))
            (expect-exit-success (org-sql-update-db))))
        (expect-db-has-tables ,config
-         (file_hashes . 1)
+         (tree_hashes . 1)
          (file_metadata . 2)
          (headlines . 1)
          (headline_closures . 1)
@@ -325,7 +325,7 @@
                (org-log-into-drawer "LOGBOOK"))
            (expect-exit-success (org-sql-update-db))))
        (expect-db-has-tables ,config
-         (file_hashes . 1)
+         (tree_hashes . 1)
          (file_metadata . 1)
          (file_tags . 3)
          (headlines . 5)
@@ -378,7 +378,7 @@
            (expect-exit-success (org-sql-update-db))))
        (expect-db-has-tables ,config
          (file_metadata . 0)
-         (file_hashes . 0)))
+         (tree_hashes . 0)))
 
      (describe-reset-db "altered file"
        ;; in order to make this test work, make a file in /tmp and alter
@@ -394,7 +394,7 @@
              (f-write-text contents1 'utf-8 test-path)
              (expect-exit-success (org-sql-update-db))))
          (it "test file hash"
-           (expect-db-has-table-contents 'file_hashes
+           (expect-db-has-table-contents 'tree_hashes
              `("ece424e0090cff9b6f1ac50722c336c0" "6" "1"))))
        (describe "alter the file"
          (before-all
@@ -407,7 +407,7 @@
              (f-write-text contents2 'utf-8 test-path)
              (expect-exit-success (org-sql-update-db))))
          (it "test for new file hash"
-           (expect-db-has-table-contents 'file_hashes
+           (expect-db-has-table-contents 'tree_hashes
              `("399bc042f23ea976a04b9102c18e9cb5" "6" "1")))
          (it "clean up"
            ;; yes killing the buffer is necessary
@@ -444,7 +444,7 @@
          (expect (org-sql--sets-equal org-sql-table-names (org-sql-list-tables)
                                       :test #'equal)))
        (expect-db-has-tables ,config
-         (file_hashes . 0)
+         (tree_hashes . 0)
          (file_metadata . 0)
          (headlines . 0)
          (timestamps . 0)
@@ -472,7 +472,7 @@
          (expect (org-sql--sets-equal org-sql-table-names (org-sql-list-tables)
                                       :test #'equal)))
        (expect-db-has-tables ,config
-         (file_hashes . 0)
+         (tree_hashes . 0)
          (file_metadata . 0)
          (headlines . 0)
          (timestamps . 0)
