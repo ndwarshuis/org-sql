@@ -2402,22 +2402,19 @@ CONFIG is the plist component if `org-sql-db-config'."
 (defun org-sql--send-sql* (sql-cmd async)
   "Execute SQL-CMD as a separate file input.
 The database connection will be handled transparently."
-  ;; TODO I don't think there are cases where I want to send a nil cmd, so
-  ;; nil should be an error
-  (if (not sql-cmd) '(0 . "")
-    (-let ((tmp-path (->> (round (float-time))
-                          (format "%sorg-sql-cmd-%s" (temporary-file-directory))))
-           (sql-cmd (org-sql--case-mode org-sql-db-config
-                      ((mysql pgsql sqlite) sql-cmd)
-                      (sqlserver (format "set nocount on; %s" sql-cmd)))))
-      (f-write sql-cmd 'utf-8 tmp-path)
-      (let ((res (org-sql--send-sql-file tmp-path async)))
-        (if (not async)
-            (f-delete tmp-path)
-          (if (process-live-p res)
-              (set-process-sentinel res (lambda (p e) (f-delete tmp-path)))
-            (f-delete tmp-path)))
-        res))))
+  (-let ((tmp-path (->> (round (float-time))
+                        (format "%sorg-sql-cmd-%s" (temporary-file-directory))))
+         (sql-cmd (org-sql--case-mode org-sql-db-config
+                    ((mysql pgsql sqlite) sql-cmd)
+                    (sqlserver (format "set nocount on; %s" sql-cmd)))))
+    (f-write sql-cmd 'utf-8 tmp-path)
+    (let ((res (org-sql--send-sql-file tmp-path async)))
+      (if (not async)
+          (f-delete tmp-path)
+        (if (process-live-p res)
+            (set-process-sentinel res (lambda (p e) (f-delete tmp-path)))
+          (f-delete tmp-path)))
+      res)))
 
 (defun org-sql--send-transaction (statements)
   (->> (org-sql--format-sql-transaction org-sql-db-config statements)
