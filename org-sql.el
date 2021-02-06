@@ -471,8 +471,10 @@ to store them. This is in addition to any properties specifified by
                      :on-delete cascade))))
       "Org-SQL database tables represented as an alist"))))
 
-(defconst org-sql-table-names (--map (symbol-name (car it)) org-sql--table-alist)
-  "The names of all required tables in org-sql.")
+(eval-and-compile
+  (defconst org-sql-table-names
+    (--map (symbol-name (car it)) org-sql--table-alist)
+    "The names of all required tables in org-sql."))
 
 ;; TODO what about the windows users?
 (defconst org-sql--mysql-exe "mysql"
@@ -709,17 +711,6 @@ TYPE must be one of 'boolean', 'text', 'enum', or 'integer'."
        (sqlserver ,@sqlserver)
        (t (error "Invalid mode: %s" (car ,config))))))
 
-(defmacro org-sql--with-config-keys (keys config &rest body)
-  "Execute BODY with keys bound to KEYS from CONFIG.
-CONFIG is the `org-sql-db-config' list and KEYS are a list of
-keys/symbols like those from the &plist switch from `-let'."
-  (declare (indent 2))
-  `(-let (((&plist ,@keys) (cdr ,config)))
-     ,@body))
-
-(defun org-sql--get-config-key (key config)
-  (plist-get (cdr config) key))
-
 ;; ensure integrity of the table alist
 
 (eval-when-compile
@@ -770,51 +761,55 @@ keys/symbols like those from the &plist switch from `-let'."
 
 ;; ensure table-alist functions are given the right input
 
-(defun org-sql--table-get-column-names (tbl-name)
-  "Return a list of columns for TBL-NAME.
+(eval-when-compile
+  (defun org-sql--table-get-column-names (tbl-name)
+    "Return a list of columns for TBL-NAME.
 The columns are retrieved from `org-sql--table-alist'."
-  (-if-let (columns (->> org-sql--table-alist
-                         (alist-get tbl-name)
-                         (alist-get 'columns)))
-      (-map #'car columns)
-    (error "Invalid table name: %s" tbl-name)))
+    (-if-let (columns (->> org-sql--table-alist
+                           (alist-get tbl-name)
+                           (alist-get 'columns)))
+        (-map #'car columns)
+      (error "Invalid table name: %s" tbl-name)))
 
-(defun org-sql--table-check-columns (tbl-name columns)
-  (let ((valid-columns (org-sql--table-get-column-names tbl-name)))
-    (-some->> (-difference valid-columns columns)
-      (error "Keys not given for table %s: %s" tbl-name))
-    (-some->> (-difference columns valid-columns)
-      (error "Keys not valid for table %s: %s" tbl-name))))
+  (defun org-sql--table-check-columns (tbl-name columns)
+    (let ((valid-columns (org-sql--table-get-column-names tbl-name)))
+      (-some->> (-difference valid-columns columns)
+        (error "Keys not given for table %s: %s" tbl-name))
+      (-some->> (-difference columns valid-columns)
+        (error "Keys not valid for table %s: %s" tbl-name))))
 
-(defun org-sql--table-check-columns-all (tbl-name plist)
-  "Test if keys in PLIST are valid column names for TBL-NAME.
+  (defun org-sql--table-check-columns-all (tbl-name plist)
+    "Test if keys in PLIST are valid column names for TBL-NAME.
 All column keys must be in PLIST."
-  (org-sql--table-check-columns tbl-name (-slice plist 0 nil 2)))
+    (org-sql--table-check-columns tbl-name (-slice plist 0 nil 2)))
 
-(defun org-sql--table-order-columns (tbl-name plist)
-  "Order the keys in PLIST according to the columns in TBL-NAME."
-  (org-sql--table-check-columns-all tbl-name plist)
-  (let ((order (->> (alist-get tbl-name org-sql--table-alist)
-                    (alist-get 'columns)
-                    (--map-indexed (cons (car it) it-index)))))
-    (->> (-partition 2 plist)
-         (--map (cons (alist-get (car it) order) (cadr it)))
-         (--sort (< (car it) (car other)))
-         (-map #'cdr))))
+  (defun org-sql--table-order-columns (tbl-name plist)
+    "Order the keys in PLIST according to the columns in TBL-NAME."
+    (org-sql--table-check-columns-all tbl-name plist)
+    (let ((order (->> (alist-get tbl-name org-sql--table-alist)
+                      (alist-get 'columns)
+                      (--map-indexed (cons (car it) it-index)))))
+      (->> (-partition 2 plist)
+           (--map (cons (alist-get (car it) order) (cadr it)))
+           (--sort (< (car it) (car other)))
+           (-map #'cdr)))))
 
-(defun org-sql--table-check-columns-contains (tbl-name plist)
-  "Test if keys in PLIST are valid column names for TBL-NAME.
-Only some of the column keys must be in PLIST."
+;;; data structure functions
+
+;; `org-sql-db-config' helper functions
+
+(defmacro org-sql--with-config-keys (keys config &rest body)
+  "Execute BODY with keys bound to KEYS from CONFIG.
+CONFIG is the `org-sql-db-config' list and KEYS are a list of
+keys/symbols like those from the &plist switch from `-let'."
   (declare (indent 2))
-  (let ((valid-keys (org-sql--table-get-column-names tbl-name))
-        (input-keys (->> (-partition 2 plist)
-                         (-map #'car))))
-    (-some->> (-difference input-keys valid-keys)
-      (error "Keys not valid for table %s: %s" tbl-name))))
+  `(-let (((&plist ,@keys) (cdr ,config)))
+     ,@body))
 
-;;; data constructors
+(defun org-sql--get-config-key (key config)
+  (plist-get (cdr config) key))
 
-;; bulk insert alist
+;; bulk insert alist constructors
 
 (defconst org-sql--empty-insert-alist
   (--map (list (car it)) org-sql--table-alist)
@@ -830,7 +825,7 @@ PLIST is a property list of the columns and values to insert."
        (setcdr tbl (cons (list ,@ordered-values) (cdr tbl)))
        ,acc)))
 
-;; external state
+;; external state data structures
 
 (defmacro org-sql--map-plist (key form plist)
   "Return PLIST modified with FORM applied to KEY's value."
@@ -961,16 +956,6 @@ Only the :lb-config and :headline keys will be changed."
          (org-sql--headline-update-supercontents-config it headline))
        (org-sql--map-plist :parent-ids (cons headline-id it))))
 
-;; (defun org-sql--to-hashpathpair (disk-path db-path file-hash)
-;;   "Return a plist representing org file status.
-;; DISK-PATH is the path to the org file on disk, DB-PATH is the
-;; path on disk recorded in the database for this org file, and
-;; FILE-HASH is the md5 of this org file."
-;;   (list :disk-path disk-path :db-path db-path :file-hash file-hash))
-
-(defun org-sql--to-hashpathpair (file-path file-hash)
-  (list :file-path file-path :file-hash file-hash))
-
 ;;; SQL string parsing functions
 
 (defun org-sql--parse-output-to-list (config out)
@@ -989,389 +974,8 @@ CONFIG is the `org-sql-db-config' list."
   (-some->> (org-sql--parse-output-to-list config out)
     (--map (-interleave cols it))))
 
-;;; MQL -> SQL string formatting functions
-
-;; formatting function tree
-
-(defun org-sql--compile-value-format-function (config type)
-  "Return SQL value formatting function.
-The returned function will depend on the MODE and TYPE."
-  (let ((formatter-form
-         (org-sql--case-type type
-           (boolean
-            (org-sql--case-mode config
-              ((mysql pgsql)
-               '(if (= it 1) "TRUE" "FALSE"))
-              ((sqlite sqlserver)
-               '(if (= it 1) "1" "0"))))
-           (enum
-            '(format "'%s'" (symbol-name it)))
-           ((integer real)
-            '(number-to-string it))
-           ((char text varchar)
-            (let ((escaped-chars
-                   (org-sql--case-mode config
-                     (mysql '(("'" . "\\\\'")
-                              ("\n" . "\\\\n")))
-                     ;; TODO not sure if these also needs Char(13) in front of
-                     ;; Char(10) for the carriage return if using on windows
-                     ;; (alas...newline war)
-                     (pgsql '(("'" . "''")
-                              ("\n" . "'||chr(10)||'")))
-                     (sqlite '(("'" . "''")
-                               ("\n" . "'||char(10)||'")))
-                     (sqlserver '(("'" . "''")
-                                  ("\n" . "+Char(10)+"))))))
-              `(->> ',escaped-chars
-                    (--reduce-from (s-replace (car it) (cdr it) acc) it)
-                    (format "'%s'")))))))
-    `(lambda (it) (if it ,formatter-form "NULL"))))
-
-
-(defun org-sql--get-column-formatter (config tbl-name column-name)
-  (let ((column (->> org-sql--table-alist
-                     (alist-get tbl-name)
-                     (alist-get 'columns)
-                     (alist-get column-name))))
-    (org-sql--compile-value-format-function config (plist-get column :type))))
-
-(defun org-sql--get-column-formatters (config tbl-name)
-  (->> org-sql--table-alist
-       (alist-get tbl-name)
-       (alist-get 'columns)
-       (--map (org-sql--compile-value-format-function config (plist-get (cdr it) :type)))))
-
-;; helper functions
-
-(defun org-sql--format-column-name (column-name)
-  "Return SQL string representation of COLUMN-NAME."
-  (if (not (keywordp column-name)) (error "Not a keyword: %s" column-name)
-    (s-chop-prefix ":" (symbol-name column-name))))
-
-(defun org-sql--format-table-name (config tbl-name)
-  "Return TBL-NAME as a formatted string according to CONFIG."
-  (org-sql--case-mode config
-    ;; these are straightforward since they don't use namespaces
-    ((mysql sqlite)
-     (symbol-name tbl-name))
-    ;; these require a custom namespace (aka schema) prefix if available
-    ((pgsql sqlserver)
-     (-let (((&plist :schema) (cdr config)))
-       (if (not schema) (symbol-name tbl-name)
-         (format "%s.%s" schema tbl-name))))))
-
-(defun org-sql--format-enum-name (config enum-name)
-  "Return ENUM-NAME as a formatted string according to CONFIG."
-  ;; ASSUME only modes that support ENUM will call this
-  (-let (((&plist :schema) (cdr config)))
-    (if (not schema) enum-name (format "%s.%s" schema enum-name))))
-
-;; create table
-
-(defun org-sql--get-enum-type-names (config table-alist)
-  (cl-flet
-      ((flatten
-        (tbl)
-        (let ((tbl-name (car tbl)))
-          (--map (cons tbl-name it) (alist-get 'columns (cdr tbl)))))
-       (format-column
-        (grouped)
-        (-let (((tbl-name . (col-name . (&plist :type :type-id :allowed))) grouped))
-          (when (and (eq type 'enum) allowed)
-            (cons (->> (or type-id
-                           (->> (org-sql--format-column-name col-name)
-                                (format "enum_%s_%s" tbl-name)))
-                       (org-sql--format-enum-name config))
-                  (--map (format "'%s'" it) allowed))))))
-    (->> (-mapcat #'flatten table-alist)
-         (-map #'format-column)
-         (-non-nil)
-         (-uniq))))
-
-(defun org-sql--format-create-enum-types (config table-alist)
-  (->> (org-sql--get-enum-type-names config table-alist)
-       (--map (format "CREATE TYPE %s AS ENUM (%s);"
-                      (car it)
-                      (s-join "," (cdr it))))))
-
-(defun org-sql--format-column-constraints (column-constraints)
-  "Return formatted column constraints for COLUMN-CONSTRAINTS."
-  (cl-flet
-      ((format-constraint
-        (constraint)
-        (pcase constraint
-          ('notnull "NOT NULL")
-          ('unique "UNIQUE")
-          (e (error "Unknown constraint %s" e)))))
-    (s-join " " (-map #'format-constraint column-constraints))))
-
-(defun org-sql--format-create-tables-type (config tbl-name column)
-  "Return SQL string for the type of COLUMN.
-CONFIG is the `org-sql-db-config' list and TBL-NAME is the name
-of the table."
-  (cl-flet
-      ((fmt-varchar
-        (column len-fmt max-str)
-        (-let (((&plist :length) (cdr column)))
-          (if length (format len-fmt length) max-str))))
-    (-let (((column-name . (&plist :type :type-id)) column))
-      (org-sql--case-type type
-        (boolean
-         (org-sql--case-mode config
-           ((mysql pgsql) "BOOLEAN")
-           (sqlite "INTEGER")
-           (sqlserver "BIT")))
-        (char
-         (org-sql--case-mode config
-           ((mysql sqlserver)
-            (-let (((&plist :length) (cdr column)))
-              (if length (format "CHAR(%s)" length) "CHAR")))
-           ;; pgsql should use TEXT here because (according to the docs) "there
-           ;; is no performance difference among char/varchar/text except for
-           ;; the length-checking"
-           ((pgsql sqlite) "TEXT")))
-        (enum
-         (org-sql--case-mode config
-           (mysql (->> (plist-get (cdr column) :allowed)
-                       (--map (format "'%s'" it))
-                       (s-join ",")
-                       (format "ENUM(%s)")))
-           (pgsql (if type-id type-id
-                    (->> (org-sql--format-column-name column-name)
-                         (format "enum_%s_%s" tbl-name)
-                         (org-sql--format-enum-name config))))
-           (sqlite "TEXT")
-           (sqlserver (-if-let (length (plist-get (cdr column) :length))
-                          (format "VARCHAR(%s)" length)
-                        "TEXT"))))
-        (integer
-         "INTEGER")
-        (real
-         (org-sql--case-mode config
-           (mysql "FLOAT")
-           ((pgsql sqlite sqlserver) "REAL")))
-        (text
-         (org-sql--case-mode config
-           ((mysql pgsql sqlite) "TEXT")
-           (sqlserver "NVARCHAR(MAX)")))
-        (varchar
-         (org-sql--case-mode config
-           (mysql (fmt-varchar column "VARCHAR(%s)" "VARCHAR"))
-           ;; see above why pgsql uses TEXT here
-           ((pgsql sqlite) "TEXT")
-           (sqlserver (fmt-varchar column "NVARCHAR(%s)" "NVARCHAR(MAX)"))))))))
-
-(defun org-sql--format-create-table-columns (config tbl-name columns)
-  "Return SQL string for COLUMNS.
-CONFIG is the `org-sql-db-config' list and TBL-NAME is the name
-of the table."
-  (cl-flet
-      ((format-column
-        (column)
-        (-let* (((name . (&plist :constraints)) column)
-                (name* (org-sql--format-column-name name))
-                (type* (org-sql--format-create-tables-type config tbl-name column))
-                (column-str (format "%s %s" name* type*)))
-          (if (not constraints) column-str
-            (->> (org-sql--format-column-constraints constraints)
-                 (format "%s %s" column-str))))))
-    (-map #'format-column columns)))
-
-(defun org-sql--format-create-table-constraints (config column-constraints defer)
-  "Return SQL string for COLUMN-CONSTRAINTS.
-If DEFER is t, add 'INITIALLY DEFERRED' to the end of each
-foreign key constraint. CONFIG is the `org-sql-db-config' list."
-  (cl-labels
-      ((format-primary
-        (keyvals)
-        (-let* (((&plist :keys) keyvals))
-          (->> (-map #'org-sql--format-column-name keys)
-               (s-join ",")
-               (format "PRIMARY KEY (%s)"))))
-       (format-foreign
-        (keyvals)
-        (-let* (((&plist :ref :keys :parent-keys :on-delete) keyvals)
-                (ref* (org-sql--format-table-name config ref))
-                (keys* (->> keys (-map #'org-sql--format-column-name) (s-join ",")))
-                (parent-keys* (->> parent-keys
-                                   (-map #'org-sql--format-column-name)
-                                   (s-join ",")))
-                (foreign-str (format "FOREIGN KEY (%s) REFERENCES %s (%s)"
-                                     keys* ref* parent-keys*))
-                (on-delete* (-some--> on-delete
-                              (cl-case it
-                                (no-action "NO ACTION")
-                                (cascade "CASCADE"))
-                              (format "ON DELETE %s" it)))
-                (deferrable (when defer "DEFERRABLE INITIALLY DEFERRED")))
-          (->> (list foreign-str on-delete* deferrable)
-               (-non-nil)
-               (s-join " "))))
-       (format-constraint
-        (constraint)
-        (pcase constraint
-          (`(primary . ,keyvals) (format-primary keyvals))
-          (`(foreign . ,keyvals) (format-foreign keyvals)))))
-    (-map #'format-constraint column-constraints)))
-
-(defun org-sql--format-create-table (config table)
-  "Return CREATE TABLE (...) SQL string for TABLE.
-CONFIG is the `org-sql-db-config' list."
-  (-let* (((tbl-name . (&alist 'columns 'constraints)) table)
-          (tbl-name* (org-sql--format-table-name config tbl-name))
-          (defer (org-sql--case-mode config
-                   ((mysql sqlserver) nil)
-                   ((pgsql sqlite) t)))
-          (fmt (org-sql--case-mode config
-                 ((mysql sqlite)
-                  "CREATE TABLE IF NOT EXISTS %s (%s);")
-                 (pgsql
-                  (org-sql--with-config-keys (:unlogged) config
-                    (s-join " " (list "CREATE"
-                                      (if unlogged "UNLOGGED TABLE" "TABLE")
-                                      "IF NOT EXISTS %s (%s);"))))
-                 (sqlserver
-                  (org-sql--with-config-keys (:database) config
-                    (format "IF NOT EXISTS (SELECT * FROM sys.tables where name = '%%1$s') CREATE TABLE %%1$s (%%2$s);" database))))))
-    (->> (org-sql--format-create-table-constraints config constraints defer)
-         (append (org-sql--format-create-table-columns config tbl-name columns))
-         (s-join ",")
-         (format fmt tbl-name*))))
-
-(defun org-sql--format-create-tables (config tables)
-  "Return schema SQL string for TABLES.
-CONFIG is the `org-sql-db-config' list."
-  (let ((create-tbl-stmts (--map (org-sql--format-create-table config it) tables)))
-    (org-sql--case-mode config
-      (pgsql
-       (-> (org-sql--format-create-enum-types config tables)
-           (append create-tbl-stmts)))
-      ((mysql sqlite sqlserver)
-       create-tbl-stmts))))
-
-;; insert
-
-(defun org-sql--format-bulk-insert-for-table (config table-bulk-insert)
-  (cl-flet
-      ((format-row
-        (formatters row)
-        (->> (--zip-with (funcall other it) row formatters)
-             (s-join ",")
-             (format "(%s)"))))
-    (-let* (((tbl-name . rows) table-bulk-insert)
-            (tbl-name* (org-sql--format-table-name config tbl-name))
-            (columns (->> (alist-get tbl-name org-sql--table-alist)
-                          (alist-get 'columns)
-                          (--map (org-sql--format-column-name (car it)))
-                          (s-join ",")))
-            ;; ASSUME these will be in the right order
-            (formatters (org-sql--get-column-formatters config tbl-name)))
-      (->> (--map (format-row formatters it) rows)
-           (s-join ",")
-           (format "INSERT INTO %s (%s) VALUES %s;" tbl-name* columns)))))
-
-(defun org-sql--format-bulk-inserts (config insert-alist)
-  (->> (-filter #'cdr insert-alist)
-       (--map (org-sql--format-bulk-insert-for-table config it))
-       (s-join "")))
-
-;; select
-
-(defun org-sql--format-select-statement (config columns tbl-name)
-  (let ((tbl-name* (org-sql--format-table-name config tbl-name))
-        (columns* (or (-some->> (-map #'org-sql--format-column-name columns)
-                        (s-join ","))
-                      "*")))
-    (format "SELECT %s FROM %s;" columns* tbl-name*)))
-
-;; hashpathpairs/tree-config -> SQL statements
-
-(defun org-sql--format-path-delete-statement (config hashpathpairs)
-  (when hashpathpairs
-    (cl-flet
-        ((format-where-clause
-          (path-fmtr hash-fmtr grouped)
-          (-let* (((hash . paths) grouped)
-                  (hash* (funcall hash-fmtr hash)))
-            (->> (--map (format "file_path = %s" (funcall path-fmtr it)) paths)
-                 (s-join " OR ")
-                 (format "(file_hash = %s AND (%s))" hash*)))))
-      (let ((tbl-name* (org-sql--format-table-name config 'file_metadata))
-            (hash-fmtr (org-sql--get-column-formatter config 'file_metadata :file_hash))
-            (path-fmtr (org-sql--get-column-formatter config 'file_metadata :file_path)))
-        (->> (org-sql--group-hashpathpairs-by-hash hashpathpairs)
-             (--map (format-where-clause path-fmtr hash-fmtr it))
-             (s-join " OR ")
-             (format "DELETE FROM %s WHERE %s;" tbl-name*))))))
-
-(defun org-sql--format-file-delete-statement (config hashpathpairs)
-  (when hashpathpairs
-    (let ((tbl-name* (org-sql--format-table-name config 'file_hashes))
-          (fmtr (org-sql--get-column-formatter config 'file_hashes :file_hash)))
-        (->> (org-sql--hashpathpairs-to-hashes hashpathpairs)
-             (--map (funcall fmtr it))
-             (s-join ",")
-             (format "DELETE FROM %s WHERE file_hash IN (%s);" tbl-name*)))))
-
-(defun org-sql--init-acc ()
-  (list :inserts (-clone org-sql--empty-insert-alist)
-        :headline-id 1
-        :timestamp-id 1
-        :entry-id 1
-        :link-id 1
-        :property-id 1
-        :clock-id 1))
-
-(defun org-sql--acc-get (key acc)
-  (plist-get acc key))
-
-(defun org-sql--acc-incr (key acc)
-  (plist-put acc key (1+ (plist-get acc key))))
-
-(defun org-sql--acc-reset (key acc)
-  (plist-put acc key 0))
-
-(defun org-sql--format-insert-statements (config paths-to-insert files-to-insert)
-  (let* ((acc (org-sql--init-acc))
-         (acc* (--reduce-from (org-sql--tree-config-to-insert-alist acc it) acc files-to-insert)))
-    (--> paths-to-insert
-      (--reduce-from (-let (((&plist :hash :path :attrs) it))
-                       (org-sql--insert-alist-add-file-metadata* acc path hash attrs))
-                     acc* it)
-         (plist-get it :inserts)
-         (org-sql--format-bulk-inserts config it))))
-
-;;; SQL string -> SQL string formatting functions
-
-(defun org-sql--format-sql-transaction (config sql-statements)
-  "Return SQL string for a transaction.
-SQL-STATEMENTS is a list of SQL statements to be included in the
-
-transaction. MODE is the SQL mode."
-  ;; TODO might want to add performance options here
-  (let ((fmt (org-sql--case-mode config
-               (sqlite "PRAGMA foreign_keys = ON;BEGIN;%sCOMMIT;")
-               ((mysql pgsql) "BEGIN;%sCOMMIT;")
-               (sqlserver "BEGIN TRANSACTION;%sCOMMIT;"))))
-    (-some->> sql-statements
-      (s-join "")
-      (format fmt))))
-
 ;;; org-element/org-ml wrapper functions
 
-;; TODO use org-ml-get-parents for this
-(defun org-sql--headline-get-path (headline)
-  "Return the path for HEADLINE node.
-Path will be a list of offsets for the parent headline and its
-parents (with HEADLINE on the right end of the list)."
-  (cl-labels
-      ((get-path
-        (acc node)
-        (if (or (null node) (eq 'org-data (car node))) acc
-          (get-path (cons (org-ml-get-property :begin node) acc)
-                    (org-ml-get-property :parent node)))))
-    (get-path nil headline)))
-        
 (defun org-sql--headline-get-archive-itags (headline)
   "Return archive itags from HEADLINE or nil if none."
   (unless org-sql-exclude-inherited-tags
@@ -1382,18 +986,6 @@ parents (with HEADLINE on the right end of the list)."
   "Return list of tags from HEADLINE."
   (->> (org-ml-get-property :tags headline)
        (-map #'substring-no-properties)))
-
-;; (defun org-sql--headline-get-contents (headline)
-;;   "Return the contents of HEADLINE.
-;; This includes everything in the headline's section element that
-;; is not the planning, logbook drawer, or property drawer."
-;;   (-some->> (org-ml-headline-get-section headline)
-;;     ;; TODO need a function in org-ml that returns non-meta
-;;     ;; TODO this only works when `org-log-into-drawer' is defined
-;;     (--remove (org-ml-is-any-type '(planning property-drawer) it))
-;;     (--remove (and (org-ml-is-type 'drawer it)
-;;                    (equal (org-element-property :drawer-name it)
-;;                           org-log-into-drawer)))))
 
 (defun org-sql--split-paragraph (paragraph)
   "Split PARAGRAPH by first line-break node."
@@ -1614,7 +1206,7 @@ to NOTE-TEXT; otherwise just as (CLOCK)."
             nil)
            (reverse)))))
 
-;; org-element tree -> MQL inserts
+;; org-element tree -> bulk insert-alist
 
 (defun org-sql--insert-alist-add-headline-logbook-item (acc entry)
   "Add MQL-insert for item ENTRY to ACC."
@@ -2056,6 +1648,375 @@ TREE-CONFIG is a list given by `org-sql--to-tree-config'."
 (defun org-sql--hashpathpairs-to-hashes (hashpathpairs)
   (-map #'car hashpathpairs))
 
+;;; SQL formatting functions
+
+;; value formatters
+
+(defun org-sql--compile-value-format-function (config type)
+  "Return SQL value formatting function.
+The returned function will depend on the MODE and TYPE."
+  (let ((formatter-form
+         (org-sql--case-type type
+           (boolean
+            (org-sql--case-mode config
+              ((mysql pgsql)
+               '(if (= it 1) "TRUE" "FALSE"))
+              ((sqlite sqlserver)
+               '(if (= it 1) "1" "0"))))
+           (enum
+            '(format "'%s'" (symbol-name it)))
+           ((integer real)
+            '(number-to-string it))
+           ((char text varchar)
+            (let ((escaped-chars
+                   (org-sql--case-mode config
+                     (mysql '(("'" . "\\\\'")
+                              ("\n" . "\\\\n")))
+                     ;; TODO not sure if these also needs Char(13) in front of
+                     ;; Char(10) for the carriage return if using on windows
+                     ;; (alas...newline war)
+                     (pgsql '(("'" . "''")
+                              ("\n" . "'||chr(10)||'")))
+                     (sqlite '(("'" . "''")
+                               ("\n" . "'||char(10)||'")))
+                     (sqlserver '(("'" . "''")
+                                  ("\n" . "+Char(10)+"))))))
+              `(->> ',escaped-chars
+                    (--reduce-from (s-replace (car it) (cdr it) acc) it)
+                    (format "'%s'")))))))
+    `(lambda (it) (if it ,formatter-form "NULL"))))
+
+(defun org-sql--get-column-formatter (config tbl-name column-name)
+  (let ((column (->> org-sql--table-alist
+                     (alist-get tbl-name)
+                     (alist-get 'columns)
+                     (alist-get column-name))))
+    (org-sql--compile-value-format-function config (plist-get column :type))))
+
+(defun org-sql--get-column-formatters (config tbl-name)
+  (->> org-sql--table-alist
+       (alist-get tbl-name)
+       (alist-get 'columns)
+       (--map (org-sql--compile-value-format-function config (plist-get (cdr it) :type)))))
+
+;; identifier formatters
+
+(defun org-sql--format-column-name (column-name)
+  "Return SQL string representation of COLUMN-NAME."
+  (if (not (keywordp column-name)) (error "Not a keyword: %s" column-name)
+    (s-chop-prefix ":" (symbol-name column-name))))
+
+(defun org-sql--format-table-name (config tbl-name)
+  "Return TBL-NAME as a formatted string according to CONFIG."
+  (org-sql--case-mode config
+    ;; these are straightforward since they don't use namespaces
+    ((mysql sqlite)
+     (symbol-name tbl-name))
+    ;; these require a custom namespace (aka schema) prefix if available
+    ((pgsql sqlserver)
+     (-let (((&plist :schema) (cdr config)))
+       (if (not schema) (symbol-name tbl-name)
+         (format "%s.%s" schema tbl-name))))))
+
+(defun org-sql--format-enum-name (config enum-name)
+  "Return ENUM-NAME as a formatted string according to CONFIG."
+  ;; ASSUME only modes that support ENUM will call this
+  (-let (((&plist :schema) (cdr config)))
+    (if (not schema) enum-name (format "%s.%s" schema enum-name))))
+
+;; create table
+
+(defun org-sql--get-enum-type-names (config table-alist)
+  (cl-flet
+      ((flatten
+        (tbl)
+        (let ((tbl-name (car tbl)))
+          (--map (cons tbl-name it) (alist-get 'columns (cdr tbl)))))
+       (format-column
+        (grouped)
+        (-let (((tbl-name . (col-name . (&plist :type :type-id :allowed))) grouped))
+          (when (and (eq type 'enum) allowed)
+            (cons (->> (or type-id
+                           (->> (org-sql--format-column-name col-name)
+                                (format "enum_%s_%s" tbl-name)))
+                       (org-sql--format-enum-name config))
+                  (--map (format "'%s'" it) allowed))))))
+    (->> (-mapcat #'flatten table-alist)
+         (-map #'format-column)
+         (-non-nil)
+         (-uniq))))
+
+(defun org-sql--format-create-enum-types (config table-alist)
+  (->> (org-sql--get-enum-type-names config table-alist)
+       (--map (format "CREATE TYPE %s AS ENUM (%s);"
+                      (car it)
+                      (s-join "," (cdr it))))))
+
+(defun org-sql--format-column-constraints (column-constraints)
+  "Return formatted column constraints for COLUMN-CONSTRAINTS."
+  (cl-flet
+      ((format-constraint
+        (constraint)
+        (pcase constraint
+          ('notnull "NOT NULL")
+          ('unique "UNIQUE")
+          (e (error "Unknown constraint %s" e)))))
+    (s-join " " (-map #'format-constraint column-constraints))))
+
+(defun org-sql--format-create-tables-type (config tbl-name column)
+  "Return SQL string for the type of COLUMN.
+CONFIG is the `org-sql-db-config' list and TBL-NAME is the name
+of the table."
+  (cl-flet
+      ((fmt-varchar
+        (column len-fmt max-str)
+        (-let (((&plist :length) (cdr column)))
+          (if length (format len-fmt length) max-str))))
+    (-let (((column-name . (&plist :type :type-id)) column))
+      (org-sql--case-type type
+        (boolean
+         (org-sql--case-mode config
+           ((mysql pgsql) "BOOLEAN")
+           (sqlite "INTEGER")
+           (sqlserver "BIT")))
+        (char
+         (org-sql--case-mode config
+           ((mysql sqlserver)
+            (-let (((&plist :length) (cdr column)))
+              (if length (format "CHAR(%s)" length) "CHAR")))
+           ;; pgsql should use TEXT here because (according to the docs) "there
+           ;; is no performance difference among char/varchar/text except for
+           ;; the length-checking"
+           ((pgsql sqlite) "TEXT")))
+        (enum
+         (org-sql--case-mode config
+           (mysql (->> (plist-get (cdr column) :allowed)
+                       (--map (format "'%s'" it))
+                       (s-join ",")
+                       (format "ENUM(%s)")))
+           (pgsql (if type-id type-id
+                    (->> (org-sql--format-column-name column-name)
+                         (format "enum_%s_%s" tbl-name)
+                         (org-sql--format-enum-name config))))
+           (sqlite "TEXT")
+           (sqlserver (-if-let (length (plist-get (cdr column) :length))
+                          (format "VARCHAR(%s)" length)
+                        "TEXT"))))
+        (integer
+         "INTEGER")
+        (real
+         (org-sql--case-mode config
+           (mysql "FLOAT")
+           ((pgsql sqlite sqlserver) "REAL")))
+        (text
+         (org-sql--case-mode config
+           ((mysql pgsql sqlite) "TEXT")
+           (sqlserver "NVARCHAR(MAX)")))
+        (varchar
+         (org-sql--case-mode config
+           (mysql (fmt-varchar column "VARCHAR(%s)" "VARCHAR"))
+           ;; see above why pgsql uses TEXT here
+           ((pgsql sqlite) "TEXT")
+           (sqlserver (fmt-varchar column "NVARCHAR(%s)" "NVARCHAR(MAX)"))))))))
+
+(defun org-sql--format-create-table-columns (config tbl-name columns)
+  "Return SQL string for COLUMNS.
+CONFIG is the `org-sql-db-config' list and TBL-NAME is the name
+of the table."
+  (cl-flet
+      ((format-column
+        (column)
+        (-let* (((name . (&plist :constraints)) column)
+                (name* (org-sql--format-column-name name))
+                (type* (org-sql--format-create-tables-type config tbl-name column))
+                (column-str (format "%s %s" name* type*)))
+          (if (not constraints) column-str
+            (->> (org-sql--format-column-constraints constraints)
+                 (format "%s %s" column-str))))))
+    (-map #'format-column columns)))
+
+(defun org-sql--format-create-table-constraints (config column-constraints defer)
+  "Return SQL string for COLUMN-CONSTRAINTS.
+If DEFER is t, add 'INITIALLY DEFERRED' to the end of each
+foreign key constraint. CONFIG is the `org-sql-db-config' list."
+  (cl-labels
+      ((format-primary
+        (keyvals)
+        (-let* (((&plist :keys) keyvals))
+          (->> (-map #'org-sql--format-column-name keys)
+               (s-join ",")
+               (format "PRIMARY KEY (%s)"))))
+       (format-foreign
+        (keyvals)
+        (-let* (((&plist :ref :keys :parent-keys :on-delete) keyvals)
+                (ref* (org-sql--format-table-name config ref))
+                (keys* (->> keys (-map #'org-sql--format-column-name) (s-join ",")))
+                (parent-keys* (->> parent-keys
+                                   (-map #'org-sql--format-column-name)
+                                   (s-join ",")))
+                (foreign-str (format "FOREIGN KEY (%s) REFERENCES %s (%s)"
+                                     keys* ref* parent-keys*))
+                (on-delete* (-some--> on-delete
+                              (cl-case it
+                                (no-action "NO ACTION")
+                                (cascade "CASCADE"))
+                              (format "ON DELETE %s" it)))
+                (deferrable (when defer "DEFERRABLE INITIALLY DEFERRED")))
+          (->> (list foreign-str on-delete* deferrable)
+               (-non-nil)
+               (s-join " "))))
+       (format-constraint
+        (constraint)
+        (pcase constraint
+          (`(primary . ,keyvals) (format-primary keyvals))
+          (`(foreign . ,keyvals) (format-foreign keyvals)))))
+    (-map #'format-constraint column-constraints)))
+
+(defun org-sql--format-create-table (config table)
+  "Return CREATE TABLE (...) SQL string for TABLE.
+CONFIG is the `org-sql-db-config' list."
+  (-let* (((tbl-name . (&alist 'columns 'constraints)) table)
+          (tbl-name* (org-sql--format-table-name config tbl-name))
+          (defer (org-sql--case-mode config
+                   ((mysql sqlserver) nil)
+                   ((pgsql sqlite) t)))
+          (fmt (org-sql--case-mode config
+                 ((mysql sqlite)
+                  "CREATE TABLE IF NOT EXISTS %s (%s);")
+                 (pgsql
+                  (org-sql--with-config-keys (:unlogged) config
+                    (s-join " " (list "CREATE"
+                                      (if unlogged "UNLOGGED TABLE" "TABLE")
+                                      "IF NOT EXISTS %s (%s);"))))
+                 (sqlserver
+                  (org-sql--with-config-keys (:database) config
+                    (format "IF NOT EXISTS (SELECT * FROM sys.tables where name = '%%1$s') CREATE TABLE %%1$s (%%2$s);" database))))))
+    (->> (org-sql--format-create-table-constraints config constraints defer)
+         (append (org-sql--format-create-table-columns config tbl-name columns))
+         (s-join ",")
+         (format fmt tbl-name*))))
+
+(defun org-sql--format-create-tables (config tables)
+  "Return schema SQL string for TABLES.
+CONFIG is the `org-sql-db-config' list."
+  (let ((create-tbl-stmts (--map (org-sql--format-create-table config it) tables)))
+    (org-sql--case-mode config
+      (pgsql
+       (-> (org-sql--format-create-enum-types config tables)
+           (append create-tbl-stmts)))
+      ((mysql sqlite sqlserver)
+       create-tbl-stmts))))
+
+;; insert
+
+(defun org-sql--format-bulk-insert-for-table (config table-bulk-insert)
+  (cl-flet
+      ((format-row
+        (formatters row)
+        (->> (--zip-with (funcall other it) row formatters)
+             (s-join ",")
+             (format "(%s)"))))
+    (-let* (((tbl-name . rows) table-bulk-insert)
+            (tbl-name* (org-sql--format-table-name config tbl-name))
+            (columns (->> (alist-get tbl-name org-sql--table-alist)
+                          (alist-get 'columns)
+                          (--map (org-sql--format-column-name (car it)))
+                          (s-join ",")))
+            ;; ASSUME these will be in the right order
+            (formatters (org-sql--get-column-formatters config tbl-name)))
+      (->> (--map (format-row formatters it) rows)
+           (s-join ",")
+           (format "INSERT INTO %s (%s) VALUES %s;" tbl-name* columns)))))
+
+(defun org-sql--format-bulk-inserts (config insert-alist)
+  (->> (-filter #'cdr insert-alist)
+       (--map (org-sql--format-bulk-insert-for-table config it))
+       (s-join "")))
+
+;; select
+
+(defun org-sql--format-select-statement (config columns tbl-name)
+  (let ((tbl-name* (org-sql--format-table-name config tbl-name))
+        (columns* (or (-some->> (-map #'org-sql--format-column-name columns)
+                        (s-join ","))
+                      "*")))
+    (format "SELECT %s FROM %s;" columns* tbl-name*)))
+
+;; bulk deletes
+
+(defun org-sql--format-path-delete-statement (config hashpathpairs)
+  (when hashpathpairs
+    (cl-flet
+        ((format-where-clause
+          (path-fmtr hash-fmtr grouped)
+          (-let* (((hash . paths) grouped)
+                  (hash* (funcall hash-fmtr hash)))
+            (->> (--map (format "file_path = %s" (funcall path-fmtr it)) paths)
+                 (s-join " OR ")
+                 (format "(file_hash = %s AND (%s))" hash*)))))
+      (let ((tbl-name* (org-sql--format-table-name config 'file_metadata))
+            (hash-fmtr (org-sql--get-column-formatter config 'file_metadata :file_hash))
+            (path-fmtr (org-sql--get-column-formatter config 'file_metadata :file_path)))
+        (->> (org-sql--group-hashpathpairs-by-hash hashpathpairs)
+             (--map (format-where-clause path-fmtr hash-fmtr it))
+             (s-join " OR ")
+             (format "DELETE FROM %s WHERE %s;" tbl-name*))))))
+
+(defun org-sql--format-file-delete-statement (config hashpathpairs)
+  (when hashpathpairs
+    (let ((tbl-name* (org-sql--format-table-name config 'file_hashes))
+          (fmtr (org-sql--get-column-formatter config 'file_hashes :file_hash)))
+        (->> (org-sql--hashpathpairs-to-hashes hashpathpairs)
+             (--map (funcall fmtr it))
+             (s-join ",")
+             (format "DELETE FROM %s WHERE file_hash IN (%s);" tbl-name*)))))
+
+;; bulk inserts
+
+(defun org-sql--init-acc ()
+  (list :inserts (-clone org-sql--empty-insert-alist)
+        :headline-id 1
+        :timestamp-id 1
+        :entry-id 1
+        :link-id 1
+        :property-id 1
+        :clock-id 1))
+
+(defun org-sql--acc-get (key acc)
+  (plist-get acc key))
+
+(defun org-sql--acc-incr (key acc)
+  (plist-put acc key (1+ (plist-get acc key))))
+
+(defun org-sql--acc-reset (key acc)
+  (plist-put acc key 0))
+
+(defun org-sql--format-insert-statements (config paths-to-insert files-to-insert)
+  (let* ((acc (org-sql--init-acc))
+         (acc* (--reduce-from (org-sql--tree-config-to-insert-alist acc it) acc files-to-insert)))
+    (--> paths-to-insert
+      (--reduce-from (-let (((&plist :hash :path :attrs) it))
+                       (org-sql--insert-alist-add-file-metadata* acc path hash attrs))
+                     acc* it)
+         (plist-get it :inserts)
+         (org-sql--format-bulk-inserts config it))))
+
+;; transactions
+
+(defun org-sql--format-sql-transaction (config sql-statements)
+  "Return SQL string for a transaction.
+SQL-STATEMENTS is a list of SQL statements to be included in the
+
+transaction. MODE is the SQL mode."
+  ;; TODO might want to add performance options here
+  (let ((fmt (org-sql--case-mode config
+               (sqlite "PRAGMA foreign_keys = ON;BEGIN;%sCOMMIT;")
+               ((mysql pgsql) "BEGIN;%sCOMMIT;")
+               (sqlserver "BEGIN TRANSACTION;%sCOMMIT;"))))
+    (-some->> sql-statements
+      (s-join "")
+      (format fmt))))
+
 ;; IO helper functions
 
 (defmacro org-sql--on-success (first-form success-form error-form)
@@ -2078,6 +2039,40 @@ same meaning."
   (declare (indent 1))
   `(org-sql--on-success ,first-form (progn ,@success-forms) (error it-out)))
 
+(defun org-org-sql--get-drop-table-statements (config)
+  (org-sql--case-mode config
+    (mysql
+     (list "SET FOREIGN_KEY_CHECKS = 0;"
+           (format "DROP TABLE IF EXISTS %s;" (s-join "," org-sql-table-names))
+           "SET FOREIGN_KEY_CHECKS = 1;"))
+    (pgsql
+     (org-sql--with-config-keys (:schema) org-sql-db-config
+       (let ((drop-tables (->> (if schema
+                                   (--map (format "%s.%s" schema it)
+                                          org-sql-table-names)
+                                 org-sql-table-names)
+                               (s-join ",")
+                               (format "DROP TABLE IF EXISTS %s CASCADE;")))
+             (drop-types (->> (org-sql--get-enum-type-names config org-sql--table-alist)
+                              (-map #'car)
+                              (s-join ",")
+                              (format "DROP TYPE IF EXISTS %s CASCADE;"))))
+         (list drop-tables drop-types))))
+    (sqlite
+     (reverse (--map (format "DROP TABLE IF EXISTS %s;" it) org-sql-table-names)))
+    (sqlserver
+     (org-sql--with-config-keys (:schema) config
+       (let ((tbl-names (--> org-sql-table-names
+                          (if schema (--map (format "%s.%s" schema it) it) it)
+                          (reverse it)))
+             (alter-fmt (->> (list
+                              "IF EXISTS"
+                              "(SELECT * FROM sys.tables where name = '%1$s')"
+                              "ALTER TABLE %1$s NOCHECK CONSTRAINT ALL;")
+                             (s-join " "))))
+         (-snoc (--map (format alter-fmt it) tbl-names)
+                (format "DROP TABLE IF EXISTS %s;" (s-join "," tbl-names))))))))
+
 ;;;
 ;;; STATEFUL FUNCTIONS
 ;;;
@@ -2099,14 +2094,6 @@ Return a cons cell like (RETURNCODE . OUTPUT)."
   (with-temp-buffer
     (let ((rc (apply #'call-process path file (current-buffer) nil args)))
       (cons rc (buffer-string)))))
-
-;; (defun org-sql--run-command-async (path args)
-;;   (make-process :command (cons path args)
-;;                 :buffer "*Org-SQL*"
-;;                 :connection-type 'pipe
-;;                 :name "org-sql-async"))
-;;     ;; (process-send-string proc (concat payload "\n"))
-;;     ;; (process-send-eof proc)))
     
 ;;; hashpathpair -> tree-config
 
@@ -2326,70 +2313,6 @@ The database connection will be handled transparently."
   (->> (org-sql--format-sql-transaction org-sql-db-config statements)
        (org-sql-send-sql)))
 
-(defun org-sql--send-transaction-with-hook (pre-key post-key trans-stmts)
-  (-let* (((pre-in-trans before-trans) (-some-> pre-key (org-sql--pull-hook)))
-          ((post-in-trans after-trans) (-some-> post-key (org-sql--pull-hook)))
-          (ts (->> (append pre-in-trans trans-stmts post-in-trans)
-                   (org-sql--format-sql-transaction org-sql-db-config)))
-          (bs (-some->> before-trans (s-join "")))
-          (as (-some->> after-trans (s-join ""))))
-    (org-sql--send-sql* (concat bs ts as) org-sql-async)))
-
-;;;
-;;; Public API
-;;;
-
-;; There are three layers which we care about: the database itself, the
-;; namespace, and the tables in which the data will live. And these three have
-;; three operations we care about: create, drop, and testing for existence. The
-;; namespace (aka the "schema") is only defined for postgres and sql server.
-;; Furthermore, we can't assume the normal user has permissions to create the
-;; database itself for any of the "server" implementations (everything but
-;; SQLite), so the create/drop commands aren't defined for these either. The
-;; only layer that is defined for all three operations and all database is the
-;; table layer.
-;;
-;; The reason this matters is because there needs to be a way to define
-;; "composite" functions like "initialize" and "reset" a database from emacs.
-;; Because all supported DBMSs have different layers, these will mean different
-;; things and must take these restrictions into account.
-
-(defun org-sql-send-sql (sql-cmd &optional async)
-  "Execute SQL-CMD.
-The database connection will be handled transparently."
-  (let ((args (org-sql--case-mode org-sql-db-config
-                (mysql `("-e" ,sql-cmd))
-                (pgsql `("-c" ,sql-cmd))
-                (sqlite `(,sql-cmd))
-                (sqlserver `("-Q" ,(format "SET NOCOUNT ON; %s" sql-cmd))))))
-    (org-sql--exec-command-in-db args async)))
-
-;; table layer
-
-;; (defun org-sql--run-hook (q hook-def)
-;;   (org-sql--on-success (pcase hook-def
-;;                          (`(file ,path) (org-sql--send-sql-file path))
-;;                          (`(sql ,cmd) (org-sql-send-sql cmd))
-;;                          (e (error "Unknown hook definition: %s" e)))
-;;     (when org-sql-debug
-;;       (let ((fmt (if (equal "" it-out)
-;;                      (format "%s hook %%S completed successfully" q)
-;;                    (format "%s hook %%S completed with output: %s" q it-out))))
-;;         (message fmt it-out)))
-;;     (let ((fmt (if (equal "" it-out) (format "%s hook %%S failed" q)
-;;                  (format "%s hook %%S failed with output: %s" q it-out))))
-;;       (message fmt it-out))))
-
-;; (defun org-sql--run-hooks (key)
-;;   (-when-let (hooks (org-sql--get-config-key key org-sql-db-config))
-;;     (when hooks
-;;       (let ((qualifier (pcase key
-;;                          (:post-init-hooks "Init")
-;;                          (:post-update-hooks "Update")
-;;                          (:post-clear-hooks "Clear")
-;;                          (e (error "Unknown qualifier: %s" e)))))
-;;         (--each hooks (org-sql--run-hook qualifier it))))))
-
 (defun org-sql--pull-hook (key)
   (-some->> (org-sql--get-config-key key org-sql-db-config)
     ;; t = INSIDE
@@ -2407,43 +2330,51 @@ The database connection will be handled transparently."
   (-let (((&alist 'append a 'independent i) (org-sql--pull-hook key)))
     (list (append stmts a) (list i))))
 
+(defun org-sql--send-transaction-with-hook (pre-key post-key trans-stmts)
+  (-let* (((pre-in-trans before-trans) (-some-> pre-key (org-sql--pull-hook)))
+          ((post-in-trans after-trans) (-some-> post-key (org-sql--pull-hook)))
+          (ts (->> (append pre-in-trans trans-stmts post-in-trans)
+                   (org-sql--format-sql-transaction org-sql-db-config)))
+          (bs (-some->> before-trans (s-join "")))
+          (as (-some->> after-trans (s-join ""))))
+    (org-sql--send-sql* (concat bs ts as) org-sql-async)))
+
+;;;
+;;; Public API
+;;;
+
+(defun org-sql-send-sql (sql-cmd &optional async)
+  "Execute SQL-CMD.
+The database connection will be handled transparently."
+  (let ((args (org-sql--case-mode org-sql-db-config
+                (mysql `("-e" ,sql-cmd))
+                (pgsql `("-c" ,sql-cmd))
+                (sqlite `(,sql-cmd))
+                (sqlserver `("-Q" ,(format "SET NOCOUNT ON; %s" sql-cmd))))))
+    (org-sql--exec-command-in-db args async)))
+
+;;; database admin
+;;
+;; There are three "admin" layers which we care about: the database itself, the
+;; namespace, and the tables in which the data will live. And these three have
+;; three operations we care about: create, drop, and testing for existence. The
+;; namespace (aka the "schema") is only defined for postgres and sql server.
+;; Furthermore, we can't assume the normal user has permissions to create the
+;; database itself for any of the "server" implementations (everything but
+;; SQLite), so the create/drop commands aren't defined for these either. The
+;; only layer that is defined for all three operations and all database is the
+;; table layer.
+;;
+;; The reason this matters is because there needs to be a way to define
+;; "composite" functions like "initialize" and "reset" a database from emacs.
+;; Because all supported DBMSs have different layers, these will mean different
+;; things and must take these restrictions into account.
+
+;; table layer
+
 (defun org-sql-create-tables ()
   (->> (org-sql--format-create-tables org-sql-db-config org-sql--table-alist)
        (org-sql--send-transaction)))
-
-(defun org-org-sql--get-drop-table-statements (config)
-  (org-sql--case-mode config
-    (mysql
-     (list "SET FOREIGN_KEY_CHECKS = 0;"
-           (format "DROP TABLE IF EXISTS %s;" (s-join "," org-sql-table-names))
-           "SET FOREIGN_KEY_CHECKS = 1;"))
-    (pgsql
-     (org-sql--with-config-keys (:schema) org-sql-db-config
-       (let ((drop-tables (->> (if schema
-                                   (--map (format "%s.%s" schema it)
-                                          org-sql-table-names)
-                                 org-sql-table-names)
-                               (s-join ",")
-                               (format "DROP TABLE IF EXISTS %s CASCADE;")))
-             (drop-types (->> (org-sql--get-enum-type-names config org-sql--table-alist)
-                              (-map #'car)
-                              (s-join ",")
-                              (format "DROP TYPE IF EXISTS %s CASCADE;"))))
-         (list drop-tables drop-types))))
-    (sqlite
-     (reverse (--map (format "DROP TABLE IF EXISTS %s;" it) org-sql-table-names)))
-    (sqlserver
-     (org-sql--with-config-keys (:schema) config
-       (let ((tbl-names (--> org-sql-table-names
-                          (if schema (--map (format "%s.%s" schema it) it) it)
-                          (reverse it)))
-             (alter-fmt (->> (list
-                              "IF EXISTS"
-                              "(SELECT * FROM sys.tables where name = '%1$s')"
-                              "ALTER TABLE %1$s NOCHECK CONSTRAINT ALL;")
-                             (s-join " "))))
-         (-snoc (--map (format alter-fmt it) tbl-names)
-                (format "DROP TABLE IF EXISTS %s;" (s-join "," tbl-names))))))))
 
 (defun org-sql-drop-tables ()
   (->> (org-org-sql--get-drop-table-statements org-sql-db-config)
@@ -2531,17 +2462,7 @@ The database connection will be handled transparently."
          (org-sql--on-success* (org-sql--exec-sqlserver-command-nodb `("-Q" ,cmd) nil)
            (equal "1" (s-trim it-out))))))))
 
-;;; composite database functions
-
-(defun org-sql-dump-table (tbl-name &optional as-plist)
-  (let ((cmd (org-sql--format-select-statement org-sql-db-config nil tbl-name)))
-    (org-sql--on-success* (org-sql-send-sql cmd)
-      (if as-plist
-          (let ((col-names (->> (alist-get tbl-name org-sql--table-alist)
-                                (alist-get 'columns)
-                                (-map #'car))))
-            (org-sql--parse-output-to-plist org-sql-db-config col-names it-out))
-        (org-sql--parse-output-to-list org-sql-db-config it-out)))))
+;; composite admin functions
 
 (defun org-sql-init-db ()
   (org-sql--case-mode org-sql-db-config
@@ -2551,18 +2472,6 @@ The database connection will be handled transparently."
      (org-sql-create-db)))
   (->> (org-sql--format-create-tables org-sql-db-config org-sql--table-alist)
        (org-sql--send-transaction-with-hook nil :post-init-hooks)))
-
-(defun org-sql-update-db ()
-  (let ((inhibit-message t))
-    (org-save-all-org-buffers))
-  (->> (org-sql--get-transactions)
-       (org-sql--send-transaction-with-hook nil :post-update-hooks)))
-
-(defun org-sql-clear-db ()
-  (->> (org-sql--format-table-name org-sql-db-config 'file_hashes)
-       (format "DELETE FROM %s;")
-       (list)
-       (org-sql--send-transaction-with-hook nil :post-clear-hooks)))
 
 (defun org-sql-reset-db ()
   (org-sql--case-mode org-sql-db-config
@@ -2580,7 +2489,38 @@ The database connection will be handled transparently."
     (->> (append drop-tbl-stmts init-stmts)
          (org-sql--send-transaction-with-hook :pre-reset-hooks :post-init-hooks))))
 
+;;; CRUD functions
+;;
+;; These functions don't require admin access to set up the tables (and as such
+;; assume they are either set up by the admin functions above or by some other
+;; mechanism); all that they need is permission to INSERT/DELETE/SELECT rows in
+;; tables
+
+(defun org-sql-dump-table (tbl-name &optional as-plist)
+  (let ((cmd (org-sql--format-select-statement org-sql-db-config nil tbl-name)))
+    (org-sql--on-success* (org-sql-send-sql cmd)
+      (if as-plist
+          (let ((col-names (->> (alist-get tbl-name org-sql--table-alist)
+                                (alist-get 'columns)
+                                (-map #'car))))
+            (org-sql--parse-output-to-plist org-sql-db-config col-names it-out))
+        (org-sql--parse-output-to-list org-sql-db-config it-out)))))
+
+(defun org-sql-update-db ()
+  (let ((inhibit-message t))
+    (org-save-all-org-buffers))
+  (->> (org-sql--get-transactions)
+       (org-sql--send-transaction-with-hook nil :post-update-hooks)))
+
+(defun org-sql-clear-db ()
+  (->> (org-sql--format-table-name org-sql-db-config 'file_hashes)
+       (format "DELETE FROM %s;")
+       (list)
+       (org-sql--send-transaction-with-hook nil :post-clear-hooks)))
+
 ;;; interactive functions
+;;
+;; these are wrappers around the more useful functions above
 
 (defun org-sql-user-update ()
   "Update the Org SQL database."
