@@ -37,13 +37,10 @@
 ;;    - NOTE: file equality will be assessed using a hash algorithm (eg md5)
 ;;    - NOTE: in the case that a file on disk has changed and its path is also
 ;;      in the db, this file will be deleted and reinserted
-;;  2) convert the updates/deletes/inserts into meta query language (MQL, an
-;;     internal, database agnostic representation of the SQL statements to be
-;;     sent)
+;;  2) convert the updates/deletes/inserts into database-specific SQL statements
 ;;    - inserts will be constructed using `org-element'/`org-ml' from target
 ;;      files on disk
-;;  3) format MQL to database-specific SQL statements
-;;  4) send SQL statements to the configured database
+;;  3) send SQL statements to the configured database
 
 ;; The code is roughly arranged as follows:
 ;; - constants
@@ -100,47 +97,44 @@ to store them. This is in addition to any properties specifified by
   "Types of timestamps to include in the database.")
 
 (eval-and-compile
-  ;; TODO use UUID type where possible for the hash column
   (let ((file_hash-char-length 32)
         ;; ASSUME all filesystems we would ever want to use have a path limit of
         ;; 255 chars (which is almost always true)
         (file_path-varchar-length 255)
         (tag-varchar-length 32)
-        (tag-col
-         '(:tag :desc "the text value of this tag"
-                :type varchar
-                :length 32))
-        (property-id-col
-         '(:property_id :desc "id of this property"
-                        :type integer))
+        (tag-col '(:tag :desc "the text value of this tag"
+                        :type varchar
+                        :length 32))
+        (property-id-col '(:property_id :desc "id of this property"
+                                        :type integer))
         (modifier-allowed-units '(hour day week month year)))
     (cl-flet*
-        ((mql-col
+        ((mk-col
           (default-desc fmt name other object notnull)
           (let* ((d (if object (format fmt object) default-desc))
                  (k `(,name :desc ,d ,@other)))
             (if notnull `(,@k :constraints (notnull)) k)))
          (file-hash-col
           (&optional object notnull)
-          (mql-col "hash (MD5) of this org-tree"
-                   "hash (MD5) of the org-tree with this %s"
-                   :file_hash `(:type char :length ,file_hash-char-length)
-                   object notnull))
+          (mk-col "hash (MD5) of this org-tree"
+                  "hash (MD5) of the org-tree with this %s"
+                  :file_hash `(:type char :length ,file_hash-char-length)
+                  object notnull))
          (headline-id-col
           (&optional object notnull)
-          (mql-col "id of this headline"
-                   "id of the headline for this %s"
-                   :headline_id '(:type integer) object notnull))
+          (mk-col "id of this headline"
+                  "id of the headline for this %s"
+                  :headline_id '(:type integer) object notnull))
          (timestamp-id-col
           (&optional object notnull)
-          (mql-col "id of this timestamp"
-                   "id of the timestamp for this %s"
-                   :timestamp_id '(:type integer) object notnull))
+          (mk-col "id of this timestamp"
+                  "id of the timestamp for this %s"
+                  :timestamp_id '(:type integer) object notnull))
          (entry-id-col
           (&optional object notnull)
-          (mql-col "id of this entry"
-                   "id of the entry for this %s"
-                   :entry_id '(:type integer) object notnull)))
+          (mk-col "id of this entry"
+                  "id of the entry for this %s"
+                  :entry_id '(:type integer) object notnull)))
       (defconst org-sql--table-alist
         `((file_hashes
            (desc . "Each row describes one org file (which may have multiple filepaths)")
@@ -475,8 +469,7 @@ to store them. This is in addition to any properties specifified by
                      :keys (:headline_id)
                      :parent-keys (:headline_id)
                      :on-delete cascade))))
-      "Org-SQL database tables represented in internal meta query
-    language (MQL, basically a giant list)"))))
+      "Org-SQL database tables represented as an alist"))))
 
 (defconst org-sql-table-names (--map (symbol-name (car it)) org-sql--table-alist)
   "The names of all required tables in org-sql.")
@@ -775,7 +768,7 @@ keys/symbols like those from the &plist switch from `-let'."
   (-each org-sql--table-alist #'org-sql--table-alist-has-valid-keys)
   (-each org-sql--table-alist #'org-sql--table-alist-has-valid-parent-keys))
 
-;; ensure MQL constructors are given the right input
+;; ensure table-alist functions are given the right input
 
 (defun org-sql--table-get-column-names (tbl-name)
   "Return a list of columns for TBL-NAME.
@@ -821,21 +814,14 @@ Only some of the column keys must be in PLIST."
 
 ;;; data constructors
 
-;; meta query language (MQL)
+;; bulk insert alist
 
-(defmacro org-sql--mql-insert (tbl-name &rest plist)
-  "Return an MQL-insert list for TBL-NAME.
-PLIST is a property list of the columns and values to insert."
-  (declare (indent 1))
-  (org-sql--table-check-columns-all tbl-name plist)
-  `(list ',tbl-name ,@plist))
-
-(defconst org-sql--empty-mql-bulk-insert
+(defconst org-sql--empty-insert-alist
   (--map (list (car it)) org-sql--table-alist)
-  "Empty bulk MQL insert to initialize accumulators.")
+  "Empty bulk insert alist to initialize accumulator.")
 
-(defmacro org-sql--add-mql-insert (acc tbl-name &rest plist)
-  "Add a new MQL-insert list for TBL-NAME to ACC.
+(defmacro org-sql--insert-alist-add (acc tbl-name &rest plist)
+  "Add a new row list for TBL-NAME to ACC.
 PLIST is a property list of the columns and values to insert."
   (declare (indent 2))
   (let ((ordered-values (org-sql--table-order-columns tbl-name plist)))
@@ -844,13 +830,8 @@ PLIST is a property list of the columns and values to insert."
        (setcdr tbl (cons (list ,@ordered-values) (cdr tbl)))
        ,acc)))
 
-(defmacro org-sql--mql-bulk-delete (tbl-name columns tuples)
-  (org-sql--table-check-columns tbl-name columns)
-  `(append (list ',tbl-name ',columns) ,tuples))
-
 ;; external state
 
-;; TODO this is hilariously inefficient
 (defmacro org-sql--map-plist (key form plist)
   "Return PLIST modified with FORM applied to KEY's value."
   (declare (indent 1))
@@ -1012,7 +993,7 @@ CONFIG is the `org-sql-db-config' list."
 
 ;; formatting function tree
 
-(defun org-sql--compile-mql-format-function (config type)
+(defun org-sql--compile-value-format-function (config type)
   "Return SQL value formatting function.
 The returned function will depend on the MODE and TYPE."
   (let ((formatter-form
@@ -1052,22 +1033,22 @@ The returned function will depend on the MODE and TYPE."
                      (alist-get tbl-name)
                      (alist-get 'columns)
                      (alist-get column-name))))
-    (org-sql--compile-mql-format-function config (plist-get column :type))))
+    (org-sql--compile-value-format-function config (plist-get column :type))))
 
 (defun org-sql--get-column-formatters (config tbl-name)
   (->> org-sql--table-alist
        (alist-get tbl-name)
        (alist-get 'columns)
-       (--map (org-sql--compile-mql-format-function config (plist-get (cdr it) :type)))))
+       (--map (org-sql--compile-value-format-function config (plist-get (cdr it) :type)))))
 
 ;; helper functions
 
-(defun org-sql--format-mql-column-name (column-name)
+(defun org-sql--format-column-name (column-name)
   "Return SQL string representation of COLUMN-NAME."
   (if (not (keywordp column-name)) (error "Not a keyword: %s" column-name)
     (s-chop-prefix ":" (symbol-name column-name))))
 
-(defun org-sql--format-mql-table-name (config tbl-name)
+(defun org-sql--format-table-name (config tbl-name)
   "Return TBL-NAME as a formatted string according to CONFIG."
   (org-sql--case-mode config
     ;; these are straightforward since they don't use namespaces
@@ -1079,7 +1060,7 @@ The returned function will depend on the MODE and TYPE."
        (if (not schema) (symbol-name tbl-name)
          (format "%s.%s" schema tbl-name))))))
 
-(defun org-sql--format-mql-enum-name (config enum-name)
+(defun org-sql--format-enum-name (config enum-name)
   "Return ENUM-NAME as a formatted string according to CONFIG."
   ;; ASSUME only modes that support ENUM will call this
   (-let (((&plist :schema) (cdr config)))
@@ -1098,9 +1079,9 @@ The returned function will depend on the MODE and TYPE."
         (-let (((tbl-name . (col-name . (&plist :type :type-id :allowed))) grouped))
           (when (and (eq type 'enum) allowed)
             (cons (->> (or type-id
-                           (->> (org-sql--format-mql-column-name col-name)
+                           (->> (org-sql--format-column-name col-name)
                                 (format "enum_%s_%s" tbl-name)))
-                       (org-sql--format-mql-enum-name config))
+                       (org-sql--format-enum-name config))
                   (--map (format "'%s'" it) allowed))))))
     (->> (-mapcat #'flatten table-alist)
          (-map #'format-column)
@@ -1124,16 +1105,16 @@ The returned function will depend on the MODE and TYPE."
           (e (error "Unknown constraint %s" e)))))
     (s-join " " (-map #'format-constraint column-constraints))))
 
-(defun org-sql--format-create-tables-type (config tbl-name mql-column)
-  "Return SQL string for the type of MQL-COLUMN.
+(defun org-sql--format-create-tables-type (config tbl-name column)
+  "Return SQL string for the type of COLUMN.
 CONFIG is the `org-sql-db-config' list and TBL-NAME is the name
 of the table."
   (cl-flet
       ((fmt-varchar
-        (mql-column len-fmt max-str)
-        (-let (((&plist :length) (cdr mql-column)))
+        (column len-fmt max-str)
+        (-let (((&plist :length) (cdr column)))
           (if length (format len-fmt length) max-str))))
-    (-let (((column-name . (&plist :type :type-id)) mql-column))
+    (-let (((column-name . (&plist :type :type-id)) column))
       (org-sql--case-type type
         (boolean
          (org-sql--case-mode config
@@ -1143,7 +1124,7 @@ of the table."
         (char
          (org-sql--case-mode config
            ((mysql sqlserver)
-            (-let (((&plist :length) (cdr mql-column)))
+            (-let (((&plist :length) (cdr column)))
               (if length (format "CHAR(%s)" length) "CHAR")))
            ;; pgsql should use TEXT here because (according to the docs) "there
            ;; is no performance difference among char/varchar/text except for
@@ -1151,16 +1132,16 @@ of the table."
            ((pgsql sqlite) "TEXT")))
         (enum
          (org-sql--case-mode config
-           (mysql (->> (plist-get (cdr mql-column) :allowed)
+           (mysql (->> (plist-get (cdr column) :allowed)
                        (--map (format "'%s'" it))
                        (s-join ",")
                        (format "ENUM(%s)")))
            (pgsql (if type-id type-id
-                    (->> (org-sql--format-mql-column-name column-name)
+                    (->> (org-sql--format-column-name column-name)
                          (format "enum_%s_%s" tbl-name)
-                         (org-sql--format-mql-enum-name config))))
+                         (org-sql--format-enum-name config))))
            (sqlite "TEXT")
-           (sqlserver (-if-let (length (plist-get (cdr mql-column) :length))
+           (sqlserver (-if-let (length (plist-get (cdr column) :length))
                           (format "VARCHAR(%s)" length)
                         "TEXT"))))
         (integer
@@ -1175,45 +1156,45 @@ of the table."
            (sqlserver "NVARCHAR(MAX)")))
         (varchar
          (org-sql--case-mode config
-           (mysql (fmt-varchar mql-column "VARCHAR(%s)" "VARCHAR"))
+           (mysql (fmt-varchar column "VARCHAR(%s)" "VARCHAR"))
            ;; see above why pgsql uses TEXT here
            ((pgsql sqlite) "TEXT")
-           (sqlserver (fmt-varchar mql-column "NVARCHAR(%s)" "NVARCHAR(MAX)"))))))))
+           (sqlserver (fmt-varchar column "NVARCHAR(%s)" "NVARCHAR(MAX)"))))))))
 
-(defun org-sql--format-create-table-columns (config tbl-name mql-columns)
-  "Return SQL string for MQL-COLUMNS.
+(defun org-sql--format-create-table-columns (config tbl-name columns)
+  "Return SQL string for COLUMNS.
 CONFIG is the `org-sql-db-config' list and TBL-NAME is the name
 of the table."
   (cl-flet
       ((format-column
-        (mql-column)
-        (-let* (((name . (&plist :constraints)) mql-column)
-                (name* (org-sql--format-mql-column-name name))
-                (type* (org-sql--format-create-tables-type config tbl-name mql-column))
+        (column)
+        (-let* (((name . (&plist :constraints)) column)
+                (name* (org-sql--format-column-name name))
+                (type* (org-sql--format-create-tables-type config tbl-name column))
                 (column-str (format "%s %s" name* type*)))
           (if (not constraints) column-str
             (->> (org-sql--format-column-constraints constraints)
                  (format "%s %s" column-str))))))
-    (-map #'format-column mql-columns)))
+    (-map #'format-column columns)))
 
-(defun org-sql--format-create-table-constraints (config mql-tbl-constraints defer)
-  "Return SQL string for MQL-TBL-CONSTRAINTS.
+(defun org-sql--format-create-table-constraints (config column-constraints defer)
+  "Return SQL string for COLUMN-CONSTRAINTS.
 If DEFER is t, add 'INITIALLY DEFERRED' to the end of each
 foreign key constraint. CONFIG is the `org-sql-db-config' list."
   (cl-labels
       ((format-primary
         (keyvals)
         (-let* (((&plist :keys) keyvals))
-          (->> (-map #'org-sql--format-mql-column-name keys)
+          (->> (-map #'org-sql--format-column-name keys)
                (s-join ",")
                (format "PRIMARY KEY (%s)"))))
        (format-foreign
         (keyvals)
         (-let* (((&plist :ref :keys :parent-keys :on-delete) keyvals)
-                (ref* (org-sql--format-mql-table-name config ref))
-                (keys* (->> keys (-map #'org-sql--format-mql-column-name) (s-join ",")))
+                (ref* (org-sql--format-table-name config ref))
+                (keys* (->> keys (-map #'org-sql--format-column-name) (s-join ",")))
                 (parent-keys* (->> parent-keys
-                                   (-map #'org-sql--format-mql-column-name)
+                                   (-map #'org-sql--format-column-name)
                                    (s-join ",")))
                 (foreign-str (format "FOREIGN KEY (%s) REFERENCES %s (%s)"
                                      keys* ref* parent-keys*))
@@ -1227,17 +1208,17 @@ foreign key constraint. CONFIG is the `org-sql-db-config' list."
                (-non-nil)
                (s-join " "))))
        (format-constraint
-        (mql-constraint)
-        (pcase mql-constraint
+        (constraint)
+        (pcase constraint
           (`(primary . ,keyvals) (format-primary keyvals))
           (`(foreign . ,keyvals) (format-foreign keyvals)))))
-    (-map #'format-constraint mql-tbl-constraints)))
+    (-map #'format-constraint column-constraints)))
 
-(defun org-sql--format-create-table (config mql-table)
-  "Return CREATE TABLE (...) SQL string for MQL-TABLE.
+(defun org-sql--format-create-table (config table)
+  "Return CREATE TABLE (...) SQL string for TABLE.
 CONFIG is the `org-sql-db-config' list."
-  (-let* (((tbl-name . (&alist 'columns 'constraints)) mql-table)
-          (tbl-name* (org-sql--format-mql-table-name config tbl-name))
+  (-let* (((tbl-name . (&alist 'columns 'constraints)) table)
+          (tbl-name* (org-sql--format-table-name config tbl-name))
           (defer (org-sql--case-mode config
                    ((mysql sqlserver) nil)
                    ((pgsql sqlite) t)))
@@ -1257,54 +1238,48 @@ CONFIG is the `org-sql-db-config' list."
          (s-join ",")
          (format fmt tbl-name*))))
 
-(defun org-sql--format-create-tables (config mql-tables)
-  "Return schema SQL string for MQL-TABLES.
+(defun org-sql--format-create-tables (config tables)
+  "Return schema SQL string for TABLES.
 CONFIG is the `org-sql-db-config' list."
-  (let ((create-tables (->> mql-tables
-                            (--map (org-sql--format-create-table config it)))))
-                            ;; (s-join ""))))
+  (let ((create-tbl-stmts (--map (org-sql--format-create-table config it) tables)))
     (org-sql--case-mode config
       (pgsql
-       (let ((create-types (->> (org-sql--format-create-enum-types config mql-tables))))
-                                ;; (s-join ""))))
-         ;; (concat create-types create-tables)))
-         (append create-types create-tables)))
+       (-> (org-sql--format-create-enum-types config tables)
+           (append create-tbl-stmts)))
       ((mysql sqlite sqlserver)
-       create-tables))))
+       create-tbl-stmts))))
 
 ;; insert
 
-(defun org-sql--format-mql-bulk-insert (config mql-bulk-insert)
+(defun org-sql--format-bulk-insert-for-table (config table-bulk-insert)
   (cl-flet
       ((format-row
         (formatters row)
         (->> (--zip-with (funcall other it) row formatters)
              (s-join ",")
              (format "(%s)"))))
-    (-let* (((tbl-name . rows) mql-bulk-insert)
-            (tbl-name* (org-sql--format-mql-table-name config tbl-name))
-            (mql-tbl (alist-get tbl-name org-sql--table-alist))
-            (mql-columns (alist-get 'columns mql-tbl))
-            (columns* (->> mql-columns
-                          ;; TODO there is a better function for this
-                          (--map (org-sql--format-mql-column-name (car it)))
+    (-let* (((tbl-name . rows) table-bulk-insert)
+            (tbl-name* (org-sql--format-table-name config tbl-name))
+            (columns (->> (alist-get tbl-name org-sql--table-alist)
+                          (alist-get 'columns)
+                          (--map (org-sql--format-column-name (car it)))
                           (s-join ",")))
             ;; ASSUME these will be in the right order
             (formatters (org-sql--get-column-formatters config tbl-name)))
       (->> (--map (format-row formatters it) rows)
            (s-join ",")
-           (format "INSERT INTO %s (%s) VALUES %s;" tbl-name* columns*)))))
+           (format "INSERT INTO %s (%s) VALUES %s;" tbl-name* columns)))))
 
-(defun org-sql--format-mql-bulk-inserts (config mql-bulk-inserts)
-  (->> (-filter #'cdr mql-bulk-inserts)
-       (--map (org-sql--format-mql-bulk-insert config it))
+(defun org-sql--format-bulk-inserts (config insert-alist)
+  (->> (-filter #'cdr insert-alist)
+       (--map (org-sql--format-bulk-insert-for-table config it))
        (s-join "")))
 
 ;; select
 
 (defun org-sql--format-select-statement (config columns tbl-name)
-  (let ((tbl-name* (org-sql--format-mql-table-name config tbl-name))
-        (columns* (or (-some->> (-map #'org-sql--format-mql-column-name columns)
+  (let ((tbl-name* (org-sql--format-table-name config tbl-name))
+        (columns* (or (-some->> (-map #'org-sql--format-column-name columns)
                         (s-join ","))
                       "*")))
     (format "SELECT %s FROM %s;" columns* tbl-name*)))
@@ -1321,7 +1296,7 @@ CONFIG is the `org-sql-db-config' list."
             (->> (--map (format "file_path = %s" (funcall path-fmtr it)) paths)
                  (s-join " OR ")
                  (format "(file_hash = %s AND (%s))" hash*)))))
-      (let ((tbl-name* (org-sql--format-mql-table-name config 'file_metadata))
+      (let ((tbl-name* (org-sql--format-table-name config 'file_metadata))
             (hash-fmtr (org-sql--get-column-formatter config 'file_metadata :file_hash))
             (path-fmtr (org-sql--get-column-formatter config 'file_metadata :file_path)))
         (->> (org-sql--group-hashpathpairs-by-hash hashpathpairs)
@@ -1331,7 +1306,7 @@ CONFIG is the `org-sql-db-config' list."
 
 (defun org-sql--format-file-delete-statement (config hashpathpairs)
   (when hashpathpairs
-    (let ((tbl-name* (org-sql--format-mql-table-name config 'file_hashes))
+    (let ((tbl-name* (org-sql--format-table-name config 'file_hashes))
           (fmtr (org-sql--get-column-formatter config 'file_hashes :file_hash)))
         (->> (org-sql--hashpathpairs-to-hashes hashpathpairs)
              (--map (funcall fmtr it))
@@ -1339,7 +1314,7 @@ CONFIG is the `org-sql-db-config' list."
              (format "DELETE FROM %s WHERE file_hash IN (%s);" tbl-name*)))))
 
 (defun org-sql--init-acc ()
-  (list :inserts (-clone org-sql--empty-mql-bulk-insert)
+  (list :inserts (-clone org-sql--empty-insert-alist)
         :headline-id 1
         :timestamp-id 1
         :entry-id 1
@@ -1358,13 +1333,13 @@ CONFIG is the `org-sql-db-config' list."
 
 (defun org-sql--format-insert-statements (config paths-to-insert files-to-insert)
   (let* ((acc (org-sql--init-acc))
-         (acc* (--reduce-from (org-sql--tree-config-to-mql-insert acc it) acc files-to-insert)))
+         (acc* (--reduce-from (org-sql--tree-config-to-insert-alist acc it) acc files-to-insert)))
     (--> paths-to-insert
       (--reduce-from (-let (((&plist :hash :path :attrs) it))
-                       (org-sql--add-mql-insert-file-metadata* acc path hash attrs))
+                       (org-sql--insert-alist-add-file-metadata* acc path hash attrs))
                      acc* it)
          (plist-get it :inserts)
-         (org-sql--format-mql-bulk-inserts config it))))
+         (org-sql--format-bulk-inserts config it))))
 
 ;;; SQL string -> SQL string formatting functions
 
@@ -1639,12 +1614,12 @@ to NOTE-TEXT; otherwise just as (CLOCK)."
             nil)
            (reverse)))))
 
-;; org-element tree -> MQL inserts (see `org-sql--mql-insert')
+;; org-element tree -> MQL inserts
 
-(defun org-sql--add-mql-insert-headline-logbook-item (acc entry)
+(defun org-sql--insert-alist-add-headline-logbook-item (acc entry)
   "Add MQL-insert for item ENTRY to ACC."
   (-let (((entry-type . (&plist :header-text :note-text :file-hash :ts)) entry))
-    (org-sql--add-mql-insert acc logbook_entries
+    (org-sql--insert-alist-add acc logbook_entries
       :entry_id (org-sql--acc-get :entry-id acc)
       :headline_id (org-sql--acc-get :headline-id acc)
       :entry_type (symbol-name entry-type)
@@ -1654,27 +1629,27 @@ to NOTE-TEXT; otherwise just as (CLOCK)."
       :header header-text
       :note note-text)))
 
-(defun org-sql--add-mql-insert-state-change (acc entry)
+(defun org-sql--insert-alist-add-state-change (acc entry)
   "Add MQL-insert for state change ENTRY to ACC."
   (-let (((&plist :old-state :new-state) (cdr entry)))
-    (--> (org-sql--add-mql-insert-headline-logbook-item acc entry)
-         (org-sql--add-mql-insert it state_changes
+    (--> (org-sql--insert-alist-add-headline-logbook-item acc entry)
+         (org-sql--insert-alist-add it state_changes
            :entry_id (org-sql--acc-get :entry-id acc)
            :state_old old-state
            :state_new new-state))))
 
-(defun org-sql--add-mql-insert-planning-change (acc hstate entry)
+(defun org-sql--insert-alist-add-planning-change (acc hstate entry)
   "Add MQL-insert for planning change ENTRY to ACC.
 HSTATE is a plist as returned by `org-sql--to-hstate'."
   (-let (((&plist :old-ts) (cdr entry)))
-    (--> (org-sql--add-mql-insert-headline-logbook-item acc entry)
-         (org-sql--add-mql-insert-timestamp it hstate old-ts)
-         (org-sql--add-mql-insert it planning_changes
+    (--> (org-sql--insert-alist-add-headline-logbook-item acc entry)
+         (org-sql--insert-alist-add-timestamp it hstate old-ts)
+         (org-sql--insert-alist-add it planning_changes
            :entry_id (org-sql--acc-get :entry-id acc)
            :timestamp_id (org-sql--acc-get :timestamp-id acc))
          (org-sql--acc-incr :timestamp-id it))))
 
-(defun org-sql--add-mql-insert-headline-logbook-items (acc hstate logbook)
+(defun org-sql--insert-alist-add-headline-logbook-items (acc hstate logbook)
   "Add MQL-inserts for LOGBOOK to ACC.
 LOGBOOK is the logbook value of the supercontents list returned
 by `org-ml-headline-get-supercontents'. HSTATE is a plist as
@@ -1689,22 +1664,22 @@ returned by `org-sql--to-hstate'."
              ((memq entry-type org-sql-excluded-logbook-types)
               acc)
              ((memq entry-type '(redeadline deldeadline reschedule delschedule))
-              (org-sql--add-mql-insert-planning-change acc hstate entry))
+              (org-sql--insert-alist-add-planning-change acc hstate entry))
              ((eq entry-type 'state)
-              (org-sql--add-mql-insert-state-change acc entry))
+              (org-sql--insert-alist-add-state-change acc entry))
              (t
-              (org-sql--add-mql-insert-headline-logbook-item acc entry))))))
+              (org-sql--insert-alist-add-headline-logbook-item acc entry))))))
       (->> (org-ml-logbook-get-items logbook)
            (--map (org-sql--item-to-entry hstate it))
            (--reduce-from (org-sql--acc-incr :entry-id (add-entry acc it)) acc)))))
 
-(defun org-sql--add-mql-insert-clock (acc hstate clock note-text)
+(defun org-sql--insert-alist-add-clock (acc hstate clock note-text)
   "Add MQL-insert for CLOCK to ACC.
 NOTE-TEXT is either a string or nil representing the clock-note.
 HSTATE is a plist as returned by `org-sql--to-hstate'."
   (-let (((&plist :headline) hstate)
          (value (org-ml-get-property :value clock)))
-    (--> (org-sql--add-mql-insert acc clocks
+    (--> (org-sql--insert-alist-add acc clocks
            :clock_id (org-sql--acc-get :clock-id acc)
            :headline_id (org-sql--acc-get :headline-id acc)
            :time_start (-some-> value
@@ -1716,7 +1691,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
            :clock_note (unless org-sql-exclude-clock-notes note-text))
       (org-sql--acc-incr :clock-id it))))
 
-(defun org-sql--add-mql-insert-headline-logbook-clocks (acc hstate logbook)
+(defun org-sql--insert-alist-add-headline-logbook-clocks (acc hstate logbook)
   "Add MQL-inserts for LOGBOOK to ACC.
 LOGBOOK is the logbook value of the supercontents list returned
 by `org-ml-headline-get-supercontents'. HSTATE is a plist as
@@ -1724,10 +1699,10 @@ returned by `org-sql--to-hstate'."
   (->> (org-ml-logbook-get-clocks logbook)
        (org-sql--clocks-append-notes hstate)
        (--reduce-from
-        (org-sql--add-mql-insert-clock acc hstate (car it) (cdr it))
+        (org-sql--insert-alist-add-clock acc hstate (car it) (cdr it))
         acc)))
 
-(defun org-sql--add-mql-insert-headline-properties (acc hstate)
+(defun org-sql--insert-alist-add-headline-properties (acc hstate)
   "Add MQL-insert for each property in the current headline to ACC.
 HSTATE is a plist as returned by `org-sql--to-hstate'."
   (if (eq 'all org-sql-excluded-properties) acc
@@ -1740,12 +1715,12 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
             (member (org-ml-get-property :key node-property) ignore-list))
            (add-property
             (acc np)
-            (--> (org-sql--add-mql-insert acc properties
+            (--> (org-sql--insert-alist-add acc properties
                    :file_hash file-hash
                    :property_id (org-sql--acc-get :property-id acc)
                    :key_text (org-ml-get-property :key np)
                    :val_text (org-ml-get-property :value np))
-              (org-sql--add-mql-insert it headline_properties
+              (org-sql--insert-alist-add it headline_properties
                 :headline_id (org-sql--acc-get :headline-id acc)
                 :property_id (org-sql--acc-get :property-id acc))
               (org-sql--acc-incr :property-id it))))
@@ -1753,7 +1728,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
              (-remove #'is-ignored)
              (-reduce-from #'add-property acc))))))
 
-(defun org-sql--add-mql-insert-headline-tags (acc hstate)
+(defun org-sql--insert-alist-add-headline-tags (acc hstate)
   "Add MQL-insert for each tag in the current headline to ACC.
 HSTATE is a plist as returned by `org-sql--to-hstate'."
   (if (eq 'all org-sql-excluded-tags) acc
@@ -1761,7 +1736,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
       (cl-flet
           ((add-tag
             (acc tag inherited)
-            (org-sql--add-mql-insert acc headline_tags
+            (org-sql--insert-alist-add acc headline_tags
               :headline_id (org-sql--acc-get :headline-id acc)
               :tag tag
               :is_inherited (if inherited 1 0)))
@@ -1775,7 +1750,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
                (--reduce-from (add-tag acc it nil) it tags)
                (--reduce-from (add-tag acc it t) it i-tags)))))))
 
-(defun org-sql--add-mql-insert-headline-links (acc hstate contents)
+(defun org-sql--insert-alist-add-headline-links (acc hstate contents)
   "Add MQL-insert for each link in the current headline to ACC.
 CONTENTS is a list corresponding to that returned by
 `org-ml-headline-get-supercontents'. HSTATE is a plist as
@@ -1788,7 +1763,7 @@ returned by `org-sql--to-hstate'."
       (cl-flet
           ((add-link
             (acc link)
-            (--> (org-sql--add-mql-insert acc links
+            (--> (org-sql--insert-alist-add acc links
                    :link_id (org-sql--acc-get :link-id acc)
                    :headline_id (org-sql--acc-get :headline-id acc)
                    :link_path (org-ml-get-property :path link)
@@ -1799,7 +1774,7 @@ returned by `org-sql--to-hstate'."
               (org-sql--acc-incr :link-id it))))
         (-reduce-from #'add-link acc links)))))
 
-(defmacro org-sql--add-mql-insert-timestamp-mod (acc modifier-type timestamp)
+(defmacro org-sql--insert-alist-add-timestamp-mod (acc modifier-type timestamp)
   (declare (indent 2))
   (-let (((tbl-name value-col unit-col type-col type-prop value-prop unit-prop)
           (cl-case modifier-type
@@ -1819,14 +1794,14 @@ returned by `org-sql--to-hstate'."
                             :repeater-unit))
             (t (error "Unknown modifier type: %s" modifier-type)))))
     `(-if-let (type (org-ml-get-property ,type-prop ,timestamp))
-         (org-sql--add-mql-insert ,acc ,tbl-name
+         (org-sql--insert-alist-add ,acc ,tbl-name
            :timestamp_id (org-sql--acc-get :timestamp-id acc)
            ,value-col (org-ml-get-property ,value-prop ,timestamp)
            ,unit-col (org-ml-get-property ,unit-prop ,timestamp)
            ,type-col type)
        ,acc)))
 
-(defun org-sql--add-mql-insert-timestamp (acc hstate timestamp)
+(defun org-sql--insert-alist-add-timestamp (acc hstate timestamp)
   "Add MQL-insert for TIMESTAMP to ACC.
 HSTATE is a plist as returned by `org-sql--to-hstate'."
   (cl-flet
@@ -1837,7 +1812,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
             (end (org-ml-timestamp-get-end-time timestamp))
             ((&plist :headline) hstate))
       (--> acc
-        (org-sql--add-mql-insert it timestamps
+        (org-sql--insert-alist-add it timestamps
           :timestamp_id (org-sql--acc-get :timestamp-id acc)
           :headline_id (org-sql--acc-get :headline-id acc)
           :is_active (if (org-ml-timestamp-is-active timestamp) 1 0)
@@ -1846,10 +1821,10 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
           :time_end (-some-> end (org-ml-time-to-unixtime))
           :end_is_long (get-resolution end)
           :raw_value (org-ml-get-property :raw-value timestamp))
-        (org-sql--add-mql-insert-timestamp-mod it warning timestamp)
-        (org-sql--add-mql-insert-timestamp-mod it repeater timestamp)))))
+        (org-sql--insert-alist-add-timestamp-mod it warning timestamp)
+        (org-sql--insert-alist-add-timestamp-mod it repeater timestamp)))))
 
-(defun org-sql--add-mql-insert-headline-timestamps (acc hstate contents)
+(defun org-sql--insert-alist-add-headline-timestamps (acc hstate contents)
   "Add MQL-insert for each timestamp in the current headline to ACC.
 CONTENTS is a list corresponding to that returned by
 `org-ml-headline-get-supercontents'. HSTATE is a plist as
@@ -1861,12 +1836,12 @@ returned by `org-sql--to-hstate'."
                         `(:any * (:and timestamp (:or ,@it)))))
         (-let* (((&plist :headline) hstate)
                 (timestamps (--mapcat (org-ml-match pattern it) contents)))
-          (--reduce-from (->> (org-sql--add-mql-insert-timestamp acc hstate it)
+          (--reduce-from (->> (org-sql--insert-alist-add-timestamp acc hstate it)
                               (org-sql--acc-incr :timestamp-id))
                          acc timestamps))
       acc)))
 
-(defun org-sql--add-mql-insert-headline-planning (acc hstate)
+(defun org-sql--insert-alist-add-headline-planning (acc hstate)
   "Add MQL-insert for each planning timestamp in the current headline to ACC.
 HSTATE is a plist as returned by `org-sql--to-hstate'."
   (-let (((&plist :headline) hstate))
@@ -1875,8 +1850,8 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
             ((add-planning-maybe
               (acc type)
               (-if-let (ts (org-ml-get-property type planning))
-                  (--> (org-sql--add-mql-insert-timestamp acc hstate ts)
-                    (org-sql--add-mql-insert it planning_entries
+                  (--> (org-sql--insert-alist-add-timestamp acc hstate ts)
+                    (org-sql--insert-alist-add it planning_entries
                       :headline_id (org-sql--acc-get :headline-id acc)
                       :planning_type (->> (symbol-name type)
                                           (s-chop-prefix ":")
@@ -1889,7 +1864,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
             (-reduce-from #'add-planning-maybe acc it)))
       acc)))
 
-(defun org-sql--add-mql-insert-headline-closures (acc hstate)
+(defun org-sql--insert-alist-add-headline-closures (acc hstate)
   "Add MQL-insert for parent closures from the current headline to ACC.
 HSTATE is a plist as returned by `org-sql--to-hstate'."
   (-let* (((&plist :headline :parent-ids) hstate)
@@ -1897,7 +1872,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
     (cl-flet
         ((add-closure
           (acc parent-id depth)
-          (org-sql--add-mql-insert acc headline_closures
+          (org-sql--insert-alist-add acc headline_closures
             :headline_id headline-id
             :parent_id parent-id
             :depth depth)))
@@ -1905,7 +1880,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
            (reverse)
            (--reduce-from (apply #'add-closure acc it) acc)))))
 
-(defun org-sql--add-mql-insert-headline (acc hstate)
+(defun org-sql--insert-alist-add-headline (acc hstate)
   "Add MQL-insert the current headline's metadata to ACC.
 HSTATE is a plist as returned by `org-sql--to-hstate'."
   (cl-flet
@@ -1926,7 +1901,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
                                   (`(,n ,d) `(,(/ (* 1.0 n) d) fraction))
                                   (`(,p) `(,p percent))))
             (contents (org-ml-supercontents-get-contents supercontents)))
-      (--> (org-sql--add-mql-insert acc headlines
+      (--> (org-sql--insert-alist-add acc headlines
              :headline_id (org-sql--acc-get :headline-id acc)
              :file_hash file-hash
              :headline_text (org-ml-get-property :raw-value headline)
@@ -1941,17 +1916,17 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
              :is_commented (if (org-ml-get-property :commentedp headline) 1 0)
              :content (-some->> (-map #'org-ml-to-string contents)
                         (s-join "")))
-        (org-sql--add-mql-insert-headline-planning it hstate)
-        (org-sql--add-mql-insert-headline-tags it hstate)
-        (org-sql--add-mql-insert-headline-properties it hstate)
-        (org-sql--add-mql-insert-headline-timestamps it hstate contents)
-        (org-sql--add-mql-insert-headline-links it hstate contents)
-        (org-sql--add-mql-insert-headline-logbook-clocks it hstate logbook)
-        (org-sql--add-mql-insert-headline-logbook-items it hstate logbook)
-        (org-sql--add-mql-insert-headline-closures it hstate)
+        (org-sql--insert-alist-add-headline-planning it hstate)
+        (org-sql--insert-alist-add-headline-tags it hstate)
+        (org-sql--insert-alist-add-headline-properties it hstate)
+        (org-sql--insert-alist-add-headline-timestamps it hstate contents)
+        (org-sql--insert-alist-add-headline-links it hstate contents)
+        (org-sql--insert-alist-add-headline-logbook-clocks it hstate logbook)
+        (org-sql--insert-alist-add-headline-logbook-items it hstate logbook)
+        (org-sql--insert-alist-add-headline-closures it hstate)
         (org-sql--acc-incr :headline-id it)))))
 
-(defun org-sql--add-mql-insert-headlines (acc tree-config)
+(defun org-sql--insert-alist-add-headlines (acc tree-config)
   "Add MQL-insert headlines in TREE-CONFIG to ACC.
 TREE-CONFIG is a list given by `org-sql--to-tree-config'."
   (-let (((&plist :headlines) tree-config))
@@ -1965,18 +1940,18 @@ TREE-CONFIG is a list given by `org-sql--to-tree-config'."
             (if (and org-sql-exclude-headline-predicate
                      (funcall org-sql-exclude-headline-predicate hl))
                 acc
-              (--> (org-sql--add-mql-insert-headline acc hstate*)
+              (--> (org-sql--insert-alist-add-headline acc hstate*)
                 (--reduce-from (add-headline acc hstate* it) it sub))))))
       (--reduce-from (add-headline acc nil it) acc headlines))))
 
-(defun org-sql--add-mql-insert-file-tags (acc tree-config)
+(defun org-sql--insert-alist-add-file-tags (acc tree-config)
   "Add MQL-insert for each file tag in file to ACC.
 TREE-CONFIG is a list given by `org-sql--to-tree-config'."
   (-let (((&plist :file-hash :top-section) tree-config))
     (cl-flet
         ((add-tag
           (acc tag)
-          (org-sql--add-mql-insert acc file_tags
+          (org-sql--insert-alist-add acc file_tags
             :file_hash file-hash
             :tag tag)))
       (->> (--filter (org-ml-is-type 'keyword it) top-section)
@@ -1985,7 +1960,7 @@ TREE-CONFIG is a list given by `org-sql--to-tree-config'."
            (-uniq)
            (-reduce-from #'add-tag acc)))))
 
-(defun org-sql--add-mql-insert-file-properties (acc tree-config)
+(defun org-sql--insert-alist-add-file-properties (acc tree-config)
   "Add MQL-insert for each file property in file to ACC.
 TREE-CONFIG is a list given by `org-sql--to-tree-config'."
   (-let (((&plist :file-hash :top-section) tree-config))
@@ -1994,7 +1969,7 @@ TREE-CONFIG is a list given by `org-sql--to-tree-config'."
           (acc keyword)
           (-let (((key value) (--> (org-ml-get-property :value keyword)
                                    (s-split-up-to " " it 1))))
-            (--> (org-sql--add-mql-insert acc properties
+            (--> (org-sql--insert-alist-add acc properties
                    :file_hash file-hash
                    :property_id (org-sql--acc-get :property-id acc)
                    :key_text key
@@ -2004,17 +1979,17 @@ TREE-CONFIG is a list given by `org-sql--to-tree-config'."
            (--filter (equal (org-ml-get-property :key it) "PROPERTY"))
            (-reduce-from #'add-property acc)))))
 
-(defun org-sql--add-mql-insert-file-hash (acc tree-config)
+(defun org-sql--insert-alist-add-file-hash (acc tree-config)
   "Add MQL-insert for file in TREE-CONFIG to ACC.
 TREE-CONFIG is a list given by `org-sql--to-tree-config'."
   (-let (((&plist :file-hash :size :lines) tree-config))
-    (org-sql--add-mql-insert acc file_hashes
+    (org-sql--insert-alist-add acc file_hashes
       :file_hash file-hash
       :tree_size size
       :tree_lines lines)))
 
-(defun org-sql--add-mql-insert-file-metadata* (acc path hash attrs)
-  (org-sql--add-mql-insert acc file_metadata
+(defun org-sql--insert-alist-add-file-metadata* (acc path hash attrs)
+  (org-sql--insert-alist-add acc file_metadata
     :file_hash hash
     :file_path path
     :file_uid (file-attribute-user-id attrs)
@@ -2027,37 +2002,22 @@ TREE-CONFIG is a list given by `org-sql--to-tree-config'."
                                  (round))
     :file_modes (file-attribute-modes attrs)))
 
-(defun org-sql--add-mql-insert-file-metadata (acc tree-config)
+(defun org-sql--insert-alist-add-file-metadata (acc tree-config)
   "Add MQL-insert for file in TREE-CONFIG to ACC.
 TREE-CONFIG is a list given by `org-sql--to-tree-config'."
   (-let (((&plist :paths-with-attributes :file-hash) tree-config))
-    (--reduce-from (org-sql--add-mql-insert-file-metadata* acc (car it) file-hash (cdr it))
+    (--reduce-from (org-sql--insert-alist-add-file-metadata* acc (car it) file-hash (cdr it))
                    acc paths-with-attributes)))
 
-(defun org-sql--tree-config-to-mql-insert (acc tree-config)
+(defun org-sql--tree-config-to-insert-alist (acc tree-config)
   "Return all MQL-inserts for TREE-CONFIG.
 TREE-CONFIG is a list given by `org-sql--to-tree-config'."
   (-> acc
-      (org-sql--add-mql-insert-file-hash tree-config)
-      (org-sql--add-mql-insert-file-metadata tree-config)
-      (org-sql--add-mql-insert-file-properties tree-config)
-      (org-sql--add-mql-insert-file-tags tree-config)
-      (org-sql--add-mql-insert-headlines tree-config)))
-
-;; (defun org-sql--hashpathpair-to-mql-delete (file-hash)
-;;   (org-sql--mql-delete file_hashes (:file_hash file-hash)))
-
-;; (defun org-sql--hashpathpair-to-mql-path-delete (file-hash file-paths)
-;;   (->> (--map (list file-hash it) file-paths)
-;;        (org-sql--mql-bulk-delete file_metadata (:file_path :file_hash))))
-;;   ;; (--map (org-sql--mql-delete file_metadata (:file_path it :file_hash file-hash))
-;;   ;;        file-paths))
-
-;; (defun org-sql--hashpathpair-to-mql-path-insert (file-hash file-paths)
-;;   (--map (org-sql--mql-insert file_metadata
-;;            :file_path it
-;;            :file_hash file-hash)
-;;          file-paths))
+      (org-sql--insert-alist-add-file-hash tree-config)
+      (org-sql--insert-alist-add-file-metadata tree-config)
+      (org-sql--insert-alist-add-file-properties tree-config)
+      (org-sql--insert-alist-add-file-tags tree-config)
+      (org-sql--insert-alist-add-headlines tree-config)))
 
 ;; hashpathpair function
 
@@ -2599,7 +2559,7 @@ The database connection will be handled transparently."
        (org-sql--send-transaction-with-hook nil :post-update-hooks)))
 
 (defun org-sql-clear-db ()
-  (->> (org-sql--format-mql-table-name org-sql-db-config 'file_hashes)
+  (->> (org-sql--format-table-name org-sql-db-config 'file_hashes)
        (format "DELETE FROM %s;")
        (list)
        (org-sql--send-transaction-with-hook nil :post-clear-hooks)))

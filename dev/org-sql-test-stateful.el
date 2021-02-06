@@ -48,7 +48,7 @@
 
 (defun org-sql--count-rows (config tbl-name)
   ;; hacky AF...
-  (let* ((tbl-name* (org-sql--format-mql-table-name config tbl-name))
+  (let* ((tbl-name* (org-sql--format-table-name config tbl-name))
          (select (format "SELECT Count(*) FROM %s" tbl-name*)))
     (org-sql-send-sql select)))
 

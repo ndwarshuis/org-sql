@@ -57,7 +57,7 @@ list then join the cdr of IN with newlines."
 
 (defconst testing-lines 666)
 
-(defconst testing-metadata-mql
+(defconst testing-file_metadata
   `(file_metadata (,testing-filepath
                    ,testing-hash
                    ,(file-attribute-user-id testing-attributes)
@@ -70,7 +70,7 @@ list then join the cdr of IN with newlines."
                          (round))
                    ,(file-attribute-modes testing-attributes))))
 
-(defconst testing-hashes-mql
+(defconst testing-file_hashes
   `(file_hashes (,testing-hash ,testing-size ,testing-lines)))
 
 (defmacro expect-sql* (in tbl res-form)
@@ -84,13 +84,12 @@ list then join the cdr of IN with newlines."
                          :clock-into-drawer org-clock-into-drawer
                          :clock-out-notes org-log-note-clock-out))
         (paths-with-attributes (list (cons testing-filepath testing-attributes)))
-        ;; (acc (-clone org-sql--empty-mql-bulk-insert)))
         (acc (org-sql--init-acc)))
     (--> (org-ml-parse-this-buffer)
          (org-sql--to-tree-config testing-hash paths-with-attributes
                              org-log-note-headings '("TODO" "DONE")
                              lb-config testing-size testing-lines it)
-         (org-sql--tree-config-to-mql-insert acc it)
+         (org-sql--tree-config-to-insert-alist acc it)
          (plist-get it :inserts)
          (-filter #'cdr it))))
 
@@ -452,10 +451,8 @@ list then join the cdr of IN with newlines."
                     :old-state nil
                     :new-state nil)))))
 
-(describe "meta-query language insert spec"
+(describe "bulk insert spec"
   (before-all
-    ;; (setq max-lisp-eval-depth 5000)
-    ;; (setq max-specpdl-size 5000)
     (org-mode))
 
   (before-each
@@ -464,16 +461,16 @@ list then join the cdr of IN with newlines."
   (describe "headlines"
     (it "single"
       (expect-sql "* headline"
-        `(,testing-hashes-mql
-          ,testing-metadata-mql
+        `(,testing-file_hashes
+          ,testing-file_metadata
           (headlines (1 ,testing-hash "headline" nil nil nil nil nil 0 0 nil))
           (headline_closures (1 1 0)))))
 
     (it "two"
       (expect-sql (list "* headline"
                         "* another headline")
-        `(,testing-hashes-mql
-          ,testing-metadata-mql
+        `(,testing-file_hashes
+          ,testing-file_metadata
           (headlines (2 ,testing-hash "another headline" nil nil nil nil nil 0 0 nil)
                      (1 ,testing-hash "headline" nil nil nil nil nil 0 0 nil))
           (headline_closures (2 2 0)
@@ -485,8 +482,8 @@ list then join the cdr of IN with newlines."
                         ":Effort: 0:30"
                         ":END:"
                         "this /should/ appear")
-        `(,testing-hashes-mql
-          ,testing-metadata-mql
+        `(,testing-file_hashes
+          ,testing-file_metadata
           (headlines
            (1 ,testing-hash "another headline [1/2]" "TODO" 30 "A" fraction 0.5
                           0 1 "this /should/ appear\n"))
@@ -500,22 +497,22 @@ list then join the cdr of IN with newlines."
       ((org-sql-exclude-headline-predicate
         (lambda (h)
           (= 1 (org-ml-get-property :level h)))))
-      `(,testing-hashes-mql
-        ,testing-metadata-mql)
+      `(,testing-file_hashes
+        ,testing-file_metadata)
 
       "nested (predicate applied to child)"
       ((org-sql-exclude-headline-predicate
         (lambda (h)
           (= 2 (org-ml-get-property :level h)))))
-      `(,testing-hashes-mql
-        ,testing-metadata-mql
+      `(,testing-file_hashes
+        ,testing-file_metadata
         (headlines (1 ,testing-hash "headline" nil nil nil nil nil 0 0 nil))
         (headline_closures (1 1 0)))
       
       "nested (no predicate)"
       nil
-      `(,testing-hashes-mql
-        ,testing-metadata-mql
+      `(,testing-file_hashes
+        ,testing-file_metadata
         (headlines (2 ,testing-hash "nested headline" nil nil nil nil nil 0 0 nil)
                    (1 ,testing-hash "headline" nil nil nil nil nil 0 0 nil))
         (headline_closures (2 2 0)
@@ -524,8 +521,8 @@ list then join the cdr of IN with newlines."
 
     (it "archived"
       (expect-sql "* headline :ARCHIVE:"
-        `(,testing-hashes-mql
-          ,testing-metadata-mql
+        `(,testing-file_hashes
+          ,testing-file_metadata
           (headlines (1 ,testing-hash "headline" nil nil nil nil nil 1 0 nil))
           (headline_closures (1 1 0))))))
 
@@ -1062,7 +1059,7 @@ list then join the cdr of IN with newlines."
                          ,(org-ts-to-unixtime ts1) "clock out note")))))))))
 
 (defun format-with (config type value)
-  (funcall (org-sql--compile-mql-format-function config type) value))
+  (funcall (org-sql--compile-value-format-function config type) value))
 
 (defun format-with-sqlite (type value)
   (format-with '(sqlite) type value))
@@ -1131,95 +1128,6 @@ list then join the cdr of IN with newlines."
                        :parent-keys (:int)
                        ;; :on_update cascade
                        :on-delete cascade))))))
-
-  ;; TODO use function to make this list, but the one now has hardcoded
-  ;; schema checking
-  ;; (it "insert (no namespace)"
-  ;;   (let* ((mql-insert '(table-foo :bool 0
-  ;;                                 :enum bim
-  ;;                                 :int 666
-  ;;                                 :text "hello"))
-  ;;         (config '(sqlite))
-  ;;         (formatter-alist
-  ;;          (->> test-schema
-  ;;               (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
-  ;;     (expect (org-sql--format-mql-insert formatter-alist mql-insert)
-  ;;             :to-equal "INSERT INTO table-foo (bool,enum,int,text) VALUES (0,'bim',666,'hello');")))
-
-  ;; (it "insert (postgres namespace)"
-  ;;   (let* ((mql-insert '(table-foo :bool 0
-  ;;                                  :enum bim
-  ;;                                  :int 666
-  ;;                                  :text "hello"))
-  ;;         (config '(postgres :schema "notpublic"))
-  ;;         (formatter-alist
-  ;;          (->> test-schema
-  ;;               (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
-  ;;     (expect (org-sql--format-mql-insert formatter-alist mql-insert)
-  ;;             :to-equal "INSERT INTO notpublic.table-foo (bool,enum,int,text) VALUES (FALSE,'bim',666,'hello');")))
-
-  ;; (it "delete (no namespace)"
-  ;;   (let* ((mql-delete '(table-foo))
-  ;;          (config '(sqlite))
-  ;;          (formatter-alist
-  ;;           (->> test-schema
-  ;;                (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
-  ;;     (expect (org-sql--format-mql-delete formatter-alist mql-delete)
-  ;;             :to-equal "DELETE FROM table-foo;")))
-
-  ;; (it "delete (no namespace; where)"
-  ;;   (let* ((mql-delete '(table-foo (where :enum bim)))
-  ;;          (config '(sqlite))
-  ;;          (formatter-alist
-  ;;           (->> test-schema
-  ;;                (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
-  ;;     (expect (org-sql--format-mql-delete formatter-alist mql-delete)
-  ;;             :to-equal "DELETE FROM table-foo WHERE enum='bim';")))
-
-  ;; (it "delete (postgres namespace)"
-  ;;   (let* ((mql-delete '(table-foo))
-  ;;          (config '(postgres :schema "notpublic"))
-  ;;          (formatter-alist
-  ;;           (->> test-schema
-  ;;                (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
-  ;;     (expect (org-sql--format-mql-delete formatter-alist mql-delete)
-  ;;             :to-equal "DELETE FROM notpublic.table-foo;")))
-
-  ;; (it "delete (postgres namespace; where)"
-  ;;   (let* ((mql-delete '(table-foo (where :enum bim)))
-  ;;          (config '(postgres :schema "notpublic"))
-  ;;          (formatter-alist
-  ;;           (->> test-schema
-  ;;                (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
-  ;;     (expect (org-sql--format-mql-delete formatter-alist mql-delete)
-  ;;             :to-equal "DELETE FROM notpublic.table-foo WHERE enum='bim';")))
-
-  ;; (it "select"
-  ;;   (let* ((mql-select '(table-foo (columns :bool)))
-  ;;          (config '(sqlite))
-  ;;          (formatter-alist
-  ;;           (->> test-schema
-  ;;                (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
-  ;;     (expect (org-sql--format-mql-select config formatter-alist mql-select)
-  ;;             :to-equal "SELECT bool FROM table-foo;")))
-
-  ;; (it "select (all columns)"
-  ;;   (let* ((mql-select '(table-foo))
-  ;;          (config '(sqlite))
-  ;;          (formatter-alist
-  ;;           (->> test-schema
-  ;;                (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
-  ;;     (expect (org-sql--format-mql-select config formatter-alist mql-select)
-  ;;             :to-equal "SELECT * FROM table-foo;")))
-
-  ;; (it "select (where)"
-  ;;   (let* ((mql-select '(table-foo (columns :bool) (where :enum bim)))
-  ;;          (config '(sqlite))
-  ;;          (formatter-alist
-  ;;           (->> test-schema
-  ;;                (--map (org-sql--compile-mql-schema-formatter-alist config it)))))
-  ;;     (expect (org-sql--format-mql-select config formatter-alist mql-select)
-  ;;             :to-equal "SELECT bool FROM table-foo WHERE enum='bim';")))
 
   (it "create table (SQLite)"
     (let ((config '(sqlite)))
