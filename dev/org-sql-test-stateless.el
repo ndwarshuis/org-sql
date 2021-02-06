@@ -1224,7 +1224,7 @@ list then join the cdr of IN with newlines."
   (it "create table (SQLite)"
     (let ((config '(sqlite)))
       (expect
-       (org-sql--format-mql-schema config test-schema)
+       (org-sql--format-create-tables config test-schema)
        :to-equal
        (list
         "CREATE TABLE IF NOT EXISTS table-foo (bool INTEGER,enum TEXT,int INTEGER,text TEXT,PRIMARY KEY (int));"
@@ -1233,7 +1233,7 @@ list then join the cdr of IN with newlines."
   (it "create table (postgres)"
     (let ((config '(pgsql)))
       (expect
-       (org-sql--format-mql-schema config test-schema)
+       (org-sql--format-create-tables config test-schema)
        :to-equal
        (list
         "CREATE TYPE enum_table-foo_enum AS ENUM ('bim','bam','boo');"
