@@ -1410,13 +1410,13 @@ CONFIG is the `org-sql-db-config' list."
 (defun org-sql--acc-reset (key acc)
   (plist-put acc key 0))
 
-(defun org-sql--format-insert-statements (config path-hashpathpairs file-tree-configs)
-  ;; (let* ((acc (-clone org-sql--empty-mql-bulk-insert))
+(defun org-sql--format-insert-statements (config paths-to-insert files-to-insert)
   (let* ((acc (org-sql--init-acc))
-         (acc* (--reduce-from (org-sql--tree-config-to-mql-insert acc it) acc file-tree-configs)))
-    (--> path-hashpathpairs
-         ;; TODO this caaaddddaaddar stuff is confusing AF...
-         (--reduce-from (org-sql--add-mql-insert-file-metadata* acc (cadr it) (car it) (cddr it)) acc* it)
+         (acc* (--reduce-from (org-sql--tree-config-to-mql-insert acc it) acc files-to-insert)))
+    (--> paths-to-insert
+      (--reduce-from (-let (((&plist :hash :path :attrs) it))
+                       (org-sql--add-mql-insert-file-metadata* acc path hash attrs))
+                     acc* it)
          (plist-get it :inserts)
          (org-sql--format-mql-bulk-inserts config it))))
 
@@ -1785,7 +1785,6 @@ returned by `org-sql--to-hstate'."
   "Add MQL-insert for each property in the current headline to ACC.
 HSTATE is a plist as returned by `org-sql--to-hstate'."
   (if (eq 'all org-sql-excluded-properties) acc
-    ;; TODO only do this once
     (-let* ((ignore-list (append org-sql--ignored-properties-default
                                  org-sql-excluded-properties))
             ((&plist :headline :file-hash) hstate))
@@ -2269,13 +2268,15 @@ state as the orgfiles on disk."
                    'paths-to-insert pi
                    'paths-to-delete pd)
            (org-sql--partition-hashpathpairs disk-hashpathpairs db-hashpathpairs))
-          (pi* (--map (cons (car it) (cons (cdr it) (file-attributes (cdr it)))) pi)))
+          (pi* (--map (list :hash (car it)
+                            :path (cdr it)
+                            :attrs (file-attributes (cdr it)))
+                      pi)))
     (list (org-sql--format-path-delete-statement org-sql-db-config pd)
           (org-sql--format-file-delete-statement org-sql-db-config fd)
           (->> (org-sql--group-hashpathpairs-by-hash fi)
                (--map (org-sql--hashpathpair-get-tree-config (car it) (cdr it)))
                (org-sql--format-insert-statements org-sql-db-config pi*)))))
-         ;; (org-sql--format-sql-transaction org-sql-db-config))))
 
 (defun org-sql-dump-update-transactions ()
   "Dump the update transaction to a separate buffer."
