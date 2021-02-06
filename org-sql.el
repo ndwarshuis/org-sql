@@ -137,7 +137,7 @@ to store them. This is in addition to any properties specifified by
                   :entry_id '(:type integer) object notnull)))
       (defconst org-sql--table-alist
         `((tree_hashes
-           (desc . "Each row describes one org file (which may have multiple filepaths)")
+           (desc . "Each row describes one org tree")
            (columns
             ,(tree-hash-col)
             (:tree_size :desc "number of characters of the org tree"
@@ -177,11 +177,10 @@ to store them. This is in addition to any properties specifified by
             (foreign :ref tree_hashes
                      :keys (:tree_hash)
                      :parent-keys (:tree_hash)
-                     ;; TODO this 'on_delete' is not lispy because it has a '_'
                      :on-delete cascade)))
 
           (headlines
-           (desc . "Each row stores one headline in a given org file and its metadata")
+           (desc . "Each row stores one headline in a given org tree")
            (columns
             ,(headline-id-col)
             ,(tree-hash-col "headline")
@@ -215,7 +214,7 @@ to store them. This is in addition to any properties specifified by
                      :on-delete cascade)))
 
           (headline_closures
-           (desc . "Each row stores the ancestor and depth of a headline relationship (eg closure table)")
+           (desc . "Each row stores the ancestor and depth of a headline relationship")
            (columns
             ,(headline-id-col)
             (:parent_id :desc "id of this headline's parent"
@@ -2008,7 +2007,6 @@ CONFIG is the `org-sql-db-config' list."
 SQL-STATEMENTS is a list of SQL statements to be included in the
 
 transaction. MODE is the SQL mode."
-  ;; TODO might want to add performance options here
   (let ((fmt (org-sql--case-mode config
                (sqlite "PRAGMA foreign_keys = ON;BEGIN;%sCOMMIT;")
                ((mysql pgsql) "BEGIN;%sCOMMIT;")
