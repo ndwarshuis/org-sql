@@ -499,33 +499,165 @@ to store them. This is in addition to any properties specifified by
 
 ;; TODO add sqlite pragma (synchronous and journalmode)
 ;; TODO add postgres transaction options
-(defcustom org-sql-db-config
-  (list 'sqlite :path (expand-file-name "org-sql.db" org-directory))
-  "Configuration for the org-sql database.
 
-This is a list like (DB-TYPE OPTION-PLIST). The valid keys and
-values in OPTION-PLIST depend on the DB-TYPE. Note that all
-values in the OPTION-PLIST must be strings.
+;; I could use `define-widget' here but it doesn't seem to work with a type this
+;; complex (it lets me configure the type properly but then says MISCONFIGURED
+;; when I come back, which makes no sense). On the bright side, this is much
+;; more transparent; just make the repetitive bits of the type using a bunch of
+;; functions
+(eval-and-compile
+  (cl-flet*
+      ((mk-option
+        (tag key value-type &optional default)
+        (let ((value (if default `(,value-type :value ,default) value-type)))
+          `(list :inline t :tag ,tag (const ,key) ,value)))
+       (mk-port
+        (n)
+        (mk-option "Port number" :port 'integer n))
+       (mk-db-choice
+        (tag sym required-keys optional-keys)
+        `(cons :tag ,tag (const ,sym)
+               (list :tag "Required keys" :offset 2
+                     ,@required-keys
+                     (set :tag "Optional keys" :inline t ,@optional-keys)))))
+    (let* ((database (mk-option "Database name" :database 'string "org_sql"))
+           (hostname (mk-option "Hostname/IP" :hostname 'string))
+           (username (mk-option "Username" :username 'string "org_sql"))
+           (password (mk-option "Password" :password 'string "org_sql@13243546"))
+           (schema (mk-option "Namespace (aka schema)" :schema 'string "org_sql"))
+           (args (mk-option "Additional args" :args '(repeat string)))
+           (env (mk-option "Environmental Vars" :env '(repeat (list string string))))
+           (def (mk-option "Defaults File" :defaults-file '(file :value "~/my.ini")))
+           (defx (mk-option "Defaults Extra File" :defaults-extra-file
+                            '(file :value "~/my-extra.ini")))
+           (sfile (mk-option "Service File" :service-file
+                             '(file :value "~/.pg_service.conf")))
+           (pfile (mk-option "Pass File" :pass-file '(file :value "~/.pgpass")))
+           (path (mk-option "Database path" :database '(string :value "~/org-sql.db")))
+           (unlogged (mk-option "Unlogged Tables" :database 'boolean))
+           (server (mk-option "Server instance" :server
+                              '(string :value "tcp:server\\instance_name,1433")))
+           (hook '(repeat
+                   (choice
+                    (cons :tag "SQL command" (const sql) string)
+                    (cons :tag "SQL command (appended)" (const sql+) string)
+                    (cons :tag "SQL file" (const file) file)
+                    (cons :tag "SQL file (appended)" (const file+) file))))
+           (post-init-hook (mk-option "Post init hooks" :post-init-hooks hook))
+           (post-update-hook (mk-option "Post update hooks" :post-update-hooks hook))
+           (post-clear-hook (mk-option "Post clear hooks" :post-clear-hooks hook))
+           (pre-reset-hook (mk-option "Pre reset hooks" :pre-reset-hooks hook))
+           (hooks `(,post-init-hook ,post-update-hook ,post-clear-hook ,pre-reset-hook)))
+      (defcustom org-sql-db-config
+        (list 'sqlite :path (expand-file-name "org-sql.db" org-directory))
+        "Configuration for the org-sql database.
 
-The following symbols are valid for DB-TYPE:
-- `sqlite' (requires the `sqlite3' command)
-- `postgres' (requires the `psql', `createdb', and `dropdb'
-  commands)
+This is a list like (DB-TYPE [KEY VAL] [[KEY VAL] ...]).
 
-For 'sqlite', the following options are in OPTION-PLIST:
-- `:path' (required): the path on disk to use for the database
-  file
+DB-TYPE is a symbol for the database to use and one of:
+- 'mysql': MySQL/MariaDB (requires the 'mysql' executable)
+- 'pgsql': PostgresSQL (requires the 'pgsql' executable)
+- 'sqlite': SQLite (requires the 'sqlite3' executable)
+- 'sqlserver': SQL-Server (requires the 'sqlcmd' executable)
 
-For 'postgres', the following options are in OPTION-PLIST:
-- `:database' (required): the name of the database to use
-- `:hostname': the hostname for the database connection
-- `:port': the port for the database connection
-- `:username': the username for the database connection
-- `:password': the password for the database connection (NOTE:
-  since setting this option will store the password in plain
-  text, consider using a `.pgpass' file\\)"
-  ;; TODO add type
-  :group 'org-sql)
+KEY and VAL form a plist and allowed combinations depend on
+DB-TYPE.
+
+Each database type requires one key to specify which database to
+use. For SQLite, this key is ':path' and its value is a path to
+the SQLite database file to use. For all others, this key is
+':database' and specifies the name of the database on the
+server (perhaps local) to which to connect.
+
+All other keys are optional.
+
+The following keys are database-specific:
+- ':hostname': (mysql pgsql) string for the hostname with which
+  to connect
+- ':port': (mysql pgsql) integer for the port by which to connect
+- ':schema' (pgsql sqlserver) string for the schema to use
+- ':username': (mysql pgsql sqlserver) string for the username
+  with which to connect
+- ':password': (mysql pgsql sqlserver) string for the password
+  with which to connect (NOTE use some combination of the other
+  options below if your don't want your password in your config)
+- ':server': (sqlserver) the server instance (used for the '-S'
+  parameter in 'sqlcmd')
+- ':pass-file' (pgsql): a string to be supplied to the PGPASSFILE
+  environment variable
+- ':server-file' (pgsql): a string to be supplied to the
+  PGSERVICEFILE environment variable
+- ':defaults-file' (mysql): a string to the be supplied to the
+  '--defaults-file' argument
+- ':defaults-extra-file' (mysql): a string to be supplied to the
+  '--defaults-extra-file' argument
+- ':args': (mysql pgsql sqlserver): list of strings for arbitrary
+  command line arguments sent to the client executable
+- ':env': (mysql pgsql sqlserver): list of lists like (STRING
+  STRING) representing environmental variables with which each
+  database client will be run
+- ':unlogged' (pgsql) set to t to use unlogged tables and
+   potentially gain a huge speed improvement
+
+In addition, all databases support the optional keys
+':post-init-hooks', ':post-update-hooks', ':post-clear-hooks',
+and ':pre-reset-hooks'; these are user-defined SQL statements
+that will be run after/before `org-sql-init-db',
+`org-sql-update-db' `org-sql-clear-db', and `org-sql-reset-db'
+respectively. The value of any of these is a list of 2-membered
+lists, where the first member is a symbol like 'sql', 'file',
+'sql+', or 'file+'. If 'sql', the second member is a string
+representing a SQL statement which will be execrated. If 'file',
+the second member is a path to a sql file that will be executed.
+The '+' flag on the car symbol signifies that the SQL string or
+file will be appended to the relevant function's SQL
+transaction (note that each of the four functions pertaining to
+these keys issues a single transaction using \"BEGIN; ...
+COMMIT;\").
+
+These are useful for setting up indexes or initializing/running
+procedures as necessary. For example, specifying
+':post-init-hooks' as ((sql+ \"CREATE INDEX foo ON
+headlines (headline_text);\")) will create the specified index at
+the end of the SQL transaction issued by `org-sql-init-db' (and
+thus will not be run if anything else in the transaction fails).
+One could issue \"DROP INDEX foo;\" using
+':pre-reset-hook' (although depending on the database this may
+not be necessary since CASCADE is used when dropping tables where
+available)."
+        :type `(choice
+                ,(mk-db-choice "MySQL/MariaDB" 'mysql `(,database)
+                               `(,hostname
+                                 ,(mk-port 3306)
+                                 ,username
+                                 ,password
+                                 ,def
+                                 ,defx
+                                 ,args
+                                 ,env
+                                 ,@hooks))
+                ,(mk-db-choice "PostgreSQL" 'pgsql `(,database)
+                               `(,hostname
+                                 ,(mk-port 5432)
+                                 ,username
+                                 ,password
+                                 ,schema
+                                 ,pfile
+                                 ,sfile
+                                 ,unlogged
+                                 ,args
+                                 ,env
+                                 ,@hooks))
+                ,(mk-db-choice "SQLite" 'sqlite `(,path) hooks)
+                ,(mk-db-choice "MS SQL-Server" 'sqlserver `(,database)
+                               `(,server
+                                 ,username
+                                 ,password
+                                 ,schema
+                                 ,args
+                                 ,env
+                                 ,@hooks)))
+        :group 'org-sql))))
 
 ;; (defcustom org-sql-log-note-headings-overrides nil
 ;;   "Alist of `org-log-note-headings' for specific files.
@@ -2180,21 +2312,22 @@ state as the orgfiles on disk."
 
 (defun org-sql--append-process-environment (env &rest pairs)
   (declare (indent 1))
-  (->> (-partition 2 pairs)
-       (--map (and (cadr it) (format "%s=%s" (car it) (cadr it))))
-       (-non-nil)
-       (append process-environment env)))
+  (let ((env* (--map (format (format "%s=%s" (car it) (cadr it))) env)))
+    (->> (-partition 2 pairs)
+         (--map (and (cadr it) (format "%s=%s" (car it) (cadr it))))
+         (-non-nil)
+         (append process-environment env*))))
 
 (defun org-sql--exec-mysql-command-nodb (fargs async)
-  (org-sql--with-config-keys (:defaults :defaults-extra :hostname :port
-                                        :username :password :args :env)
+  (org-sql--with-config-keys (:hostname :port :username :password :args :env
+                                        :defaults-file :defaults-extra-file)
       org-sql-db-config
     (let ((all-args (append
                      ;; either of these must be the first option if given
-                     (or (-some->> defaults
+                     (or (-some->> defaults-file
                            (format "--defaults-file=%s")
                            (list))
-                         (-some->> defaults-extra
+                         (-some->> defaults-extra-file
                            (format "--defaults-extra-file=%s")
                            (list)))
                      (-some->> hostname (list "-h"))
@@ -2211,8 +2344,8 @@ state as the orgfiles on disk."
 (defun org-sql--exec-postgres-command-nodb (fargs async)
   "Execute a postgres command with ARGS.
 CONFIG-KEYS is a list like `org-sql-db-config'."
-  (org-sql--with-config-keys (:service-file :pass-file :hostname :port
-                                            :username :password :args :env)
+  (org-sql--with-config-keys (:hostname :port :username :password :args :env
+                                        :service-file :pass-file)
       org-sql-db-config
     (let ((all-args (append
                      (-some->> hostname (list "-h"))
@@ -2455,7 +2588,6 @@ The database connection will be handled transparently."
        (file-exists-p path)))
     (sqlserver
      (org-sql--with-config-keys (:database) org-sql-db-config
-       ;; TODO the 'set nocount on' bit should be common to all commands
        (let ((cmd (format "SET NOCOUNT ON;SELECT 1 FROM sys.databases WHERE name = '%s';" database)))
          (org-sql--on-success* (org-sql--exec-sqlserver-command-nodb `("-Q" ,cmd) nil)
            (equal "1" (s-trim it-out))))))))
