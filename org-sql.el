@@ -604,7 +604,7 @@ In addition, all databases support the optional keys
 ':post-init-hooks', ':post-update-hooks', ':post-clear-hooks',
 and ':pre-reset-hooks'; these are user-defined SQL statements
 that will be run after/before `org-sql-init-db',
-`org-sql-update-db' `org-sql-clear-db', and `org-sql-reset-db'
+`org-sql-push-to-db' `org-sql-clear-db', and `org-sql-reset-db'
 respectively. The value of any of these is a list of 2-membered
 lists, where the first member is a symbol like 'sql', 'file',
 'sql+', or 'file+'. If 'sql', the second member is a string
@@ -2875,8 +2875,8 @@ connection."
             (org-sql--parse-output-to-plist org-sql-db-config col-names it-out))
         (org-sql--parse-output-to-list org-sql-db-config it-out)))))
 
-(defun org-sql-update-db ()
-  "Update the org-sql database.
+(defun org-sql-push-to-db ()
+  "Push current org-file state to the org-sql database.
 
 The database will be updated to reflect the current state of
 all org-file on disk for which there is an entry in `org-sql-files'.
@@ -2919,11 +2919,11 @@ process to run asynchronously."
 ;;
 ;; these are wrappers around the more useful functions above
 
-(defun org-sql-user-update ()
-  "Update the Org SQL database."
+(defun org-sql-user-push ()
+  "Push current org-file state to the database."
   (interactive)
   (message "Updating Org SQL database")
-  (let ((out (org-sql-update-db)))
+  (let ((out (org-sql-push-to-db)))
     (when org-sql-debug
       (print "Debug output for org-sql update")
       (print (if (equal out "") "Run Successfully" out))))

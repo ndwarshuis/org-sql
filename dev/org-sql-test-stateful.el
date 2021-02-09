@@ -231,7 +231,7 @@
      (describe-reset-db "single file"
        (it "update database"
          (let ((org-sql-files (list (f-join test-files "foo1.org"))))
-           (expect-exit-success (org-sql-update-db))))
+           (expect-exit-success (org-sql-push-to-db))))
        (expect-db-has-tables ,config
          (tree_hashes . 1)
          (file_metadata . 1)
@@ -254,7 +254,7 @@
        (it "update database"
          (let ((org-sql-files (list (f-join test-files "foo1.org")))
                (org-sql-async t))
-           (expect-exit-success (org-sql-update-db))))
+           (expect-exit-success (org-sql-push-to-db))))
        (expect-db-has-tables ,config
          (tree_hashes . 1)
          (file_metadata . 1)
@@ -277,7 +277,7 @@
        (it "update database"
          (let ((org-sql-files (list (f-join test-files "foo1.org")
                                     (f-join test-files "foo3.org"))))
-           (expect-exit-success (org-sql-update-db))))
+           (expect-exit-success (org-sql-push-to-db))))
        (expect-db-has-tables ,config
          (tree_hashes . 2)
          (file_metadata . 2)
@@ -300,7 +300,7 @@
        (it "update database"
          (let ((org-sql-files (list (f-join test-files "foo1.org")
                                     (f-join test-files "foo2.org"))))
-           (expect-exit-success (org-sql-update-db))))
+           (expect-exit-success (org-sql-push-to-db))))
        (expect-db-has-tables ,config
          (tree_hashes . 1)
          (file_metadata . 2)
@@ -323,7 +323,7 @@
        (it "update database"
          (let ((org-sql-files (list (f-join test-files "fancy.org")))
                (org-log-into-drawer "LOGBOOK"))
-           (expect-exit-success (org-sql-update-db))))
+           (expect-exit-success (org-sql-push-to-db))))
        (expect-db-has-tables ,config
          (tree_hashes . 1)
          (file_metadata . 1)
@@ -349,7 +349,7 @@
            (setq test-path (f-join test-files "foo1.org")))
          (it "update database"
            (let ((org-sql-files (list test-path)))
-             (expect-exit-success (org-sql-update-db))))
+             (expect-exit-success (org-sql-push-to-db))))
          (it "test for file in tables"
            (expect-db-has-table-contents 'file_metadata
              `(,test-path "106e9f12c9e4ff3333425115d148fbd4" org-sql-is-number
@@ -362,7 +362,7 @@
            (setq test-path (f-join test-files "foo2.org")))
          (it "update database"
            (let ((org-sql-files (list test-path)))
-             (expect-exit-success (org-sql-update-db))))
+             (expect-exit-success (org-sql-push-to-db))))
          (it "test for file in tables"
            (expect-db-has-table-contents 'file_metadata
              `(,test-path "106e9f12c9e4ff3333425115d148fbd4" org-sql-is-number
@@ -372,10 +372,10 @@
      (describe-reset-db "deleted file"
        (it "update database"
          (let ((org-sql-files (list (f-join test-files "foo1.org"))))
-           (expect-exit-success (org-sql-update-db))))
+           (expect-exit-success (org-sql-push-to-db))))
        (it "update database (untrack the original file)"
          (let ((org-sql-files nil))
-           (expect-exit-success (org-sql-update-db))))
+           (expect-exit-success (org-sql-push-to-db))))
        (expect-db-has-tables ,config
          (file_metadata . 0)
          (tree_hashes . 0)))
@@ -392,7 +392,7 @@
                  (org-sql-files (list test-path)))
              ;; write file and update db
              (f-write-text contents1 'utf-8 test-path)
-             (expect-exit-success (org-sql-update-db))))
+             (expect-exit-success (org-sql-push-to-db))))
          (it "test file hash"
            (expect-db-has-table-contents 'tree_hashes
              `("ece424e0090cff9b6f1ac50722c336c0" "6" "1"))))
@@ -405,7 +405,7 @@
              ;; close buffer, alter the file, and update again
              (kill-buffer (find-file-noselect test-path t))
              (f-write-text contents2 'utf-8 test-path)
-             (expect-exit-success (org-sql-update-db))))
+             (expect-exit-success (org-sql-push-to-db))))
          (it "test for new file hash"
            (expect-db-has-table-contents 'tree_hashes
              `("399bc042f23ea976a04b9102c18e9cb5" "6" "1")))
@@ -437,7 +437,7 @@
      (describe-reset-db "loading a file and clearing"
        (it "update database"
          (let ((org-sql-files (list (f-join test-files "foo1.org"))))
-           (expect-exit-success (org-sql-update-db))))
+           (expect-exit-success (org-sql-push-to-db))))
        (it "clear database"
          (expect-exit-success (org-sql-clear-db)))
        (it "tables should still exist"
@@ -464,7 +464,7 @@
        (it "update database"
          (let ((org-sql-files (list (f-join test-files "foo1.org")))
                (org-sql-async t))
-           (expect-exit-success (org-sql-update-db))))
+           (expect-exit-success (org-sql-push-to-db))))
        (it "clear database"
          (let ((org-sql-async t))
            (expect-exit-success (org-sql-clear-db))))
@@ -521,7 +521,7 @@
                         `((file+ ,(f-join test-scripts "update_hook.sql"))
                           (sql+ "INSERT INTO fake_update_table VALUES (1);")))))
          (let ((org-sql-files (list (f-join test-files "foo1.org"))))
-           (expect-exit-success (org-sql-update-db))))
+           (expect-exit-success (org-sql-push-to-db))))
        (it "fake update table should exist"
          (expect-db-has-table-contents 'fake_update_table '("1")))
        (it "clear database"
