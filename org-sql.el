@@ -25,7 +25,8 @@
 
 ;; This code stores org buffers in a variety of SQL databases for use in
 ;; processing org-mode data outside of Emacs where SQL operations might be more
-;; appropriate.
+;; appropriate. Org files are stored according to the perspective of unique
+;; org tree, any tree might reside in multiple identical files.
 
 ;; The rough process by which this occurs is:
 ;;  1) query state of org files on disk and in db (if any) and classify
@@ -473,7 +474,7 @@ to store them. This is in addition to any properties specifified by
 (eval-and-compile
   (defconst org-sql-table-names
     (--map (symbol-name (car it)) org-sql--table-alist)
-    "The names of all required tables in org-sql."))
+    "The names of all tables in the org-sql database."))
 
 ;; TODO what about the windows users?
 (defconst org-sql--mysql-exe "mysql"
@@ -748,6 +749,7 @@ or 'inactive-range'. To exclude none set to nil."
               (const :tag "Inactive Timestamp Ranges" inactive-range))
   :group 'org-sql)
 
+;; TODO what if they customize these keys?
 (defcustom org-sql-excluded-logbook-types nil
   "List of logbook entry types to exclude from the database.
 List members are any of the keys from `org-log-note-headings' with the
@@ -802,7 +804,7 @@ ARGS is a list of additional arguments to pass to `cl-subsetp'."
 
 (defmacro org-sql--case-type (type &rest alist-forms)
   "Execute one of ALIST-FORMS depending on TYPE.
-TYPE must be one of 'boolean', 'text', 'enum', or 'integer'."
+A compile error will be triggered if TYPE is invalid."
   (declare (indent 1))
   (-let (((&alist 'boolean 'char 'enum 'integer 'real 'text 'varchar)
           (--splice (listp (car it))
@@ -822,6 +824,9 @@ TYPE must be one of 'boolean', 'text', 'enum', or 'integer'."
        (t (error "Invalid type: %s" ,type)))))
 
 (defmacro org-sql--case-mode (config &rest alist-forms)
+  "Execute one of ALIST-FORMS depending on CONFIG.
+A compile error will be triggered if the car of CONFIG (eg the
+database to be used) is invalid."
   (declare (indent 1))
   (-let (((keys &as &alist 'mysql 'pgsql 'sqlserver 'sqlite)
           (--splice (listp (car it))
@@ -938,6 +943,8 @@ keys/symbols like those from the &plist switch from `-let'."
      ,@body))
 
 (defun org-sql--get-config-key (key config)
+  "Return the value of KEY from CONFIG.
+CONFIG is a list like `org-sql-db-list'."
   (plist-get (cdr config) key))
 
 ;; bulk insert alist constructors
@@ -948,10 +955,11 @@ keys/symbols like those from the &plist switch from `-let'."
 
 (defmacro org-sql--insert-alist-add (acc tbl-name &rest plist)
   "Add a new row list for TBL-NAME to ACC.
-PLIST is a property list of the columns and values to insert."
+PLIST is a property list of the columns and values to insert.
+WARNING: this function looks like a pure function but it
+intentionally has side effects for performance reasons."
   (declare (indent 2))
   (let ((ordered-values (org-sql--table-order-columns tbl-name plist)))
-    ;; WARNING this has side effects (but is super fast because of it)
     `(let ((tbl (assq ',tbl-name (plist-get ,acc :inserts))))
        (setcdr tbl (cons (list ,@ordered-values) (cdr tbl)))
        ,acc)))
@@ -959,7 +967,8 @@ PLIST is a property list of the columns and values to insert."
 ;; external state data structures
 
 (defmacro org-sql--map-plist (key form plist)
-  "Return PLIST modified with FORM applied to KEY's value."
+  "Return PLIST modified with FORM applied to KEY's value.
+WARNING: this function will modify PLIST in place."
   (declare (indent 1))
   `(let ((it (plist-get ,plist ,key)))
      (plist-put ,plist ,key ,form)))
@@ -1001,15 +1010,19 @@ If not present, return the current value of CLOCK-OUT-NOTES."
    "lognoteclock-out" "nolognoteclock-out" clock-out-notes top-section))
 
 (defun org-sql--to-tree-config (tree-hash paths-with-attributes log-note-headings
-                                     todo-keywords lb-config size lines tree)
+                                          todo-keywords lb-config size lines tree)
   "Return a plist representing the state of an org buffer.
 The plist will include:
 - `:tree-hash': the hash of this org file (given by TREE-HASH)
-- `:attributes': the ATTRIBUTES list for the file as returned via
-  `file-attributes'
+- `:paths-with-attributes': a list of lists where the car is a
+  file path and the cdr is a list of attributes given by
+  `file-attributes' (given by PATHS-WITH-ATTRIBUTES)
+- `:size': the size of the org tree (given by SIZE)
+- `:length': the number of lines of the org tree (given by
+  LENGTH)
 - `:top-section': the org-element TREE representation of this
   org-file's top section before the first headline
-- `:headline': a list of org-element TREE headlines in this org
+- `:headlines': a list of org-element TREE headlines in this org
   file
 - `:lb-config' the same list as that supplied to
   `org-ml-headline-get-supercontents' (based on LB-CONFIG)
@@ -1070,7 +1083,9 @@ will include the follwing keys/values:
 - `:lb-config' the supercontents config plist
 - `:log-note-matcher': a list of log-note-matchers for this org
   file as returned by `org-sql--build-log-note-heading-matchers'
-- `:headline' the current headline node."
+- `:headline' the current headline node.
+- `:parent-ids': the ids of this headline's parents (to which
+  HEADLINE-ID will be set as the sole member)."
   (-let (((&plist :tree-hash h :lb-config c :log-note-matcher m) tree-config))
     (list :tree-hash h
           :lb-config (org-sql--headline-update-supercontents-config c headline)
@@ -1080,7 +1095,9 @@ will include the follwing keys/values:
 
 (defun org-sql--update-hstate (headline-id hstate headline)
   "Return a new HSTATE updated with information from HEADLINE.
-Only the :lb-config and :headline keys will be changed."
+Only the :lb-config, :headline, and :parent-ids keys will be
+changed (the latter will be appended to the front of the current
+:parent-ids with HEADLINE-ID)."
   ;; TODO plist-put won't work here
   (->> (org-sql--replace-in-plist :headline headline hstate)
        (org-sql--map-plist :lb-config
@@ -1090,6 +1107,12 @@ Only the :lb-config and :headline keys will be changed."
 ;;; SQL string parsing functions
 
 (defun org-sql--parse-output-to-list (config out)
+  "Return OUT as a LIST.
+OUT is assumed to be tabular output from one of the SQL client
+command line utilities. CONFIG is a list like `org-sql-db-config'
+and contains the information for how to parse the output. The
+returned list will be a list of lists, with each list being the
+values of one row from OUT."
   (unless (equal out "")
     (let ((sep (org-sql--case-mode config
                  (mysql "\t")
@@ -1099,9 +1122,12 @@ Only the :lb-config and :headline keys will be changed."
            (--map (-map #'s-trim (s-split sep it)))))))
 
 (defun org-sql--parse-output-to-plist (config cols out)
-  "Parse SQL output string OUT to an plist representing the data.
-COLS are the column names as symbols used to obtain OUT.
-CONFIG is the `org-sql-db-config' list."
+  "Parse OUT to a plist.
+This will perform `org-sql--parse-output-to-list' on OUT using
+CONFIG and intersperse COLS (a list of keywords representing the
+column names) in each row of the returned list, effectively
+turning the return value from a list of lists to a list of
+plists (where the keys are the column names for the rows)."
   (-some->> (org-sql--parse-output-to-list config out)
     (--map (-interleave cols it))))
 
@@ -1339,8 +1365,13 @@ to NOTE-TEXT; otherwise just as (CLOCK)."
 
 ;; org-element tree -> bulk insert-alist
 
+;; these functions take a specific element of the org tree and "add" a "row"
+;; (which is just a list of values representing that row) to accumulator `ACC'
+;; (representing the bulk insert SQL statement). `ACC' is an alist of table
+;; names whose cdr's hold the rows to be inserted to that table
+
 (defun org-sql--insert-alist-add-headline-logbook-item (acc entry)
-  "Add MQL-insert for item ENTRY to ACC."
+  "Add row for item ENTRY to ACC."
   (-let (((entry-type . (&plist :header-text :note-text :tree-hash :ts)) entry))
     (org-sql--insert-alist-add acc logbook_entries
       :entry_id (org-sql--acc-get :entry-id acc)
@@ -1353,7 +1384,7 @@ to NOTE-TEXT; otherwise just as (CLOCK)."
       :note note-text)))
 
 (defun org-sql--insert-alist-add-state-change (acc entry)
-  "Add MQL-insert for state change ENTRY to ACC."
+  "Add rows for state change ENTRY to ACC."
   (-let (((&plist :old-state :new-state) (cdr entry)))
     (--> (org-sql--insert-alist-add-headline-logbook-item acc entry)
          (org-sql--insert-alist-add it state_changes
@@ -1362,7 +1393,7 @@ to NOTE-TEXT; otherwise just as (CLOCK)."
            :state_new new-state))))
 
 (defun org-sql--insert-alist-add-planning-change (acc hstate entry)
-  "Add MQL-insert for planning change ENTRY to ACC.
+  "Add rows for planning change ENTRY to ACC.
 HSTATE is a plist as returned by `org-sql--to-hstate'."
   (-let (((&plist :old-ts) (cdr entry)))
     (--> (org-sql--insert-alist-add-headline-logbook-item acc entry)
@@ -1373,7 +1404,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
          (org-sql--acc-incr :timestamp-id it))))
 
 (defun org-sql--insert-alist-add-headline-logbook-items (acc hstate logbook)
-  "Add MQL-inserts for LOGBOOK to ACC.
+  "Add rows for LOGBOOK to ACC.
 LOGBOOK is the logbook value of the supercontents list returned
 by `org-ml-headline-get-supercontents'. HSTATE is a plist as
 returned by `org-sql--to-hstate'."
@@ -1397,7 +1428,7 @@ returned by `org-sql--to-hstate'."
            (--reduce-from (org-sql--acc-incr :entry-id (add-entry acc it)) acc)))))
 
 (defun org-sql--insert-alist-add-clock (acc hstate clock note-text)
-  "Add MQL-insert for CLOCK to ACC.
+  "Add rows for CLOCK to ACC.
 NOTE-TEXT is either a string or nil representing the clock-note.
 HSTATE is a plist as returned by `org-sql--to-hstate'."
   (-let (((&plist :headline) hstate)
@@ -1415,7 +1446,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
       (org-sql--acc-incr :clock-id it))))
 
 (defun org-sql--insert-alist-add-headline-logbook-clocks (acc hstate logbook)
-  "Add MQL-inserts for LOGBOOK to ACC.
+  "Add rows for LOGBOOK to ACC.
 LOGBOOK is the logbook value of the supercontents list returned
 by `org-ml-headline-get-supercontents'. HSTATE is a plist as
 returned by `org-sql--to-hstate'."
@@ -1426,7 +1457,7 @@ returned by `org-sql--to-hstate'."
         acc)))
 
 (defun org-sql--insert-alist-add-headline-properties (acc hstate)
-  "Add MQL-insert for each property in the current headline to ACC.
+  "Add row for each property in the current headline to ACC.
 HSTATE is a plist as returned by `org-sql--to-hstate'."
   (if (eq 'all org-sql-excluded-properties) acc
     (-let* ((ignore-list (append org-sql--ignored-properties-default
@@ -1452,7 +1483,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
              (-reduce-from #'add-property acc))))))
 
 (defun org-sql--insert-alist-add-headline-tags (acc hstate)
-  "Add MQL-insert for each tag in the current headline to ACC.
+  "Add row for each tag in the current headline to ACC.
 HSTATE is a plist as returned by `org-sql--to-hstate'."
   (if (eq 'all org-sql-excluded-tags) acc
     (-let (((&plist :headline) hstate))
@@ -1474,7 +1505,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
                (--reduce-from (add-tag acc it t) it i-tags)))))))
 
 (defun org-sql--insert-alist-add-headline-links (acc hstate contents)
-  "Add MQL-insert for each link in the current headline to ACC.
+  "Add row for each link in the current headline to ACC.
 CONTENTS is a list corresponding to that returned by
 `org-ml-headline-get-supercontents'. HSTATE is a plist as
 returned by `org-sql--to-hstate'."
@@ -1498,6 +1529,8 @@ returned by `org-sql--to-hstate'."
         (-reduce-from #'add-link acc links)))))
 
 (defmacro org-sql--insert-alist-add-timestamp-mod (acc modifier-type timestamp)
+  "Add row for timestamp modifier of TIMESTAMP to ACC.
+MODIFIER-TYPE is one of 'warning' or 'repeater'."
   (declare (indent 2))
   (-let (((tbl-name value-col unit-col type-col type-prop value-prop unit-prop)
           (cl-case modifier-type
@@ -1525,7 +1558,7 @@ returned by `org-sql--to-hstate'."
        ,acc)))
 
 (defun org-sql--insert-alist-add-timestamp (acc hstate timestamp)
-  "Add MQL-insert for TIMESTAMP to ACC.
+  "Add row for TIMESTAMP to ACC.
 HSTATE is a plist as returned by `org-sql--to-hstate'."
   (cl-flet
       ((get-resolution
@@ -1548,7 +1581,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
         (org-sql--insert-alist-add-timestamp-mod it repeater timestamp)))))
 
 (defun org-sql--insert-alist-add-headline-timestamps (acc hstate contents)
-  "Add MQL-insert for each timestamp in the current headline to ACC.
+  "Add row for each timestamp in the current headline to ACC.
 CONTENTS is a list corresponding to that returned by
 `org-ml-headline-get-supercontents'. HSTATE is a plist as
 returned by `org-sql--to-hstate'."
@@ -1565,7 +1598,7 @@ returned by `org-sql--to-hstate'."
       acc)))
 
 (defun org-sql--insert-alist-add-headline-planning (acc hstate)
-  "Add MQL-insert for each planning timestamp in the current headline to ACC.
+  "Add row for each planning timestamp in the current headline to ACC.
 HSTATE is a plist as returned by `org-sql--to-hstate'."
   (-let (((&plist :headline) hstate))
     (-if-let (planning (org-ml-headline-get-planning headline))
@@ -1588,7 +1621,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
       acc)))
 
 (defun org-sql--insert-alist-add-headline-closures (acc hstate)
-  "Add MQL-insert for parent closures from the current headline to ACC.
+  "Add row for parent closures from the current headline to ACC.
 HSTATE is a plist as returned by `org-sql--to-hstate'."
   (-let* (((&plist :headline :parent-ids) hstate)
           (headline-id (org-sql--acc-get :headline-id acc)))
@@ -1604,7 +1637,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
            (--reduce-from (apply #'add-closure acc it) acc)))))
 
 (defun org-sql--insert-alist-add-headline (acc hstate)
-  "Add MQL-insert the current headline's metadata to ACC.
+  "Add row the current headline's metadata to ACC.
 HSTATE is a plist as returned by `org-sql--to-hstate'."
   (cl-flet
       ((effort-to-int
@@ -1650,7 +1683,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
         (org-sql--acc-incr :headline-id it)))))
 
 (defun org-sql--insert-alist-add-headlines (acc tree-config)
-  "Add MQL-insert headlines in TREE-CONFIG to ACC.
+  "Add row headlines in TREE-CONFIG to ACC.
 TREE-CONFIG is a list given by `org-sql--to-tree-config'."
   (-let (((&plist :headlines) tree-config))
     (cl-labels
@@ -1668,7 +1701,7 @@ TREE-CONFIG is a list given by `org-sql--to-tree-config'."
       (--reduce-from (add-headline acc nil it) acc headlines))))
 
 (defun org-sql--insert-alist-add-file-tags (acc tree-config)
-  "Add MQL-insert for each file tag in file to ACC.
+  "Add row for each file tag in file to ACC.
 TREE-CONFIG is a list given by `org-sql--to-tree-config'."
   (-let (((&plist :tree-hash :top-section) tree-config))
     (cl-flet
@@ -1684,7 +1717,7 @@ TREE-CONFIG is a list given by `org-sql--to-tree-config'."
            (-reduce-from #'add-tag acc)))))
 
 (defun org-sql--insert-alist-add-file-properties (acc tree-config)
-  "Add MQL-insert for each file property in file to ACC.
+  "Add row for each file property in file to ACC.
 TREE-CONFIG is a list given by `org-sql--to-tree-config'."
   (-let (((&plist :tree-hash :top-section) tree-config))
     (cl-flet
@@ -1703,7 +1736,7 @@ TREE-CONFIG is a list given by `org-sql--to-tree-config'."
            (-reduce-from #'add-property acc)))))
 
 (defun org-sql--insert-alist-add-tree-hash (acc tree-config)
-  "Add MQL-insert for file in TREE-CONFIG to ACC.
+  "Add row for TREE-CONFIG to ACC.
 TREE-CONFIG is a list given by `org-sql--to-tree-config'."
   (-let (((&plist :tree-hash :size :lines) tree-config))
     (org-sql--insert-alist-add acc tree_hashes
@@ -1712,6 +1745,10 @@ TREE-CONFIG is a list given by `org-sql--to-tree-config'."
       :tree_lines lines)))
 
 (defun org-sql--insert-alist-add-file-metadata* (acc path hash attrs)
+  "Add row for a file and its metadata to ACC.
+PATH is a path to the file to insert, HASH is the MD5 of the
+file, and ATTRS is the list of attributes returned by
+`file-attributes' for the file."
   (org-sql--insert-alist-add acc file_metadata
     :tree_hash hash
     :file_path path
@@ -1726,14 +1763,14 @@ TREE-CONFIG is a list given by `org-sql--to-tree-config'."
     :file_modes (file-attribute-modes attrs)))
 
 (defun org-sql--insert-alist-add-file-metadata (acc tree-config)
-  "Add MQL-insert for file in TREE-CONFIG to ACC.
+  "Add row for file in TREE-CONFIG to ACC.
 TREE-CONFIG is a list given by `org-sql--to-tree-config'."
   (-let (((&plist :paths-with-attributes :tree-hash) tree-config))
     (--reduce-from (org-sql--insert-alist-add-file-metadata* acc (car it) tree-hash (cdr it))
                    acc paths-with-attributes)))
 
 (defun org-sql--tree-config-to-insert-alist (acc tree-config)
-  "Return all MQL-inserts for TREE-CONFIG.
+  "Add all rows to be inserted from TREE-CONFIG to ACC.
 TREE-CONFIG is a list given by `org-sql--to-tree-config'."
   (-> acc
       (org-sql--insert-alist-add-tree-hash tree-config)
@@ -1745,6 +1782,36 @@ TREE-CONFIG is a list given by `org-sql--to-tree-config'."
 ;; hashpathpair function
 
 (defun org-sql--partition-hashpathpairs (disk-hashpathpairs db-hashpathpairs)
+  "Group hashpathpairs according to operations to be performed.
+
+DISK-HASHPATHPAIRS and DB-HASHPATHPAIRS are lists of cons cells
+like (FILE-HASH . FILE-PATH) located on the disk and in the
+database respectively. Return a list with these cons cells
+grouped like (FILES-TO-INSERT PATHS-TO-INSERT PATHS-TO-DELETE
+FILES-TO-DELETE); these represent the operations that are to
+be taken on these particular files.
+
+Criteria for grouping each pair is as follows.
+- any pairs that are on disk and in the db are ignored (eg don't
+  go into any of the four buckets above)
+- a pair from disk that has a matching hash in the db will be
+  grouped with PATHS-TO-INSERT
+- a pair from the db that has a matching hash on disk will be
+  grouped with PATHS-TO-DELETE
+- a hash that exists on disk but not the db will be added to
+  FILES-TO-INSERT
+- a hash that exists in the db but not on disk will be added to
+  FILES-TO-DELETE
+
+Note that in terms of common file manipulations one might do,
+PATHS-TO-INSERT and PATHS-TO-DELETE represent when a file is
+renamed (the contents of the file don't change, so the hash
+doesn't change). FILES-TO-INSERT and FILES-TO-DELETE are
+self-explanatory, but note that if a file is \"modified\" (eg the
+contents change but the path does not) it will be delete from the
+database and reinserted (so the new file will be in
+FILES-TO-INSERT and the old will be in FILES-TO-DELETE). There is
+no efficient way to \"update\" a file in place in the database."
   (let (hash-in-db paths-dont-match files-to-insert paths-to-insert
                    paths-to-delete cur-disk cur-db n)
     (while disk-hashpathpairs
@@ -1774,9 +1841,13 @@ TREE-CONFIG is a list given by `org-sql--to-tree-config'."
       (files-to-delete ,@db-hashpathpairs))))
 
 (defun org-sql--group-hashpathpairs-by-hash (hashpathpairs)
+  "Return a list of HASHPATHPAIRS grouped by hash.
+The returned list will be like ((HASH1 PATH1a PATH1b ...) (HASH2
+PATH2a PATH2a ...))."
   (--map (cons (car it) (-map #'cdr (cdr it))) (-group-by #'car hashpathpairs)))
 
 (defun org-sql--hashpathpairs-to-hashes (hashpathpairs)
+  "Return a list of just the hashes from HASHPATHPAIRS."
   (-map #'car hashpathpairs))
 
 ;;; SQL formatting functions
@@ -1784,8 +1855,9 @@ TREE-CONFIG is a list given by `org-sql--to-tree-config'."
 ;; value formatters
 
 (defun org-sql--compile-value-format-function (config type)
-  "Return SQL value formatting function.
-The returned function will depend on the MODE and TYPE."
+  "Return SQL value formatting function for TYPE.
+The function will be compiled according to CONFIG, a list like
+`org-sql-db-config'."
   (let ((formatter-form
          (org-sql--case-type type
            (boolean
@@ -1818,6 +1890,10 @@ The returned function will depend on the MODE and TYPE."
     `(lambda (it) (if it ,formatter-form "NULL"))))
 
 (defun org-sql--get-column-formatter (config tbl-name column-name)
+  "Return the formatter for COLUMN-NAME in TBL-NAME.
+The formatter will be compiled according to
+`org-sql--compile-value-format-function' where CONFIG has the
+same meaning as it has here."
   (let ((column (->> org-sql--table-alist
                      (alist-get tbl-name)
                      (alist-get 'columns)
@@ -1825,6 +1901,10 @@ The returned function will depend on the MODE and TYPE."
     (org-sql--compile-value-format-function config (plist-get column :type))))
 
 (defun org-sql--get-column-formatters (config tbl-name)
+  "Return the formatters for all columns (in order) in TBL-NAME.
+The formatters will be compiled according to
+`org-sql--compile-value-format-function' where CONFIG has the
+same meaning as it has here."
   (->> org-sql--table-alist
        (alist-get tbl-name)
        (alist-get 'columns)
@@ -1858,6 +1938,9 @@ The returned function will depend on the MODE and TYPE."
 ;; create table
 
 (defun org-sql--get-enum-type-names (config table-alist)
+  "Return the names of the enum types for TABLE-ALIST.
+CONFIG is a list like `org-sql-db-config'. Note that these are
+the type names that will be used in \"CREATE TYPE\" statements."
   (cl-flet
       ((flatten
         (tbl)
@@ -1878,6 +1961,8 @@ The returned function will depend on the MODE and TYPE."
          (-uniq))))
 
 (defun org-sql--format-create-enum-types (config table-alist)
+  "Return string of CREATE TYPE statements for TABLE-ALIST.
+CONFIG is a list like `org-sql-db-config'."
   (->> (org-sql--get-enum-type-names config table-alist)
        (--map (format "CREATE TYPE %s AS ENUM (%s);"
                       (car it)
@@ -2041,6 +2126,10 @@ CONFIG is the `org-sql-db-config' list."
 ;; insert
 
 (defun org-sql--format-bulk-insert-for-table (config table-bulk-insert)
+  "Return a multi-row INSERT statement for a table.
+TABLE-BULK-INSERT is a list like one cell of
+`org-sql--empty-insert-alist' that has been populated with rows
+to insert. CONFIG is a list like `org-sql-db-config'."
   (cl-flet
       ((format-row
         (formatters row)
@@ -2060,6 +2149,10 @@ CONFIG is the `org-sql-db-config' list."
            (format "INSERT INTO %s (%s) VALUES %s;" tbl-name* columns)))))
 
 (defun org-sql--format-bulk-inserts (config insert-alist)
+  "Return multi-row INSERT statements.
+INSERT-ALIST is an alist like `org-sql--empty-insert-alist' that
+has been populated with rows to insert. CONFIG is a list like
+`org-sql-db-config'."
   (->> (-filter #'cdr insert-alist)
        (--map (org-sql--format-bulk-insert-for-table config it))
        (s-join "")))
@@ -2067,6 +2160,10 @@ CONFIG is the `org-sql-db-config' list."
 ;; select
 
 (defun org-sql--format-select-statement (config columns tbl-name)
+  "Return a simple SELECT statement.
+TBL-NAME is the table name to select from and COLUMNS are the
+columns to return (nil will \"SELECT *\"). CONFIG is a list like
+`org-sql-db-config'."
   (let ((tbl-name* (org-sql--format-table-name config tbl-name))
         (columns* (or (-some->> (-map #'org-sql--format-column-name columns)
                         (s-join ","))
@@ -2076,6 +2173,10 @@ CONFIG is the `org-sql-db-config' list."
 ;; bulk deletes
 
 (defun org-sql--format-path-delete-statement (config hashpathpairs)
+  "Return a DELETE statement for file paths.
+HASHPATHPAIRS are a list of cons cells like (FILE-HASH .
+FILE-PATH) which are to be deleted. CONFIG is a list like
+`org-sql-db-config'."
   (when hashpathpairs
     (cl-flet
         ((format-where-clause
@@ -2093,7 +2194,11 @@ CONFIG is the `org-sql-db-config' list."
              (s-join " OR ")
              (format "DELETE FROM %s WHERE %s;" tbl-name*))))))
 
-(defun org-sql--format-file-delete-statement (config hashpathpairs)
+(defun org-sql--format-tree-delete-statement (config hashpathpairs)
+  "Return a DELETE statement for an org-tree.
+HASHPATHPAIRS are a list of cons cells like (FILE-HASH .
+FILE-PATH) which are to be deleted. CONFIG is a list like
+`org-sql-db-config'."
   (when hashpathpairs
     (let ((tbl-name* (org-sql--format-table-name config 'tree_hashes))
           (fmtr (org-sql--get-column-formatter config 'tree_hashes :tree_hash)))
@@ -2105,6 +2210,13 @@ CONFIG is the `org-sql-db-config' list."
 ;; bulk inserts
 
 (defun org-sql--init-acc ()
+  "Return an initialized accumulator for bulk insertion.
+The accumulator will be a plist. The :inserts key will hold the
+alist (initialized with `org-sql--empty-insert-alist') which will
+hold the rows to be inserted. The remaining keys will hold the ID
+surrogate key values for corresponding columns in their
+respective tables (which are :headline-id, :timestamp-id,
+:entry-id, :link-id, :property-id, and :clock-id)."
   (list :inserts (-clone org-sql--empty-insert-alist)
         :headline-id 1
         :timestamp-id 1
@@ -2114,15 +2226,23 @@ CONFIG is the `org-sql-db-config' list."
         :clock-id 1))
 
 (defun org-sql--acc-get (key acc)
+  "Return KEY from ACC."
   (plist-get acc key))
 
 (defun org-sql--acc-incr (key acc)
+  "Return ACC with 1 added to KEY."
   (plist-put acc key (1+ (plist-get acc key))))
 
 (defun org-sql--acc-reset (key acc)
+  "Return ACC with KEY set to 1."
   (plist-put acc key 0))
 
 (defun org-sql--format-insert-statements (config paths-to-insert files-to-insert)
+  "Return list of multi-row INSERT statements for paths and trees.
+CONFIG is a list like `org-sql-db-config'. PATHS-TO-INSERT is a
+plist like (:hash FILE-HASH :path FILE-HASH :attrs
+FILE-ATTRIBUTES) and FILES-TO-INSERT is a list of TREE-CONFIG
+lists."
   (let* ((acc (org-sql--init-acc))
          (acc* (--reduce-from (org-sql--tree-config-to-insert-alist acc it) acc files-to-insert)))
     (--> paths-to-insert
@@ -2135,10 +2255,9 @@ CONFIG is the `org-sql-db-config' list."
 ;; transactions
 
 (defun org-sql--format-sql-transaction (config sql-statements)
-  "Return SQL string for a transaction.
+  "Return formatted SQL transaction.
 SQL-STATEMENTS is a list of SQL statements to be included in the
-
-transaction. MODE is the SQL mode."
+transaction. CONFIG is a list like `org-sql-db-config'."
   (let ((fmt (org-sql--case-mode config
                (sqlite "PRAGMA foreign_keys = ON;BEGIN;%sCOMMIT;")
                ((mysql pgsql) "BEGIN;%sCOMMIT;")
@@ -2162,14 +2281,16 @@ be run otherwise. In either case, OUT will be bound to the symbol
        (if (= 0 ,r) ,success-form ,error-form))))
 
 (defmacro org-sql--on-success* (first-form &rest success-forms)
-  "Run form on successful exit code.
+  "Run SUCCESS-FORMS on successful exit code.
 This is like `org-sql--on-success' but with '(error it-out)'
-supplied for ERROR-FORM. FIRST-FORM and SUCCESS-FORM have the
-same meaning."
+supplied for ERROR-FORM. FIRST-FORM has the same meaning."
   (declare (indent 1))
   `(org-sql--on-success ,first-form (progn ,@success-forms) (error it-out)))
 
-(defun org-org-sql--get-drop-table-statements (config)
+(defun org-sql--get-drop-table-statements (config)
+  "Return a list of DROP TABLE statements.
+These statements will drop all tables required for org-sql.
+CONFIG is a list like `org-sql-db-config'."
   (org-sql--case-mode config
     (mysql
      (list "SET FOREIGN_KEY_CHECKS = 0;"
@@ -2211,7 +2332,8 @@ same meaning."
 
 (defun org-sql--run-command (path args async)
   "Execute PATH with ARGS.
-Return a cons cell like (RETURNCODE . OUTPUT)."
+Return a cons cell like (RETURNCODE . OUTPUT). IF ASYNC is t, run
+the command at PATH in an asynchronous process."
   (if (not async) (org-sql--run-command* path nil args)
       (make-process :command (cons path args)
                     :buffer "*Org-SQL*"
@@ -2228,7 +2350,11 @@ Return a cons cell like (RETURNCODE . OUTPUT)."
 ;;; hashpathpair -> tree-config
 
 (defun org-sql--hashpathpair-get-tree-config (tree-hash file-paths)
-  (let ((paths-with-attributes (--map (cons it (file-attributes it 'integer)) file-paths)))
+  "Return tree-config for TREE-HASH and FILE-PATHS.
+Returned list will be constructed using
+`org-sql--to-tree-config'."
+  (let ((paths-with-attributes (--map (cons it (file-attributes it 'integer))
+                                      file-paths)))
     ;; just pick the first file path to open
     (with-current-buffer (find-file-noselect (car file-paths) t)
       (let ((tree (org-element-parse-buffer))
@@ -2296,7 +2422,7 @@ state as the orgfiles on disk."
                             :attrs (file-attributes (cdr it)))
                       pi)))
     (list (org-sql--format-path-delete-statement org-sql-db-config pd)
-          (org-sql--format-file-delete-statement org-sql-db-config fd)
+          (org-sql--format-tree-delete-statement org-sql-db-config fd)
           (->> (org-sql--group-hashpathpairs-by-hash fi)
                (--map (org-sql--hashpathpair-get-tree-config (car it) (cdr it)))
                (org-sql--format-insert-statements org-sql-db-config pi*)))))
@@ -2311,6 +2437,11 @@ state as the orgfiles on disk."
 ;;; SQL command wrappers
 
 (defun org-sql--append-process-environment (env &rest pairs)
+  "Append ENV and PAIRS to the current environment.
+ENV is a list like ((VAR VAL) ...) and PAIRS is a list like (VAR1
+VAL1 VAR2 VAL2) where VAR is an env var name and VAL is the value
+to assign it. Return these appended to the current value of
+`process-environment'."
   (declare (indent 1))
   (let ((env* (--map (format (format "%s=%s" (car it) (cadr it))) env)))
     (->> (-partition 2 pairs)
@@ -2319,6 +2450,9 @@ state as the orgfiles on disk."
          (append process-environment env*))))
 
 (defun org-sql--exec-mysql-command-nodb (fargs async)
+  "Run the mysql client with FARGS.
+If ASYNC is t, the client will be run in an asynchronous
+process."
   (org-sql--with-config-keys (:hostname :port :username :password :args :env
                                         :defaults-file :defaults-extra-file)
       org-sql-db-config
@@ -2342,8 +2476,9 @@ state as the orgfiles on disk."
       (org-sql--run-command org-sql--mysql-exe all-args async))))
 
 (defun org-sql--exec-postgres-command-nodb (fargs async)
-  "Execute a postgres command with ARGS.
-CONFIG-KEYS is a list like `org-sql-db-config'."
+  "Run the postgres client with FARGS.
+If ASYNC is t, the client will be run in an asynchronous
+process."
   (org-sql--with-config-keys (:hostname :port :username :password :args :env
                                         :service-file :pass-file)
       org-sql-db-config
@@ -2366,6 +2501,9 @@ CONFIG-KEYS is a list like `org-sql-db-config'."
       (org-sql--run-command org-sql--psql-exe all-args async))))
 
 (defun org-sql--exec-sqlserver-command-nodb (fargs async)
+  "Run the sql-server client with FARGS.
+If ASYNC is t, the client will be run in an asynchronous
+process."
   (org-sql--with-config-keys (:server :username :password :args :env)
       org-sql-db-config
     (let ((all-args (append
@@ -2382,18 +2520,26 @@ CONFIG-KEYS is a list like `org-sql-db-config'."
       (org-sql--run-command org-sql--sqlserver-exe all-args async))))
 
 (defun org-sql--exec-sqlite-command (args async)
-  "Execute a sqlite command with ARGS.
-CONFIG is the plist component if `org-sql-db-config'."
+  "Run the sqlite client with ARGS.
+If ASYNC is t, the client will be run in an asynchronous
+process."
   (org-sql--with-config-keys (:path) org-sql-db-config
     (if (not path) (error "No path specified")
       (org-sql--run-command org-sql--sqlite-exe (cons path args) async))))
 
+;; TODO this is the only db that requires a command like this?
 (defun org-sql--exec-sqlserver-command (args async)
+  "Run the sql-server client with ARGS in the configured database.
+If ASYNC is t, the client will be run in an asynchronous
+process."
   (org-sql--with-config-keys (:database) org-sql-db-config
     (if (not database) (error "No database specified")
       (org-sql--exec-sqlserver-command-nodb `("-d" ,database ,@args) async))))
 
 (defun org-sql--exec-command-in-db (args async)
+  "Run the configured client in the configured database.
+ARGS is a list of arguments to be sent to the client. If ASYNC is
+t, the client will be run in an asynchronous process."
   (cl-flet
       ((send
         (fun flag key args async)
@@ -2410,29 +2556,28 @@ CONFIG is the plist component if `org-sql-db-config'."
     (sqlserver
      (send #'org-sql--exec-sqlserver-command-nodb "-d" :database args async)))))
 
-(defun org-sql--send-sql-file (path async)
-  (org-sql--case-mode org-sql-db-config
-    (mysql
-     (org-sql-send-sql (format "source %s" path) async))
-    (pgsql
-     (org-sql-send-sql (format "\\i %s" path) async))
-    (sqlite
-     (org-sql-send-sql (format ".read %s" path) async))
-    (sqlserver
-     ;; I think ":r tmp-path" should work here to make this analogous
-     ;; with the others
-     (org-sql--exec-sqlserver-command `("-i" ,path) async))))
-
-(defun org-sql--send-sql* (sql-cmd async)
-  "Execute SQL-CMD as a separate file input.
-The database connection will be handled transparently."
+(defun org-sql--send-sql-file (sql-cmd async)
+  "Send SQL-CMD to the configured client.
+SQL-CMD will be saved in a temporary file and sent to client from
+there. If ASYNC is t, the client will be run in an asynchronous
+process."
   (-let ((tmp-path (->> (round (float-time))
                         (format "%sorg-sql-cmd-%s" (temporary-file-directory))))
          (sql-cmd (org-sql--case-mode org-sql-db-config
                     ((mysql pgsql sqlite) sql-cmd)
                     (sqlserver (format "set nocount on; %s" sql-cmd)))))
     (f-write sql-cmd 'utf-8 tmp-path)
-    (let ((res (org-sql--send-sql-file tmp-path async)))
+    (let ((res (org-sql--case-mode org-sql-db-config
+                 (mysql
+                  (org-sql-send-sql (format "source %s" tmp-path) async))
+                 (pgsql
+                  (org-sql-send-sql (format "\\i %s" tmp-path) async))
+                 (sqlite
+                  (org-sql-send-sql (format ".read %s" tmp-path) async))
+                 (sqlserver
+                  ;; I think ":r tmp-path" should work here to make this
+                  ;; analogous with the others
+                  (org-sql--exec-sqlserver-command `("-i" ,tmp-path) async)))))
       (if (not async)
           (f-delete tmp-path)
         (if (process-live-p res)
@@ -2441,10 +2586,14 @@ The database connection will be handled transparently."
       res)))
 
 (defun org-sql--send-transaction (statements)
+  "Send STATEMENTS to the configured database client.
+STATEMENTS will be formated to a single transaction (eg with
+\"BEGIN; ... COMMIT;\")."
   (->> (org-sql--format-sql-transaction org-sql-db-config statements)
        (org-sql-send-sql)))
 
 (defun org-sql--pull-hook (key)
+  "Return the hooks list for KEY."
   (-some->> (org-sql--get-config-key key org-sql-db-config)
     ;; t = INSIDE
     (--map (pcase it
@@ -2458,25 +2607,34 @@ The database connection will be handled transparently."
     (--map (-map #'cdr it))))
 
 (defun org-sql--append-hook (stmts key)
+  "Return STMTS with statements from the hooks defined by KEY."
   (-let (((&alist 'append a 'independent i) (org-sql--pull-hook key)))
     (list (append stmts a) (list i))))
 
 (defun org-sql--send-transaction-with-hook (pre-key post-key trans-stmts)
+  "Send TRANS-STMTS to the configured database client.
+STATEMENTS will be formated to a single transaction (eg with
+\"BEGIN; ... COMMIT;\"). Additionally, any hook statements found
+using PRE-KEY and POST-KEY will be appended before or after
+TRANS-STATEMENTS (either inside or outside the transaction
+boundaries depending on the hook)."
   (-let* (((pre-in-trans before-trans) (-some-> pre-key (org-sql--pull-hook)))
           ((post-in-trans after-trans) (-some-> post-key (org-sql--pull-hook)))
           (ts (->> (append pre-in-trans trans-stmts post-in-trans)
                    (org-sql--format-sql-transaction org-sql-db-config)))
           (bs (-some->> before-trans (s-join "")))
           (as (-some->> after-trans (s-join ""))))
-    (org-sql--send-sql* (concat bs ts as) org-sql-async)))
+    (org-sql--send-sql-file (concat bs ts as) org-sql-async)))
 
 ;;;
 ;;; Public API
 ;;;
 
 (defun org-sql-send-sql (sql-cmd &optional async)
-  "Execute SQL-CMD.
-The database connection will be handled transparently."
+  "Execute SQL-CMD in the configured database.
+See `org-sql-db-config' for how to chose and configure the
+database connection. If ASYNC is t, the client command will be
+spawned in an asynchronous process."
   (let ((args (org-sql--case-mode org-sql-db-config
                 (mysql `("-e" ,sql-cmd))
                 (pgsql `("-c" ,sql-cmd))
@@ -2504,14 +2662,26 @@ The database connection will be handled transparently."
 ;; table layer
 
 (defun org-sql-create-tables ()
+  "Create required tables in the database.
+See `org-sql-db-config' for how to configure the database
+connection."
   (->> (org-sql--format-create-tables org-sql-db-config org-sql--table-alist)
        (org-sql--send-transaction)))
 
 (defun org-sql-drop-tables ()
-  (->> (org-org-sql--get-drop-table-statements org-sql-db-config)
+  "Drop all tables in the database pertinent to org-sql.
+See `org-sql-db-config' for how to configure the database
+connection."
+  (->> (org-sql--get-drop-table-statements org-sql-db-config)
        (org-sql--send-transaction)))
 
 (defun org-sql-list-tables ()
+  "List all tables in the database.
+See `org-sql-db-config' for how to configure the database
+connection. Note this will return all tables in the database, not
+just those necessarily dedicated to org-sql. If the case of
+postgres and sql-server, only return tables in the default
+schema (or the schema defined by the :schema keyword)."
   (-let (((sql-cmd parse-fun)
           (org-sql--case-mode org-sql-db-config
             (mysql
@@ -2551,6 +2721,11 @@ The database connection will be handled transparently."
 ;; database layer
 
 (defun org-sql-create-db ()
+  "Create the org-sql database.
+See `org-sql-db-config' for how to configure the database
+connection. Note that this will error on all by SQLite since
+org-sql does not assume you have full root privileges on the
+server implementations."
   (org-sql--case-mode org-sql-db-config
     ((mysql pgsql sqlserver)
      (error "Must manually create database using admin privileges"))
@@ -2562,6 +2737,11 @@ The database connection will be handled transparently."
        '(0 . "")))))
 
 (defun org-sql-drop-db ()
+  "Drop the org-sql database.
+See `org-sql-db-config' for how to configure the database
+connection. Note that this will error on all by SQLite since
+org-sql does not assume you have full root privileges on the
+server implementations."
   (org-sql--case-mode org-sql-db-config
     ((mysql pgsql sqlserver)
      (error "Must manually drop database using admin privileges"))
@@ -2572,6 +2752,9 @@ The database connection will be handled transparently."
        '(0 . "")))))
 
 (defun org-sql-db-exists ()
+  "Return t if the configured database exists.
+See `org-sql-db-config' for how to configure the database
+connection."
   (org-sql--case-mode org-sql-db-config
     (mysql
      (org-sql--with-config-keys (:database) org-sql-db-config
@@ -2595,6 +2778,28 @@ The database connection will be handled transparently."
 ;; composite admin functions
 
 (defun org-sql-init-db ()
+  "Initialize the org-sql database.
+This means the database will be created (in the case of SQLite if
+it does not already exist) and the required tables will be
+created.
+
+Note that in the case of all but SQLite, additional
+steps outside this package is required to set up the database
+itself, the schema (in the case of Postgres and SQL-Server), and
+permissions/access. In the case of SQLite, the only permission required
+is the filesystem permissions to create the database file.
+
+Permissions required: CREATE TABLE (and CREATE TYPE in the case
+of Postgres)
+
+See `org-sql-db-config' for how to set up the database
+connection. Set the ':post-init-hooks' key in the config to run
+SQL commands for additional setup after the core initialization
+this function provides (eg setting up indexes, triggers, etc as
+desired).
+
+Setting `org-sql-async' to t will allow this function's client
+process to run asynchronously."
   (org-sql--case-mode org-sql-db-config
     ((mysql pgsql sqlserver)
      nil)
@@ -2604,6 +2809,28 @@ The database connection will be handled transparently."
        (org-sql--send-transaction-with-hook nil :post-init-hooks)))
 
 (defun org-sql-reset-db ()
+  "Initialize the org-sql database.
+In the case of SQLite, this will delete the database file, create
+a new database, and populate it with the required tables. In all
+other cases, this function will drop all tables pertinent to
+org-sql and create them again.
+
+Permissions required: DROP TABLE, CREATE TABLE (also ALTER TABLE
+in the case of SQL-Server to drop the foreign key constraints)
+
+See `org-sql-db-config' for how to set up the database
+connection. Set the ':pre-reset-hooks' key in the config to run
+SQL commands to teardown any other customized database features
+as required (presumably those created with ':post-init-hooks')
+before this function's core reset SQL commands are run. Note that
+all the DROP TABLE statements are run with CASCADE where
+appropriate, so any triggers or indexes attached to the org-sql
+tables will be dropped assuming the database implementation
+allows this and setting additional explicit DROP for this key
+might not be necessary.
+
+Setting `org-sql-async' to t will allow this function's client
+process to run asynchronously."
   (org-sql--case-mode org-sql-db-config
     ((mysql pgsql sqlserver)
      nil)
@@ -2612,7 +2839,7 @@ The database connection will be handled transparently."
   (let ((drop-tbl-stmts
          (org-sql--case-mode org-sql-db-config
            ((mysql pgsql sqlserver)
-            (org-org-sql--get-drop-table-statements org-sql-db-config))
+            (org-sql--get-drop-table-statements org-sql-db-config))
            (sqlite nil)))
         (init-stmts
          (org-sql--format-create-tables org-sql-db-config org-sql--table-alist)))
@@ -2627,6 +2854,18 @@ The database connection will be handled transparently."
 ;; tables
 
 (defun org-sql-dump-table (tbl-name &optional as-plist)
+  "Return contents of table TBL-NAME.
+
+The returned contents will be a list of lists where each list is
+a row in the table and each value in the list is the value in
+each column of that row in the order it appears in the database.
+If AS-PLIST is t, each row list will be a plist where the keys
+are the columns names like :column-name.
+
+Permissions required: SELECT
+
+See `org-sql-db-config' for how to configure the database
+connection."
   (let ((cmd (org-sql--format-select-statement org-sql-db-config nil tbl-name)))
     (org-sql--on-success* (org-sql-send-sql cmd)
       (if as-plist
@@ -2637,12 +2876,40 @@ The database connection will be handled transparently."
         (org-sql--parse-output-to-list org-sql-db-config it-out)))))
 
 (defun org-sql-update-db ()
+  "Update the org-sql database.
+
+The database will be updated to reflect the current state of
+all org-file on disk for which there is an entry in `org-sql-files'.
+
+See `org-sql-db-config' for how to set up the database
+connection. Set the ':post-update-hooks' key in the config to run
+additional SQL commands after the update finishes (for example,
+running a procedure based on the new data).
+
+Permissions required: INSERT, DELETE
+
+Setting `org-sql-async' to t will allow this function's client
+process to run asynchronously."
   (let ((inhibit-message t))
     (org-save-all-org-buffers))
   (->> (org-sql--get-transactions)
        (org-sql--send-transaction-with-hook nil :post-update-hooks)))
 
 (defun org-sql-clear-db ()
+  "Clear the org-sql database.
+
+All data will be deleted from the tables, but the tables
+themselves will not be deleted.
+
+See `org-sql-db-config' for how to set up the database
+connection. Set the ':post-clear-hooks' key in the config to run
+additional SQL commands after the update finishes (for example,
+running a procedure based on the new data).
+
+Permissions required: DELETE
+
+Setting `org-sql-async' to t will allow this function's client
+process to run asynchronously."
   (->> (org-sql--format-table-name org-sql-db-config 'tree_hashes)
        (format "DELETE FROM %s;")
        (list)
