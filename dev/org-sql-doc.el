@@ -17,24 +17,9 @@
 
 ;;; Commentary:
 
-;; These functions build parts of the document for org-sql. The readme template
-;; is used as a base, and information that depends precisely on code is compiled
-;; to documentation here
+;;; These are functions to build the ERDs and table descriptions
 
 ;;; Code:
-
-(defvar org-sql-dev-path
-  (when load-file-name
-    (directory-file-name (file-name-directory load-file-name)))
-  "Path to development directory.")
-
-(defvar org-sql-dev-root-path
-  (when org-sql-dev-path
-    (directory-file-name (file-name-directory org-sql-dev-path)))
-  "Path to root directory.")
-
-(add-to-list 'load-path org-sql-dev-root-path)
-(add-to-list 'load-path org-sql-dev-path)
 
 (require 'package)
 (require 'dash)
@@ -42,9 +27,10 @@
 (require 'f)
 (require 'org-sql)
 
-;;;
-;;; make entity relationship diagrams
-;;;
+(defconst org-sql-doc-dir "doc"
+  "The location of the doc files")
+
+;;; entity relationship diagrams
 
 (defun org-sql-er-format-column (pks fks config column)
   (-let* (((name . (&plist :type :constraints)) column)
@@ -122,7 +108,7 @@
                           (sqlite "sqlite")
                           (sqlserver "sqlserver"))
                         (format "erd-%s.pdf")
-                        (f-join "."))))
+                        (f-join org-sql-doc-dir))))
       (f-write-text er 'utf-8 inpath)
       (call-process "erd" nil nil nil "-i" inpath "-o" outpath)
       (f-delete inpath t))))
@@ -130,9 +116,7 @@
 (defun org-sql-create-all-erds ()
   (-each '((mysql) (pgsql) (sqlite) (sqlserver)) #'org-sql-write-erd))
 
-;;;
-;;; writing table descriptions
-;;;
+;;; table descriptions
 
 (defun org-sql-get-package-version ()
   "Get version of om package."
@@ -141,19 +125,6 @@
          (package-desc-version)
          (-map 'number-to-string)
          (s-join version-separator))))
-
-;; (let ((public-syms (alist-get 'public org-ml-dev-defined-names))
-;;       (example-syms (->> (-remove #'stringp org-ml-dev-examples-list)
-;;                          (-map #'car))))
-;;   (-some->> (-difference public-syms example-syms)
-;;             (-map #'symbol-name)
-;;             (--remove (s-ends-with? "*" it))
-;;             (--remove (s-starts-with? "org-ml-update-this-" it))
-;;             (--remove (s-starts-with? "org-ml-parse-this-" it))
-;;             (--map (format "  %s" it))
-;;             (s-join "\n")
-;;             (format "The following functions don't have examples:\n%s")
-;;             (print)))
 
 (defun org-sql-doc-format-quotes (s)
   (s-replace-regexp "`\\([^[:space:]]+\\)'" "`\\1`" s))
@@ -168,58 +139,23 @@
             (rest* (s-join ", " rest)))
       (format "%s, or %s" rest* (car last)))))
 
-(defun org-sql-doc-format-foreign (column-name constraints-meta)
-  (cl-flet
-      ((find-format
-        (foreign-meta)
-        (-let (((&plist :ref :keys :parent-keys) foreign-meta))
-          (-some--> (--find-index (eq it column-name) keys)
-            (nth it parent-keys)
-            (org-sql--format-column-name it)
-            (format "%s - %s" it ref)))))
-    (->> (--filter (eq 'foreign (car it)) constraints-meta)
-         (--map (find-format (cdr it)))
-         (-non-nil)
-         (s-join ", "))))
-
-(defun org-sql-doc-format-type (mql-column)
-  (let ((sqlite-type (org-sql--format-create-tables-type '(sqlite) "" mql-column))
-        (postgres-type
-         (--> (org-sql--format-create-tables-type '(pgsql) "" mql-column)
-           (if (s-starts-with? "enum" it) "ENUM" it)))
-        (mysql-type (org-sql--format-create-tables-type '(mysql) "" mql-column))
-        (sql-server-type (org-sql--format-create-tables-type '(sqlserver) "" mql-column)))
-    (format "%s / %s / %s / %s" mysql-type postgres-type sqlite-type sql-server-type)))
-
 (defun org-sql-doc-format-column (column-meta constraints-meta)
   (-let* (((column-name . (&plist :desc :type :constraints :allowed)) column-meta)
           ((&alist 'primary) constraints-meta)
           (primary-keys (plist-get primary :keys))
           (column-name* (org-sql--format-column-name column-name))
-          (is-primary (if (memq column-name primary-keys) "x" ""))
-          (null-allowed (if (or (memq 'notnull constraints)
-                                (memq column-name primary-keys))
-                            ""
-                          "x"))
-          (foreign (org-sql-doc-format-foreign column-name constraints-meta))
-          (type* (org-sql-doc-format-type column-meta))
           (allowed* (org-sql-doc-format-allowed-values allowed))
           (desc* (org-sql-doc-format-quotes desc))
           (desc-full (if allowed* (format "%s (%s)" desc* allowed*) desc*)))
-    (->> (list column-name* is-primary foreign null-allowed type* desc-full)
+    (->> (list column-name* desc-full)
          (org-sql-doc-format-table-row))))
 
 (defun org-sql-doc-format-schema (table-meta)
   (-let* (((table-name . meta) table-meta)
           ((&alist 'desc 'columns 'constraints) meta)
           (header (->> (symbol-name table-name)
-                       (format "### %s")))
-          (table-headers (list "Column"
-                               "Is Primary"
-                               "Foreign Keys (parent - table)"
-                               "NULL Allowed"
-                               "Type (MySQL / Postgres / SQLite / SQL-Server)"
-                               "Description"))
+                       (format "## %s")))
+          (table-headers (list "Column" "Description"))
           (table-line (->> (-repeat (length table-headers) " - ")
                            (org-sql-doc-format-table-row)))
           (table-headers* (org-sql-doc-format-table-row table-headers))
@@ -228,32 +164,21 @@
                            (s-join "\n"))))
     (->> (list header
                ""
-               desc
+               (s-join " " desc)
                ""
                table-headers*
                table-line
                table-rows)
          (s-join "\n"))))
 
-(defun goto-and-replace-all (s replacement)
-  (while (progn (goto-char (point-min)) (search-forward s nil t))
-    (delete-char (- (length s)))
-    (insert replacement)))
-
-(defun goto-and-remove (s)
-  (goto-char (point-min))
-  (search-forward s)
-  (delete-char (- (length s))))
-
 (defun create-docs-file ()
-  (with-temp-file "./README.md"
-    (insert-file-contents-literally "./readme-template.md")
+  (with-temp-file (f-join org-sql-doc-dir "table-descriptions.md")
+    (insert "# Table Descriptions\n\n")
 
-    (goto-and-remove "[[ schema-docs ]]")
     (insert (->> org-sql--table-alist
                  (-map #'org-sql-doc-format-schema)
                  (s-join "\n\n")))
 
-    (goto-and-replace-all "[[ version ]]" (org-sql-get-package-version))))
+    (insert (org-sql-get-package-version))))
 
 ;;; org-sql-doc.el ends here

@@ -9,7 +9,7 @@ test:
 	${MAKE} compile
 
 docs:
-	${CASK} exec ${EMACS} -Q -batch \
+	${CASK} exec ${EMACS} -Q -batch -L . \
        -l dev/org-sql-doc.el \
        -f create-docs-file \
        -f org-sql-create-all-erds

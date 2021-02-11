@@ -138,7 +138,7 @@ to store them. This is in addition to any properties specifified by
                   :entry_id '(:type integer) object notnull)))
       (defconst org-sql--table-alist
         `((tree_hashes
-           (desc . "Each row describes one org tree")
+           (desc "Each row stores the hash and size for org tree")
            (columns
             ,(tree-hash-col)
             (:tree_size :desc "number of characters of the org tree"
@@ -151,7 +151,8 @@ to store them. This is in addition to any properties specifified by
             (primary :keys (:tree_hash))))
 
           (file_metadata
-           (desc . "Each row stores filesystem metadata for one tracked org file")
+           (desc "Each row stores filesystem metadata for one tracked org file."
+                 "Note that one org-tree can have multiple paths pointing to it.")
            (columns
             (:file_path :desc "path to org file"
                         :type varchar
@@ -182,7 +183,7 @@ to store them. This is in addition to any properties specifified by
                      :cardinality many-to-one)))
 
           (headlines
-           (desc . "Each row stores one headline in a given org tree")
+           (desc "Each row stores one headline in a given org tree")
            (columns
             ,(headline-id-col)
             ,(tree-hash-col "headline" t)
@@ -195,15 +196,15 @@ to store them. This is in addition to any properties specifified by
                      :type integer)
             (:priority :desc "character value of the priority"
                        :type text)
-            (:stats_cookie_type :desc "type of the statistics cookie"
+            (:stats_cookie_type :desc "type of the statistics cookie (the \"[n/d]\" or \"[p%]\" at the end of some headlines)"
                                 :type enum
                                 :allowed (fraction percent))
-            (:stats_cookie_value :desc "value of the statistics cookie"
+            (:stats_cookie_value :desc "value of the statistics cookie (between 0 and 1)"
                                  :type real)
-            (:is_archived :desc "true if the headline has an archive tag"
+            (:is_archived :desc "true if the headline has an ARCHIVE tag"
                           :type boolean
                           :constraints (notnull))
-            (:is_commented :desc "true if the headline has a comment keyword"
+            (:is_commented :desc "true if the headline has a COMMENT keyword"
                            :type boolean
                            :constraints (notnull))
             (:content :desc "the headline contents"
@@ -217,7 +218,9 @@ to store them. This is in addition to any properties specifified by
                      :cardinality many-or-none-to-one)))
 
           (headline_closures
-           (desc . "Each row stores the ancestor and depth of a headline relationship")
+           (desc "Each row stores the ancestor and depth of a headline"
+                 "relationship. All headlines will have a 0-depth entry in which"
+                 "'parent_id' and 'headline_id' are equal.")
            (columns
             ,(headline-id-col)
             (:parent_id :desc "id of this headline's parent"
@@ -237,7 +240,9 @@ to store them. This is in addition to any properties specifified by
                      :cardinality many-to-one)))
 
           (timestamps
-           (desc . "Each row stores one timestamp")
+           (desc "Each row stores one timestamp. Any timestamps in this"
+                 "table that are not referenced in other tables are part of the"
+                 "headlines's contents (the part after the logbook")
            (columns
             ,(timestamp-id-col)
             ,(headline-id-col "timestamp" t)
@@ -266,7 +271,7 @@ to store them. This is in addition to any properties specifified by
                      :cardinality many-or-none-to-one)))
 
           (timestamp_warnings
-           (desc . "Each row stores specific information for a timestamp warning")
+           (desc "Each row stores the warning component for a timestamp")
            (columns
             ,(timestamp-id-col "warning")
             (:warning_value :desc "shift of this warning"
@@ -286,7 +291,7 @@ to store them. This is in addition to any properties specifified by
                      :cardinality one-or-none-to-one)))
           
           (timestamp_repeaters
-           (desc . "Each row stores specific information for a timestamp repeater")
+           (desc "Each row stores the repeater component for a timestamp")
            (columns
             ,(timestamp-id-col "repeater")
             (:repeater_value :desc "shift of this repeater"
@@ -306,7 +311,8 @@ to store them. This is in addition to any properties specifified by
                      :cardinality one-or-none-to-one)))
 
           (planning_entries
-           (desc . "Each row stores the metadata for headline planning timestamps.")
+           (desc "Each row stores the metadata for headline planning timestamps"
+                 "(the DEADLINE, SCHEDULED, or CLOSED parts).")
            (columns
             ,(headline-id-col "planning entry")
             (:planning_type :desc "the type of this planning entry"
@@ -324,7 +330,7 @@ to store them. This is in addition to any properties specifified by
                      :cardinality one-to-one)))
 
           (file_tags
-           (desc . "Each row stores one tag at the file level")
+           (desc "Each row stores one tag denoted by the \"#+FILETAGS\" keyword")
            (columns
             ,(tree-hash-col "tag" t)
             ,tag-col)
@@ -337,7 +343,10 @@ to store them. This is in addition to any properties specifified by
                      :cardinality many-or-none-to-one)))
 
           (headline_tags
-           (desc . "Each row stores one tag")
+           (desc "Each row stores one tag attached to a headline. This includes"
+                 "tags actively attached to a headlines as well as those in the"
+                 "\"ACHIVE_ITAGS\" property within archive files. The"
+                 "'is_inherited' field will only be TRUE for the latter.")
            (columns
             ,(headline-id-col "tag")
             ,tag-col
@@ -353,7 +362,9 @@ to store them. This is in addition to any properties specifified by
                      :cardinality many-or-none-to-one)))
 
           (properties
-           (desc . "Each row stores one property")
+           (desc "Each row stores one property. Note this includes properties"
+                 "under headlines as well as properties defined at the"
+                 "file-level using \"#+PROPERTY\"")
            (columns
             ,(tree-hash-col "property" t)
             ,property-id-col
@@ -372,7 +383,7 @@ to store them. This is in addition to any properties specifified by
                      :cardinality many-or-none-to-one)))
 
           (headline_properties
-           (desc . "Each row stores a property at the headline level")
+           (desc "Each row stores a property under a headline")
            (columns
             ,(headline-id-col "property" t)
             ,property-id-col)
@@ -390,7 +401,7 @@ to store them. This is in addition to any properties specifified by
                      :cardinality many-or-none-to-one)))
           
           (clocks
-           (desc . "Each row stores one clock entry")
+           (desc "Each row stores one clock entry.")
            (columns
             (:clock_id :desc "id of this clock"
                        :type integer)
@@ -410,7 +421,7 @@ to store them. This is in addition to any properties specifified by
                      :cardinality many-or-none-to-one)))
 
           (logbook_entries
-           (desc . "Each row stores one logbook entry (except for clocks)")
+           (desc "Each row stores one logbook entry (except for clocks).")
            (columns
             ,(entry-id-col)
             ,(headline-id-col "logbook entry" t)
@@ -431,7 +442,8 @@ to store them. This is in addition to any properties specifified by
                      :cardinality many-or-none-to-one)))
 
           (state_changes
-           (desc . "Each row stores additional metadata for a state change logbook entry")
+           (desc "Each row stores the new and old states for logbook entries"
+                 "of type 'state'.")
            (columns
             ,(entry-id-col "state change")
             (:state_old :desc "former todo state keyword"
@@ -449,7 +461,9 @@ to store them. This is in addition to any properties specifified by
                      :cardinality one-or-none-to-one)))
 
           (planning_changes
-           (desc . "Each row stores additional metadata for a planning change logbook entry")
+           (desc "Each row stores the former timestamp for logbook entries with"
+                 "type 'reschedule', 'delschedule', 'redeadline', and"
+                 "'deldeadline'")
            (columns
             ,(entry-id-col "planning change")
             (:timestamp_id :desc "id of the former timestamp"
@@ -469,7 +483,7 @@ to store them. This is in addition to any properties specifified by
                      :cardinality one-or-none-to-one)))
 
           (links
-           (desc . "Each row stores one link")
+           (desc "Each row stores one link")
            (columns
             (:link_id :desc "id of this link"
                       :type integer)
