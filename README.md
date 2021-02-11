@@ -307,13 +307,13 @@ be duplicated.
 
 ## Entity Relationship Diagrams
 
-[MySQL/MariaDB](doc/erd-mysql.pdf) 
+![MySQL/MariaDB](doc/erd-mysql.pdf) 
 
-[PostgreSQL](doc/erd-postgres.pdf) 
+![PostgreSQL](doc/erd-postgres.pdf) 
 
-[SQLite](doc/erd-sqlite.pdf) 
+![SQLite](doc/erd-sqlite.pdf) 
 
-[SQL Server](doc/erd-sql-server.pdf) 
+![SQL Server](doc/erd-sql-server.pdf) 
 
 ## Table Descriptions
 
