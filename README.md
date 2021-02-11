@@ -402,5 +402,5 @@ make docs
 
 # Acknowledgements
 
-The idea for this is based on ![John Kitchin's](http://kitchingroup.cheme.cmu.edu/blog/2017/01/03/Find-stuff-in-org-mode-anywhere/)
+The idea for this is based on [John Kitchin's](http://kitchingroup.cheme.cmu.edu/blog/2017/01/03/Find-stuff-in-org-mode-anywhere/)
 implementation, which uses `emacsql` as the SQL backend.
