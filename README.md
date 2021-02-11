@@ -171,35 +171,6 @@ environmental variable in the `:env` key (see above) to the path of a startup
 file which sets the password using the `"SQLCMDPASSWORD"` environmental
 variable.
 
-### Running custom SQL
-
-In addition to the database-specific keys above, there are four keys which can
-be used to execute arbitrary SQL commands (called 'hooks') on the `org-sql`
-database (within permissions obviously). This might be useful for setting up
-triggers, adding additional indexes, defining and/or running procedures, etc.
-
-The keys are:
-- `:post-init-hooks`: run after the commands `org-sql-init-db`,
-  `org-sql-reset-db` and `org-sql-user-reset`
-- `:post-update-hooks`: run after the commands `org-sql-push-to-db` and
-  `org-sql-user-push`.
-- `:post-clear-hooks`: run after the commands `org-sql-clear-db` and
-  `org-sql-user-clear-all`.
-- `:pre-reset-hooks`: run before the commands `org-sql-reset-db` and
-  `org-sql-user-reset`.
-
-The value of each hook key is a list of 2-membered lists, where each 2-membered
-list is one 'hook'. The car of each hook is one of `sql`, `sql+`, `file`, or
-`file+`. The `sql(+)` keys denote that the cadr of the hook is a SQL statement
-to be executed. The `file(+)` keys denote that the cadr is a path to a SQL file
-to be executated.
-
-The difference between the `+` and non-`+` versions of these is that the former
-will be run inside the transaction of the SQL statements belonging to the
-function modified by the key. Note that all the functions listed above perform
-their job by sending a single transaction with `BEGIN` and `COMMIT` (and `+`
-means that the extra SQL command will be inside the `BEGIN/COMMIT` block).
-
 ## Database Preparation
 
 Since `org-sql` cannot assume it has superuser access to your database and/or
@@ -226,6 +197,23 @@ those tables on this schema.
 The database server must already exist and the database defined by the
 `:database` key must also already exist. The user used by `org-sql` to connect
 must have permissions to create tables and insert/delete data from said tables.
+
+## Database Customization
+
+Org-SQL by default will only create tables (with pimary and foreign keys) and
+insert/delete data in these tables. If you want to do anything beyond this such
+as creating additional indexes, adding triggers, defining and calling
+procedures, etc one can do so through 'hooks'. These are variables that hold
+additional SQL statements that will be run along with the functions in Org-SQL.
+
+These variables are:
+- `org-sql-post-init-hooks`: run after `org-sql-init-db`
+- `org-sql-post-push-hooks`: run after `org-sql-push-to-db`
+- `org-sql-post-clear-hooks`: run after `org-sql-clear-db` 
+- `org-sql-pre-reset-hooks`: run before `org-sql-reset-db`
+
+See the docstrings of these variables for how to define the custom SQL
+statements and how to control their execution.
 
 # Usage
 
@@ -299,13 +287,14 @@ be duplicated.
 
 ## General design features
 
-- With the exception of a few types, the layouts are identical between all
-  database implementations
 - All foreign keys are set with `DELETE CASCADE`
 - All time values are stores as unixtime (integers in seconds)
 - No triggers or indexes (outside of the primary keys) are created by `org-sql`
 
 ## Entity Relationship Diagrams
+
+The table layouts for each implementation are more or less identical; the only
+differences are the types.
 
 [MySQL/MariaDB](doc/erd-mysql.pdf) 
 
