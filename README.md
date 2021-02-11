@@ -307,17 +307,17 @@ be duplicated.
 
 ## Entity Relationship Diagrams
 
-[MySQL/MariaDB](https://github.com/ndwarshuis/org-sql/doc/erd-mysql.pdf) 
+[MySQL/MariaDB](doc/erd-mysql.pdf) 
 
-[PostgreSQL](https://github.com/ndwarshuis/org-sql/doc/erd-postgres.pdf) 
+[PostgreSQL](doc/erd-postgres.pdf) 
 
-[SQLite](https://github.com/ndwarshuis/org-sql/doc/erd-sqlite.pdf) 
+[SQLite](doc/erd-sqlite.pdf) 
 
-[SQL Server](https://github.com/ndwarshuis/org-sql/doc/erd-sql-server.pdf) 
+[SQL Server](doc/erd-sql-server.pdf) 
 
 ## Table Descriptions
 
-See [here](https://github.com/ndwarshuis/org-sql/doc/table-descriptions.md) for
+See [here](doc/table-descriptions.md) for
 a description of each table and its columns.
 
 # Contributing
