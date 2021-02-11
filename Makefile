@@ -11,7 +11,8 @@ test:
 docs:
 	${CASK} exec ${EMACS} -Q -batch \
        -l dev/org-sql-doc.el \
-       -f create-docs-file
+       -f create-docs-file \
+       -f org-sql-create-all-erds
 
 stateless:
 	${CASK} exec buttercup -L . -l dev/org-sql-test-stateless.el

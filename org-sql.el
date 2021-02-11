@@ -178,13 +178,14 @@ to store them. This is in addition to any properties specifified by
             (foreign :ref tree_hashes
                      :keys (:tree_hash)
                      :parent-keys (:tree_hash)
-                     :on-delete cascade)))
+                     :on-delete cascade
+                     :cardinality many-to-one)))
 
           (headlines
            (desc . "Each row stores one headline in a given org tree")
            (columns
             ,(headline-id-col)
-            ,(tree-hash-col "headline")
+            ,(tree-hash-col "headline" t)
             (:headline_text :desc "raw text of the headline"
                             :type text
                             :constraints (notnull))
@@ -212,7 +213,8 @@ to store them. This is in addition to any properties specifified by
             (foreign :ref tree_hashes
                      :keys (:tree_hash)
                      :parent-keys (:tree_hash)
-                     :on-delete cascade)))
+                     :on-delete cascade
+                     :cardinality many-or-none-to-one)))
 
           (headline_closures
            (desc . "Each row stores the ancestor and depth of a headline relationship")
@@ -227,10 +229,12 @@ to store them. This is in addition to any properties specifified by
             (foreign :ref headlines
                      :keys (:headline_id)
                      :parent-keys (:headline_id)
-                     :on-delete cascade)
+                     :on-delete cascade
+                     :cardinality many-to-one)
             (foreign :ref headlines
                      :keys (:parent_id)
-                     :parent-keys (:headline_id))))
+                     :parent-keys (:headline_id)
+                     :cardinality many-to-one)))
 
           (timestamps
            (desc . "Each row stores one timestamp")
@@ -258,7 +262,8 @@ to store them. This is in addition to any properties specifified by
             (foreign :ref headlines
                      :keys (:headline_id)
                      :parent-keys (:headline_id)
-                     :on-delete cascade)))
+                     :on-delete cascade
+                     :cardinality many-or-none-to-one)))
 
           (timestamp_warnings
            (desc . "Each row stores specific information for a timestamp warning")
@@ -277,7 +282,8 @@ to store them. This is in addition to any properties specifified by
             (foreign :ref timestamps
                      :keys (:timestamp_id)
                      :parent-keys (:timestamp_id)
-                     :on-delete cascade)))
+                     :on-delete cascade
+                     :cardinality one-or-none-to-one)))
           
           (timestamp_repeaters
            (desc . "Each row stores specific information for a timestamp repeater")
@@ -296,7 +302,8 @@ to store them. This is in addition to any properties specifified by
             (foreign :ref timestamps
                      :keys (:timestamp_id)
                      :parent-keys (:timestamp_id)
-                     :on-delete cascade)))
+                     :on-delete cascade
+                     :cardinality one-or-none-to-one)))
 
           (planning_entries
            (desc . "Each row stores the metadata for headline planning timestamps.")
@@ -307,24 +314,27 @@ to store them. This is in addition to any properties specifified by
                             :length 9
                             :allowed (closed scheduled deadline))
             ,(timestamp-id-col "planning entry" t))
+           ;; TODO foreign key for headlines?
            (constraints
             (primary :keys (:headline_id :planning_type))
             (foreign :ref timestamps
                      :keys (:timestamp_id)
                      :parent-keys (:timestamp_id)
-                     :on-delete cascade)))
+                     :on-delete cascade
+                     :cardinality one-to-one)))
 
           (file_tags
            (desc . "Each row stores one tag at the file level")
            (columns
-            ,(tree-hash-col "tag")
+            ,(tree-hash-col "tag" t)
             ,tag-col)
            (constraints
             (primary :keys (:tree_hash :tag))
             (foreign :ref tree_hashes
                      :keys (:tree_hash)
                      :parent-keys (:tree_hash)
-                     :on-delete cascade)))
+                     :on-delete cascade
+                     :cardinality many-or-none-to-one)))
 
           (headline_tags
            (desc . "Each row stores one tag")
@@ -339,12 +349,13 @@ to store them. This is in addition to any properties specifified by
             (foreign :ref headlines
                      :keys (:headline_id)
                      :parent-keys (:headline_id)
-                     :on-delete cascade)))
+                     :on-delete cascade
+                     :cardinality many-or-none-to-one)))
 
           (properties
            (desc . "Each row stores one property")
            (columns
-            ,(tree-hash-col "property")
+            ,(tree-hash-col "property" t)
             ,property-id-col
             (:key_text :desc "this property's key"
                        :type text
@@ -357,7 +368,8 @@ to store them. This is in addition to any properties specifified by
             (foreign :ref tree_hashes
                      :keys (:tree_hash)
                      :parent-keys (:tree_hash)
-                     :on-delete cascade)))
+                     :on-delete cascade
+                     :cardinality many-or-none-to-one)))
 
           (headline_properties
            (desc . "Each row stores a property at the headline level")
@@ -368,12 +380,14 @@ to store them. This is in addition to any properties specifified by
             (primary :keys (:property_id))
             (foreign :ref properties
                      :keys (:property_id)
-                     :parent-keys (:property_id))
+                     :parent-keys (:property_id)
+                     :cardinality one-to-one)
                      ;; :on-delete cascade)
             (foreign :ref headlines
                      :keys (:headline_id)
                      :parent-keys (:headline_id)
-                     :on-delete cascade)))
+                     :on-delete cascade
+                     :cardinality many-or-none-to-one)))
           
           (clocks
            (desc . "Each row stores one clock entry")
@@ -392,7 +406,8 @@ to store them. This is in addition to any properties specifified by
             (foreign :ref headlines
                      :keys (:headline_id)
                      :parent-keys (:headline_id)
-                     :on-delete cascade)))
+                     :on-delete cascade
+                     :cardinality many-or-none-to-one)))
 
           (logbook_entries
            (desc . "Each row stores one logbook entry (except for clocks)")
@@ -412,7 +427,8 @@ to store them. This is in addition to any properties specifified by
             (foreign :ref headlines
                      :keys (:headline_id)
                      :parent-keys (:headline_id)
-                     :on-delete cascade)))
+                     :on-delete cascade
+                     :cardinality many-or-none-to-one)))
 
           (state_changes
            (desc . "Each row stores additional metadata for a state change logbook entry")
@@ -429,7 +445,8 @@ to store them. This is in addition to any properties specifified by
             (foreign :ref logbook_entries
                      :keys (:entry_id)
                      :parent-keys (:entry_id)
-                     :on-delete cascade)))
+                     :on-delete cascade
+                     :cardinality one-or-none-to-one)))
 
           (planning_changes
            (desc . "Each row stores additional metadata for a planning change logbook entry")
@@ -442,12 +459,14 @@ to store them. This is in addition to any properties specifified by
             (primary :keys (:entry_id))
             (foreign :ref timestamps
                      :keys (:timestamp_id)
-                     :parent-keys (:timestamp_id))
+                     :parent-keys (:timestamp_id)
+                     :cardinality one-to-one)
                      ;; :on-delete cascade)
             (foreign :ref logbook_entries
                      :keys (:entry_id)
                      :parent-keys (:entry_id)
-                     :on-delete cascade)))
+                     :on-delete cascade
+                     :cardinality one-or-none-to-one)))
 
           (links
            (desc . "Each row stores one link")
@@ -468,7 +487,8 @@ to store them. This is in addition to any properties specifified by
             (foreign :ref headlines
                      :keys (:headline_id)
                      :parent-keys (:headline_id)
-                     :on-delete cascade))))
+                     :on-delete cascade
+                     :cardinality many-or-none-to-one))))
         "Org-SQL database tables represented as an alist"))))
 
 (eval-and-compile
