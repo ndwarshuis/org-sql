@@ -550,11 +550,12 @@ to store them. This is in addition to any properties specifified by
         (n)
         (mk-option "Port number" :port 'integer n))
        (mk-db-choice
-        (tag sym required-keys optional-keys)
+        (tag sym required-keys &optional optional-keys)
         `(cons :tag ,tag (const ,sym)
-               (list :tag "Required keys" :offset 2
-                     ,@required-keys
-                     (set :tag "Optional keys" :inline t ,@optional-keys)))))
+               ,(if optional-keys
+                    `(list :tag "Required keys" :offset 2 ,@required-keys
+                           (set :tag "Optional keys" :inline t ,@optional-keys))
+                  `(list :tag "Required keys" :offset 2 ,@required-keys)))))
     (let* ((database (mk-option "Database name" :database 'string "org_sql"))
            (hostname (mk-option "Hostname/IP" :hostname 'string))
            (username (mk-option "Username" :username 'string "org_sql"))
@@ -568,21 +569,10 @@ to store them. This is in addition to any properties specifified by
            (sfile (mk-option "Service File" :service-file
                              '(file :value "~/.pg_service.conf")))
            (pfile (mk-option "Pass File" :pass-file '(file :value "~/.pgpass")))
-           (path (mk-option "Database path" :database '(string :value "~/org-sql.db")))
-           (unlogged (mk-option "Unlogged Tables" :database 'boolean))
+           (path (mk-option "Database path" :path '(string :value "~/org-sql.db")))
+           (unlogged (mk-option "Unlogged Tables" :unlogged 'boolean))
            (server (mk-option "Server instance" :server
-                              '(string :value "tcp:server\\instance_name,1433")))
-           (hook '(repeat
-                   (choice
-                    (cons :tag "SQL command" (const sql) string)
-                    (cons :tag "SQL command (appended)" (const sql+) string)
-                    (cons :tag "SQL file" (const file) file)
-                    (cons :tag "SQL file (appended)" (const file+) file))))
-           (post-init-hook (mk-option "Post init hooks" :post-init-hooks hook))
-           (post-update-hook (mk-option "Post update hooks" :post-update-hooks hook))
-           (post-clear-hook (mk-option "Post clear hooks" :post-clear-hooks hook))
-           (pre-reset-hook (mk-option "Pre reset hooks" :pre-reset-hooks hook))
-           (hooks `(,post-init-hook ,post-update-hook ,post-clear-hook ,pre-reset-hook)))
+                              '(string :value "tcp:server\\instance_name,1433"))))
       (defcustom org-sql-db-config
         (list 'sqlite :path (expand-file-name "org-sql.db" org-directory))
         "Configuration for the org-sql database.
@@ -632,34 +622,7 @@ The following keys are database-specific:
   STRING) representing environmental variables with which each
   database client will be run
 - ':unlogged' (pgsql) set to t to use unlogged tables and
-   potentially gain a huge speed improvement
-
-In addition, all databases support the optional keys
-':post-init-hooks', ':post-update-hooks', ':post-clear-hooks',
-and ':pre-reset-hooks'; these are user-defined SQL statements
-that will be run after/before `org-sql-init-db',
-`org-sql-push-to-db' `org-sql-clear-db', and `org-sql-reset-db'
-respectively. The value of any of these is a list of 2-membered
-lists, where the first member is a symbol like 'sql', 'file',
-'sql+', or 'file+'. If 'sql', the second member is a string
-representing a SQL statement which will be execrated. If 'file',
-the second member is a path to a sql file that will be executed.
-The '+' flag on the car symbol signifies that the SQL string or
-file will be appended to the relevant function's SQL
-transaction (note that each of the four functions pertaining to
-these keys issues a single transaction using \"BEGIN; ...
-COMMIT;\").
-
-These are useful for setting up indexes or initializing/running
-procedures as necessary. For example, specifying
-':post-init-hooks' as ((sql+ \"CREATE INDEX foo ON
-headlines (headline_text);\")) will create the specified index at
-the end of the SQL transaction issued by `org-sql-init-db' (and
-thus will not be run if anything else in the transaction fails).
-One could issue \"DROP INDEX foo;\" using
-':pre-reset-hook' (although depending on the database this may
-not be necessary since CASCADE is used when dropping tables where
-available)."
+   potentially gain a huge speed improvement."
         :type `(choice
                 ,(mk-db-choice "MySQL/MariaDB" 'mysql `(,database)
                                `(,hostname
@@ -669,8 +632,7 @@ available)."
                                  ,def
                                  ,defx
                                  ,args
-                                 ,env
-                                 ,@hooks))
+                                 ,env))
                 ,(mk-db-choice "PostgreSQL" 'pgsql `(,database)
                                `(,hostname
                                  ,(mk-port 5432)
@@ -681,17 +643,15 @@ available)."
                                  ,sfile
                                  ,unlogged
                                  ,args
-                                 ,env
-                                 ,@hooks))
-                ,(mk-db-choice "SQLite" 'sqlite `(,path) hooks)
+                                 ,env))
+                ,(mk-db-choice "SQLite" 'sqlite `(,path))
                 ,(mk-db-choice "MS SQL-Server" 'sqlserver `(,database)
                                `(,server
                                  ,username
                                  ,password
                                  ,schema
                                  ,args
-                                 ,env
-                                 ,@hooks)))
+                                 ,env)))
         :group 'org-sql))))
 
 ;; (defcustom org-sql-log-note-headings-overrides nil
@@ -723,6 +683,55 @@ directly are added. Only files ending in .org or .org_archive are
 considered. See function `org-sql-files'."
   :type '(repeat :tag "List of files and directories" file)
   :group 'org-sql)
+
+(eval-and-compile
+  (let ((hook '(repeat
+                (choice
+                 (cons :tag "SQL command" (const sql) string)
+                 (cons :tag "SQL command (appended)" (const sql+) string)
+                 (cons :tag "SQL file" (const file) file)
+                 (cons :tag "SQL file (appended)" (const file+) file)))))
+    (defcustom org-sql-post-init-hooks nil
+      "Hooks to run after `org-sql-init-db'.
+
+This is a list of 2-membered lists where each 2-membered list is
+a 'hook'. The first member of a hook is a symbol like 'sql',
+'file', 'sql+', or 'file+'. If 'sql', the second member is a
+string representing a SQL statement which will be executed. If
+'file', the second member is a path to a SQL file that will be
+executed. The '+' flag signifies that the SQL string or file of
+the hook will be appended to the transaction sent by
+`org-sql-db-init' (eg inside the \"BEGIN;...COMMIT;\" block).
+
+These hooks are generally useful for running arbitrary SQL
+statements after `org-sql' database operations. This could
+include setting up additional indexes on tables, adding triggers,
+defining and executing procedures, etc. See also
+`org-sql-post-push-hooks', `org-sql-post-clear-hooks', and
+`org-sql-pre-reset-hooks'."
+      :type hook
+      :group 'org-sql)
+
+    (defcustom org-sql-post-push-hooks nil
+      "Hooks to run after `org-sql-push-to-db'.
+
+This works analogously to `org-sql-post-init-hooks'."
+      :type hook
+      :group 'org-sql)
+
+    (defcustom org-sql-post-clear-hooks nil
+      "Hooks to run after `org-sql-clear-db'.
+
+This works analogously to `org-sql-post-init-hooks'."
+      :type hook
+      :group 'org-sql)
+
+    (defcustom org-sql-pre-reset-hooks nil
+      "Hooks to run before `org-sql-reset-db'.
+
+This works analogously to `org-sql-post-init-hooks'."
+      :type hook
+      :group 'org-sql)))
 
 (defcustom org-sql-excluded-properties nil
   "List of properties to exclude from the database.
@@ -2626,9 +2635,10 @@ STATEMENTS will be formated to a single transaction (eg with
   (->> (org-sql--format-sql-transaction org-sql-db-config statements)
        (org-sql-send-sql)))
 
-(defun org-sql--pull-hook (key)
-  "Return the hooks list for KEY."
-  (-some->> (org-sql--get-config-key key org-sql-db-config)
+(defun org-sql--group-hooks (hooks)
+  "Return HOOK with statements grouped.
+Returned list will be like (INSIDE-TRANS OUTSIDE-TRANS)."
+  (-some->> hooks
     ;; t = INSIDE
     (--map (pcase it
              (`(file ,path) (cons nil (f-read-text path)))
@@ -2640,20 +2650,15 @@ STATEMENTS will be formated to a single transaction (eg with
     ;; (INSIDE AFTER)
     (--map (-map #'cdr it))))
 
-(defun org-sql--append-hook (stmts key)
-  "Return STMTS with statements from the hooks defined by KEY."
-  (-let (((&alist 'append a 'independent i) (org-sql--pull-hook key)))
-    (list (append stmts a) (list i))))
-
-(defun org-sql--send-transaction-with-hook (pre-key post-key trans-stmts)
+(defun org-sql--send-transaction-with-hook (pre-hooks post-hooks trans-stmts)
   "Send TRANS-STMTS to the configured database client.
 STATEMENTS will be formated to a single transaction (eg with
 \"BEGIN; ... COMMIT;\"). Additionally, any hook statements found
 using PRE-KEY and POST-KEY will be appended before or after
 TRANS-STATEMENTS (either inside or outside the transaction
 boundaries depending on the hook)."
-  (-let* (((pre-in-trans before-trans) (-some-> pre-key (org-sql--pull-hook)))
-          ((post-in-trans after-trans) (-some-> post-key (org-sql--pull-hook)))
+  (-let* (((pre-in-trans before-trans) (org-sql--group-hooks pre-hooks))
+          ((post-in-trans after-trans) (org-sql--group-hooks post-hooks))
           (ts (->> (append pre-in-trans trans-stmts post-in-trans)
                    (org-sql--format-sql-transaction org-sql-db-config)))
           (bs (-some->> before-trans (s-join "")))
@@ -2827,10 +2832,9 @@ Permissions required: CREATE TABLE (and CREATE TYPE in the case
 of Postgres)
 
 See `org-sql-db-config' for how to set up the database
-connection. Set the ':post-init-hooks' key in the config to run
-SQL commands for additional setup after the core initialization
-this function provides (eg setting up indexes, triggers, etc as
-desired).
+connection. Set `org-sql-post-init-hooks' to run SQL commands for
+additional setup after the core initialization this function
+provides (eg setting up indexes, triggers, etc as desired).
 
 Setting `org-sql-async' to t will allow this function's client
 process to run asynchronously."
@@ -2840,7 +2844,7 @@ process to run asynchronously."
     (sqlite
      (org-sql-create-db)))
   (->> (org-sql--format-create-tables org-sql-db-config org-sql--table-alist)
-       (org-sql--send-transaction-with-hook nil :post-init-hooks)))
+       (org-sql--send-transaction-with-hook nil org-sql-post-init-hooks)))
 
 (defun org-sql-reset-db ()
   "Initialize the org-sql database.
@@ -2853,15 +2857,15 @@ Permissions required: DROP TABLE, CREATE TABLE (also ALTER TABLE
 in the case of SQL-Server to drop the foreign key constraints)
 
 See `org-sql-db-config' for how to set up the database
-connection. Set the ':pre-reset-hooks' key in the config to run
-SQL commands to teardown any other customized database features
-as required (presumably those created with ':post-init-hooks')
-before this function's core reset SQL commands are run. Note that
-all the DROP TABLE statements are run with CASCADE where
-appropriate, so any triggers or indexes attached to the org-sql
-tables will be dropped assuming the database implementation
-allows this and setting additional explicit DROP for this key
-might not be necessary.
+connection. Set `org-sql-pre-reset-hooks' to run SQL commands to
+teardown any other customized database features as
+required (presumably those created with
+`org-sql-post-init-hooks') before this function's core reset SQL
+commands are run. Note that all the DROP TABLE statements are run
+with CASCADE where appropriate, so any triggers or indexes
+attached to the org-sql tables will be dropped assuming the
+database implementation allows this and setting additional
+explicit DROP for this key might not be necessary.
 
 Setting `org-sql-async' to t will allow this function's client
 process to run asynchronously."
@@ -2878,7 +2882,8 @@ process to run asynchronously."
         (init-stmts
          (org-sql--format-create-tables org-sql-db-config org-sql--table-alist)))
     (->> (append drop-tbl-stmts init-stmts)
-         (org-sql--send-transaction-with-hook :pre-reset-hooks :post-init-hooks))))
+         (org-sql--send-transaction-with-hook org-sql-pre-reset-hooks
+                                              org-sql-post-init-hooks))))
 
 ;;; CRUD functions
 ;;
@@ -2916,9 +2921,9 @@ The database will be updated to reflect the current state of
 all org-file on disk for which there is an entry in `org-sql-files'.
 
 See `org-sql-db-config' for how to set up the database
-connection. Set the ':post-update-hooks' key in the config to run
-additional SQL commands after the update finishes (for example,
-running a procedure based on the new data).
+connection. Set `org-sql-post-push-hooks' to run additional SQL
+commands after the update finishes (for example, running a
+procedure based on the new data).
 
 Permissions required: INSERT, DELETE
 
@@ -2927,7 +2932,7 @@ process to run asynchronously."
   (let ((inhibit-message t))
     (org-save-all-org-buffers))
   (->> (org-sql--get-transactions)
-       (org-sql--send-transaction-with-hook nil :post-update-hooks)))
+       (org-sql--send-transaction-with-hook nil org-sql-post-push-hooks)))
 
 (defun org-sql-clear-db ()
   "Clear the org-sql database.
@@ -2936,9 +2941,9 @@ All data will be deleted from the tables, but the tables
 themselves will not be deleted.
 
 See `org-sql-db-config' for how to set up the database
-connection. Set the ':post-clear-hooks' key in the config to run
-additional SQL commands after the update finishes (for example,
-running a procedure based on the new data).
+connection. Set `org-sql-post-clear-hooks' to run additional SQL
+commands after the update finishes (for example, running a
+procedure based on the new data).
 
 Permissions required: DELETE
 
@@ -2947,14 +2952,15 @@ process to run asynchronously."
   (->> (org-sql--format-table-name org-sql-db-config 'tree_hashes)
        (format "DELETE FROM %s;")
        (list)
-       (org-sql--send-transaction-with-hook nil :post-clear-hooks)))
+       (org-sql--send-transaction-with-hook nil org-sql-post-clear-hooks)))
 
 ;;; interactive functions
 ;;
 ;; these are wrappers around the more useful functions above
 
 (defun org-sql-user-push ()
-  "Push current org-file state to the database."
+  "Push current org-file state to the database.
+Calls `org-sql-push-to-db'."
   (interactive)
   (message "Updating Org SQL database")
   (let ((out (org-sql-push-to-db)))
@@ -2964,7 +2970,8 @@ process to run asynchronously."
   (message "Org SQL update complete"))
 
 (defun org-sql-user-clear-all ()
-  "Remove all entries in the database."
+  "Remove all entries in the database.
+Calls `org-sql-clear-db'."
   (interactive)
   (if (y-or-n-p "Really clear all? ")
       (progn
@@ -2977,7 +2984,9 @@ process to run asynchronously."
     (message "Aborted")))
 
 (defun org-sql-user-reset ()
-  "Reset the database with default table layout."
+  "Reset the database with default table layout.
+Calls `org-sql-reset-db' or `org-sql-init-db' depending on if the
+database exists."
   (interactive)
   (if (or (not (org-sql-db-exists))
           (y-or-n-p "Really reset database? "))

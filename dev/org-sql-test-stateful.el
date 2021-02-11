@@ -497,51 +497,45 @@
        (ignore-errors
          (org-sql-drop-db)))
 
+     (after-each
+       (setq org-sql-post-init-hooks nil
+             org-sql-post-push-hooks nil
+             org-sql-post-clear-hooks nil
+             org-sql-pre-reset-hooks nil))
+
      (after-all
        (org-sql-send-sql "DROP TABLE IF EXISTS fake_init_table;")
        (org-sql-send-sql "DROP TABLE IF EXISTS fake_update_table;")
-       (org-sql-send-sql "DROP TABLE IF EXISTS save_something;")
-       (setq org-sql-db-config `,config))
+       (org-sql-send-sql "DROP TABLE IF EXISTS save_something;"))
 
      (describe-reset-db "update hook"
        (it "init database"
-         (setq org-sql-db-config
-               (append ',config
-                       (list :post-init-hooks
-                             `((file ,(f-join test-scripts "init_hook.sql"))
-                               (sql "INSERT INTO fake_init_table VALUES (1);")))))
+         (setq org-sql-post-init-hooks
+               `((file ,(f-join test-scripts "init_hook.sql"))
+                 (sql "INSERT INTO fake_init_table VALUES (1);")))
          (expect-exit-success (org-sql-init-db)))
        (it "fake init table should exist"
          (expect-db-has-table-contents 'fake_init_table '("1")))
        (it "update database"
-         (setq org-sql-db-config
-               (append ',config
-                       (list
-                        :post-update-hooks
-                        `((file+ ,(f-join test-scripts "update_hook.sql"))
-                          (sql+ "INSERT INTO fake_update_table VALUES (1);")))))
+         (setq org-sql-post-push-hooks
+               `((file+ ,(f-join test-scripts "update_hook.sql"))
+                 (sql+ "INSERT INTO fake_update_table VALUES (1);")))
          (let ((org-sql-files (list (f-join test-files "foo1.org"))))
            (expect-exit-success (org-sql-push-to-db))))
        (it "fake update table should exist"
          (expect-db-has-table-contents 'fake_update_table '("1")))
        (it "clear database"
-         (setq org-sql-db-config
-               (append ',config
-                       (list
-                        :post-clear-hooks
-                        `((file ,(f-join test-scripts "clear_hook.sql"))
-                          (sql "DROP TABLE fake_update_table;")))))
+         (setq org-sql-post-clear-hooks
+               `((file ,(f-join test-scripts "clear_hook.sql"))
+                 (sql "DROP TABLE fake_update_table;")))
          (expect-exit-success (org-sql-clear-db)))
        (it "fake init table should not exist"
          (expect (not (member "fake_init_table" (org-sql-list-tables)))))
        (it "fake update table should not exist"
          (expect (not (member "fake_update_table" (org-sql-list-tables)))))
        (it "reset database"
-         (setq org-sql-db-config
-               (append ',config
-                       (list
-                        :pre-reset-hooks
-                        `((sql "CREATE TABLE save_something (x INTEGER);")))))
+         (setq org-sql-pre-reset-hooks
+               `((sql "CREATE TABLE save_something (x INTEGER);")))
          (expect-exit-success (org-sql-reset-db)))
        (it "reset table should exist"
          (expect (member "save_something" (org-sql-list-tables)))))))
