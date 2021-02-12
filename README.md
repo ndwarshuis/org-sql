@@ -322,13 +322,13 @@ be duplicated.
 The table layouts for each implementation are more or less identical; the only
 differences are the types.
 
-[MySQL/MariaDB](doc/erd-mysql.pdf) 
+[MySQL/MariaDB](doc/erd/erd-mysql.pdf) 
 
-[PostgreSQL](doc/erd-postgres.pdf) 
+[PostgreSQL](doc/erd/erd-postgres.pdf) 
 
-[SQLite](doc/erd-sqlite.pdf) 
+[SQLite](doc/erd/erd-sqlite.pdf) 
 
-[SQL Server](doc/erd-sql-server.pdf) 
+[SQL Server](doc/erd/erd-sql-server.pdf) 
 
 ## Table Descriptions
 

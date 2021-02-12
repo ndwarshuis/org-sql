@@ -110,7 +110,7 @@
                           (sqlite "sqlite")
                           (sqlserver "sqlserver"))
                         (format "erd-%s.pdf")
-                        (f-join org-sql-doc-dir))))
+                        (f-join org-sql-doc-dir "erd"))))
       (f-write-text er 'utf-8 inpath)
       (call-process "erd" nil nil nil "-i" inpath "-o" outpath)
       (f-delete inpath t))))
