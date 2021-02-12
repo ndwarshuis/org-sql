@@ -1,23 +1,23 @@
 # Table Descriptions
 
-## tree_hashes
+## outlines
 
-Each row stores the hash and size for org tree
+Each row stores the hash and size for an org outline
 
 | Column | Description |
 |  -  |  -  |
-| tree_hash | hash (MD5) of this org-tree |
-| tree_size | number of characters of the org tree |
-| tree_lines | number of lines in the org file |
+| outline_hash | hash (MD5) of this org outline |
+| outline_size | number of characters of the org outline |
+| outline_lines | number of lines in the org file |
 
 ## file_metadata
 
-Each row stores filesystem metadata for one tracked org file. Note that one org-tree can have multiple paths pointing to it.
+Each row stores filesystem metadata for one tracked org file. Note that one org outline can have multiple paths pointing to it.
 
 | Column | Description |
 |  -  |  -  |
 | file_path | path to org file |
-| tree_hash | hash (MD5) of the org-tree with this path |
+| outline_hash | hash (MD5) of the org outline with this path |
 | file_uid | UID of the file |
 | file_gid | GID of the file |
 | file_modification_time | time of the file's last modification |
@@ -26,12 +26,12 @@ Each row stores filesystem metadata for one tracked org file. Note that one org-
 
 ## headlines
 
-Each row stores one headline in a given org tree
+Each row stores one headline in a given org outline
 
 | Column | Description |
 |  -  |  -  |
 | headline_id | id of this headline |
-| tree_hash | hash (MD5) of the org-tree with this headline |
+| outline_hash | hash (MD5) of the org outline with this headline |
 | headline_text | raw text of the headline |
 | keyword | the TODO state keyword |
 | effort | the value of the Effort property in minutes |
@@ -105,7 +105,7 @@ Each row stores one tag denoted by the "#+FILETAGS" keyword
 
 | Column | Description |
 |  -  |  -  |
-| tree_hash | hash (MD5) of the org-tree with this tag |
+| outline_hash | hash (MD5) of the org outline with this tag |
 | tag | the text value of this tag |
 
 ## headline_tags
@@ -124,7 +124,7 @@ Each row stores one property. Note this includes properties under headlines as w
 
 | Column | Description |
 |  -  |  -  |
-| tree_hash | hash (MD5) of the org-tree with this property |
+| outline_hash | hash (MD5) of the org outline with this property |
 | property_id | id of this property |
 | key_text | this property's key |
 | val_text | this property's value |

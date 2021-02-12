@@ -84,7 +84,7 @@ This is only used in combination with `org-replace-escapes'")
 (defconst org-sql--entry-keys
   (append
    (-map #'car org-sql--log-note-keys)
-   '(:tree-hash :note-text :header-text :old-ts :new-ts))
+   '(:outline-hash :note-text :header-text :old-ts :new-ts))
   "Valid keys that may be used in logbook entry lists.")
 
 (defconst org-sql--ignored-properties-default
@@ -99,7 +99,7 @@ to store them. This is in addition to any properties specifified by
   "Types of timestamps to include in the database.")
 
 (eval-and-compile
-  (let ((tree_hash-char-length 32)
+  (let ((outline_hash-char-length 32)
         ;; ASSUME all filesystems we would ever want to use have a path limit of
         ;; 255 chars (which is almost always true)
         (file_path-varchar-length 255)
@@ -116,11 +116,11 @@ to store them. This is in addition to any properties specifified by
           (let* ((d (if object (format fmt object) default-desc))
                  (k `(,name :desc ,d ,@other)))
             (if notnull `(,@k :constraints (notnull)) k)))
-         (tree-hash-col
+         (outline-hash-col
           (&optional object notnull)
-          (mk-col "hash (MD5) of this org-tree"
-                  "hash (MD5) of the org-tree with this %s"
-                  :tree_hash `(:type char :length ,tree_hash-char-length)
+          (mk-col "hash (MD5) of this org outline"
+                  "hash (MD5) of the org outline with this %s"
+                  :outline_hash `(:type char :length ,outline_hash-char-length)
                   object notnull))
          (headline-id-col
           (&optional object notnull)
@@ -138,27 +138,28 @@ to store them. This is in addition to any properties specifified by
                   "id of the entry for this %s"
                   :entry_id '(:type integer) object notnull)))
       (defconst org-sql--table-alist
-        `((tree_hashes
-           (desc "Each row stores the hash and size for org tree")
+        `((outlines
+           (desc "Each row stores the hash and size for an org outline")
            (columns
-            ,(tree-hash-col)
-            (:tree_size :desc "number of characters of the org tree"
-                        :type integer
-                        :constraints (notnull))
-            (:tree_lines :desc "number of lines in the org file"
-                         :type integer
-                         :constraints (notnull)))
+            ,(outline-hash-col)
+            (:outline_size :desc "number of characters of the org outline"
+                           :type integer
+                           :constraints (notnull))
+            (:outline_lines :desc "number of lines in the org file"
+                            :type integer
+                            :constraints (notnull)))
            (constraints
-            (primary :keys (:tree_hash))))
+            (primary :keys (:outline_hash))))
 
           (file_metadata
            (desc "Each row stores filesystem metadata for one tracked org file."
-                 "Note that one org-tree can have multiple paths pointing to it.")
+                 "Note that one org outline can have multiple paths pointing"
+                 "to it.")
            (columns
             (:file_path :desc "path to org file"
                         :type varchar
                         :length ,file_path-varchar-length)
-            ,(tree-hash-col "path" t)
+            ,(outline-hash-col "path" t)
             (:file_uid :desc "UID of the file"
                        :type integer
                        :constraints (notnull))
@@ -177,17 +178,17 @@ to store them. This is in addition to any properties specifified by
                          :constraints (notnull)))
            (constraints
             (primary :keys (:file_path))
-            (foreign :ref tree_hashes
-                     :keys (:tree_hash)
-                     :parent-keys (:tree_hash)
+            (foreign :ref outlines
+                     :keys (:outline_hash)
+                     :parent-keys (:outline_hash)
                      :on-delete cascade
                      :cardinality many-to-one)))
 
           (headlines
-           (desc "Each row stores one headline in a given org tree")
+           (desc "Each row stores one headline in a given org outline")
            (columns
             ,(headline-id-col)
-            ,(tree-hash-col "headline" t)
+            ,(outline-hash-col "headline" t)
             (:headline_text :desc "raw text of the headline"
                             :type text
                             :constraints (notnull))
@@ -212,9 +213,9 @@ to store them. This is in addition to any properties specifified by
                       :type text))
            (constraints
             (primary :keys (:headline_id))
-            (foreign :ref tree_hashes
-                     :keys (:tree_hash)
-                     :parent-keys (:tree_hash)
+            (foreign :ref outlines
+                     :keys (:outline_hash)
+                     :parent-keys (:outline_hash)
                      :on-delete cascade
                      :cardinality many-or-none-to-one)))
 
@@ -333,13 +334,13 @@ to store them. This is in addition to any properties specifified by
           (file_tags
            (desc "Each row stores one tag denoted by the \"#+FILETAGS\" keyword")
            (columns
-            ,(tree-hash-col "tag" t)
+            ,(outline-hash-col "tag" t)
             ,tag-col)
            (constraints
-            (primary :keys (:tree_hash :tag))
-            (foreign :ref tree_hashes
-                     :keys (:tree_hash)
-                     :parent-keys (:tree_hash)
+            (primary :keys (:outline_hash :tag))
+            (foreign :ref outlines
+                     :keys (:outline_hash)
+                     :parent-keys (:outline_hash)
                      :on-delete cascade
                      :cardinality many-or-none-to-one)))
 
@@ -367,7 +368,7 @@ to store them. This is in addition to any properties specifified by
                  "under headlines as well as properties defined at the"
                  "file-level using \"#+PROPERTY\"")
            (columns
-            ,(tree-hash-col "property" t)
+            ,(outline-hash-col "property" t)
             ,property-id-col
             (:key_text :desc "this property's key"
                        :type text
@@ -377,9 +378,9 @@ to store them. This is in addition to any properties specifified by
                        :constraints (notnull)))
            (constraints
             (primary :keys (:property_id))
-            (foreign :ref tree_hashes
-                     :keys (:tree_hash)
-                     :parent-keys (:tree_hash)
+            (foreign :ref outlines
+                     :keys (:outline_hash)
+                     :parent-keys (:outline_hash)
                      :on-delete cascade
                      :cardinality many-or-none-to-one)))
 
@@ -1087,11 +1088,12 @@ If not present, return the current value of CLOCK-OUT-NOTES."
   (org-sql--top-section-get-binary-startup
    "lognoteclock-out" "nolognoteclock-out" clock-out-notes top-section))
 
-(defun org-sql--to-tree-config (tree-hash paths-with-attributes log-note-headings
-                                          todo-keywords lb-config size lines tree)
+(defun org-sql--to-outline-config (outline-hash paths-with-attributes
+                                                log-note-headings todo-keywords
+                                                lb-config size lines tree)
   "Return a plist representing the state of an org buffer.
 The plist will include:
-- `:tree-hash': the hash of this org file (given by TREE-HASH)
+- `:outline-hash': the hash of this org file (given by OUTLINE-HASH)
 - `:paths-with-attributes': a list of lists where the car is a
   file path and the cdr is a list of attributes given by
   `file-attributes' (given by PATHS-WITH-ATTRIBUTES)
@@ -1109,7 +1111,7 @@ The plist will include:
   (which depends on TODO-KEYWORDS and LOG-NOTE-HEADINGS)"
   (let* ((children (org-ml-get-children tree))
          (top-section (-some-> (assq 'section children) (org-ml-get-children))))
-    (list :tree-hash tree-hash
+    (list :outline-hash outline-hash
           :paths-with-attributes paths-with-attributes
           :size size
           :lines lines
@@ -1152,20 +1154,20 @@ If not present, return the current value of CLOCK-INTO-DRAWER."
        (org-sql--map-plist :clock-into-drawer
          (org-sql--headline-get-clock-into-drawer it headline))))
 
-(defun org-sql--to-hstate (headline-id tree-config headline)
-  "Return new hstate set from TREE-CONFIG and HEADLINE.
+(defun org-sql--to-hstate (headline-id outline-config headline)
+  "Return new hstate set from OUTLINE-CONFIG and HEADLINE.
 
 An HSTATE represents the current headline being processed and
 will include the follwing keys/values:
-- `:tree-hash' the path to the current file being processed
+- `:outline-hash' the path to the current file being processed
 - `:lb-config' the supercontents config plist
 - `:log-note-matcher': a list of log-note-matchers for this org
   file as returned by `org-sql--build-log-note-heading-matchers'
 - `:headline' the current headline node.
 - `:parent-ids': the ids of this headline's parents (to which
   HEADLINE-ID will be set as the sole member)."
-  (-let (((&plist :tree-hash h :lb-config c :log-note-matcher m) tree-config))
-    (list :tree-hash h
+  (-let (((&plist :outline-hash h :lb-config c :log-note-matcher m) outline-config))
+    (list :outline-hash h
           :lb-config (org-sql--headline-update-supercontents-config c headline)
           :log-note-matcher m
           :headline headline
@@ -1374,7 +1376,7 @@ whose keys are a subset of `org-sql--entry-keys'."
   "Return entry list from ITEM.
 See `org-sql--to-entry' for the meaning of the returned list.
 HSTATE is a list given by `org-sql--to-hstate'."
-  (-let* (((&plist :tree-hash :headline) hstate)
+  (-let* (((&plist :outline-hash :headline) hstate)
           ((header-node . rest) (org-sql--split-item item))
           (header-offset (org-ml-get-property :begin header-node))
           (header-text (org-ml-to-trimmed-string header-node))
@@ -1406,7 +1408,7 @@ HSTATE is a list given by `org-sql--to-hstate'."
       (let ((old-ts (get-timestamp-node old-state))
             (new-ts (get-timestamp-node new-state)))
         (org-sql--to-entry type
-          :tree-hash tree-hash
+          :outline-hash outline-hash
           :header-text header-text
           :note-text note-text
           :user (get-substring user)
@@ -1450,7 +1452,7 @@ to NOTE-TEXT; otherwise just as (CLOCK)."
 
 (defun org-sql--insert-alist-add-headline-logbook-item (acc entry)
   "Add row for item ENTRY to ACC."
-  (-let (((entry-type . (&plist :header-text :note-text :tree-hash :ts)) entry))
+  (-let (((entry-type . (&plist :header-text :note-text :outline-hash :ts)) entry))
     (org-sql--insert-alist-add acc logbook_entries
       :entry_id (org-sql--acc-get :entry-id acc)
       :headline_id (org-sql--acc-get :headline-id acc)
@@ -1540,7 +1542,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
   (if (eq 'all org-sql-excluded-properties) acc
     (-let* ((ignore-list (append org-sql--ignored-properties-default
                                  org-sql-excluded-properties))
-            ((&plist :headline :tree-hash) hstate))
+            ((&plist :headline :outline-hash) hstate))
       (cl-flet
           ((is-ignored
             (node-property)
@@ -1548,7 +1550,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
            (add-property
             (acc np)
             (--> (org-sql--insert-alist-add acc properties
-                   :tree_hash tree-hash
+                   :outline_hash outline-hash
                    :property_id (org-sql--acc-get :property-id acc)
                    :key_text (org-ml-get-property :key np)
                    :val_text (org-ml-get-property :value np))
@@ -1726,7 +1728,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
                  (-drop 2))
           (`(nil ,h ,m) (+ (* 60 (string-to-number h)) (string-to-number m)))
           (`(,m) (string-to-number m)))))
-    (-let* (((&plist :tree-hash :lb-config :headline) hstate)
+    (-let* (((&plist :outline-hash :lb-config :headline) hstate)
             (supercontents (org-ml-headline-get-supercontents lb-config headline))
             (logbook (org-ml-supercontents-get-logbook supercontents))
             (sc (-some->> (org-ml-headline-get-statistics-cookie headline)
@@ -1737,7 +1739,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
             (contents (org-ml-supercontents-get-contents supercontents)))
       (--> (org-sql--insert-alist-add acc headlines
              :headline_id (org-sql--acc-get :headline-id acc)
-             :tree_hash tree-hash
+             :outline_hash outline-hash
              :headline_text (org-ml-get-property :raw-value headline)
              :keyword (org-ml-get-property :todo-keyword headline)
              :effort (-> (org-ml-headline-get-node-property "Effort" headline)
@@ -1760,17 +1762,17 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
         (org-sql--insert-alist-add-headline-closures it hstate)
         (org-sql--acc-incr :headline-id it)))))
 
-(defun org-sql--insert-alist-add-headlines (acc tree-config)
-  "Add row headlines in TREE-CONFIG to ACC.
-TREE-CONFIG is a list given by `org-sql--to-tree-config'."
-  (-let (((&plist :headlines) tree-config))
+(defun org-sql--insert-alist-add-headlines (acc outline-config)
+  "Add row headlines in OUTLINE-CONFIG to ACC.
+OUTLINE-CONFIG is a list given by `org-sql--to-outline-config'."
+  (-let (((&plist :headlines) outline-config))
     (cl-labels
         ((add-headline
           (acc hstate hl)
           (let* ((sub (org-ml-headline-get-subheadlines hl))
                  (headline-id (org-sql--acc-get :headline-id acc))
                  (hstate* (if hstate (org-sql--update-hstate headline-id hstate hl)
-                            (org-sql--to-hstate headline-id tree-config hl))))
+                            (org-sql--to-hstate headline-id outline-config hl))))
             (if (and org-sql-exclude-headline-predicate
                      (funcall org-sql-exclude-headline-predicate hl))
                 acc
@@ -1778,15 +1780,15 @@ TREE-CONFIG is a list given by `org-sql--to-tree-config'."
                 (--reduce-from (add-headline acc hstate* it) it sub))))))
       (--reduce-from (add-headline acc nil it) acc headlines))))
 
-(defun org-sql--insert-alist-add-file-tags (acc tree-config)
+(defun org-sql--insert-alist-add-file-tags (acc outline-config)
   "Add row for each file tag in file to ACC.
-TREE-CONFIG is a list given by `org-sql--to-tree-config'."
-  (-let (((&plist :tree-hash :top-section) tree-config))
+OUTLINE-CONFIG is a list given by `org-sql--to-outline-config'."
+  (-let (((&plist :outline-hash :top-section) outline-config))
     (cl-flet
         ((add-tag
           (acc tag)
           (org-sql--insert-alist-add acc file_tags
-            :tree_hash tree-hash
+            :outline_hash outline-hash
             :tag tag)))
       (->> (--filter (org-ml-is-type 'keyword it) top-section)
            (--filter (equal (org-ml-get-property :key it) "FILETAGS"))
@@ -1794,17 +1796,17 @@ TREE-CONFIG is a list given by `org-sql--to-tree-config'."
            (-uniq)
            (-reduce-from #'add-tag acc)))))
 
-(defun org-sql--insert-alist-add-file-properties (acc tree-config)
+(defun org-sql--insert-alist-add-file-properties (acc outline-config)
   "Add row for each file property in file to ACC.
-TREE-CONFIG is a list given by `org-sql--to-tree-config'."
-  (-let (((&plist :tree-hash :top-section) tree-config))
+OUTLINE-CONFIG is a list given by `org-sql--to-outline-config'."
+  (-let (((&plist :outline-hash :top-section) outline-config))
     (cl-flet
         ((add-property
           (acc keyword)
           (-let (((key value) (--> (org-ml-get-property :value keyword)
                                    (s-split-up-to " " it 1))))
             (--> (org-sql--insert-alist-add acc properties
-                   :tree_hash tree-hash
+                   :outline_hash outline-hash
                    :property_id (org-sql--acc-get :property-id acc)
                    :key_text key
                    :val_text value)
@@ -1813,14 +1815,14 @@ TREE-CONFIG is a list given by `org-sql--to-tree-config'."
            (--filter (equal (org-ml-get-property :key it) "PROPERTY"))
            (-reduce-from #'add-property acc)))))
 
-(defun org-sql--insert-alist-add-tree-hash (acc tree-config)
-  "Add row for TREE-CONFIG to ACC.
-TREE-CONFIG is a list given by `org-sql--to-tree-config'."
-  (-let (((&plist :tree-hash :size :lines) tree-config))
-    (org-sql--insert-alist-add acc tree_hashes
-      :tree_hash tree-hash
-      :tree_size size
-      :tree_lines lines)))
+(defun org-sql--insert-alist-add-outline-hash (acc outline-config)
+  "Add row for OUTLINE-CONFIG to ACC.
+OUTLINE-CONFIG is a list given by `org-sql--to-outline-config'."
+  (-let (((&plist :outline-hash :size :lines) outline-config))
+    (org-sql--insert-alist-add acc outlines
+      :outline_hash outline-hash
+      :outline_size size
+      :outline_lines lines)))
 
 (defun org-sql--insert-alist-add-file-metadata* (acc path hash attrs)
   "Add row for a file and its metadata to ACC.
@@ -1828,7 +1830,7 @@ PATH is a path to the file to insert, HASH is the MD5 of the
 file, and ATTRS is the list of attributes returned by
 `file-attributes' for the file."
   (org-sql--insert-alist-add acc file_metadata
-    :tree_hash hash
+    :outline_hash hash
     :file_path path
     :file_uid (file-attribute-user-id attrs)
     :file_gid (file-attribute-group-id attrs)
@@ -1840,22 +1842,22 @@ file, and ATTRS is the list of attributes returned by
                                  (round))
     :file_modes (file-attribute-modes attrs)))
 
-(defun org-sql--insert-alist-add-file-metadata (acc tree-config)
-  "Add row for file in TREE-CONFIG to ACC.
-TREE-CONFIG is a list given by `org-sql--to-tree-config'."
-  (-let (((&plist :paths-with-attributes :tree-hash) tree-config))
-    (--reduce-from (org-sql--insert-alist-add-file-metadata* acc (car it) tree-hash (cdr it))
+(defun org-sql--insert-alist-add-file-metadata (acc outline-config)
+  "Add row for file in OUTLINE-CONFIG to ACC.
+OUTLINE-CONFIG is a list given by `org-sql--to-outline-config'."
+  (-let (((&plist :paths-with-attributes :outline-hash) outline-config))
+    (--reduce-from (org-sql--insert-alist-add-file-metadata* acc (car it) outline-hash (cdr it))
                    acc paths-with-attributes)))
 
-(defun org-sql--tree-config-to-insert-alist (acc tree-config)
-  "Add all rows to be inserted from TREE-CONFIG to ACC.
-TREE-CONFIG is a list given by `org-sql--to-tree-config'."
+(defun org-sql--outline-config-to-insert-alist (acc outline-config)
+  "Add all rows to be inserted from OUTLINE-CONFIG to ACC.
+OUTLINE-CONFIG is a list given by `org-sql--to-outline-config'."
   (-> acc
-      (org-sql--insert-alist-add-tree-hash tree-config)
-      (org-sql--insert-alist-add-file-metadata tree-config)
-      (org-sql--insert-alist-add-file-properties tree-config)
-      (org-sql--insert-alist-add-file-tags tree-config)
-      (org-sql--insert-alist-add-headlines tree-config)))
+      (org-sql--insert-alist-add-outline-hash outline-config)
+      (org-sql--insert-alist-add-file-metadata outline-config)
+      (org-sql--insert-alist-add-file-properties outline-config)
+      (org-sql--insert-alist-add-file-tags outline-config)
+      (org-sql--insert-alist-add-headlines outline-config)))
 
 ;; hashpathpair function
 
@@ -2263,27 +2265,27 @@ FILE-PATH) which are to be deleted. CONFIG is a list like
                   (hash* (funcall hash-fmtr hash)))
             (->> (--map (format "file_path = %s" (funcall path-fmtr it)) paths)
                  (s-join " OR ")
-                 (format "(tree_hash = %s AND (%s))" hash*)))))
+                 (format "(outline_hash = %s AND (%s))" hash*)))))
       (let ((tbl-name* (org-sql--format-table-name config 'file_metadata))
-            (hash-fmtr (org-sql--get-column-formatter config 'file_metadata :tree_hash))
+            (hash-fmtr (org-sql--get-column-formatter config 'file_metadata :outline_hash))
             (path-fmtr (org-sql--get-column-formatter config 'file_metadata :file_path)))
         (->> (org-sql--group-hashpathpairs-by-hash hashpathpairs)
              (--map (format-where-clause path-fmtr hash-fmtr it))
              (s-join " OR ")
              (format "DELETE FROM %s WHERE %s;" tbl-name*))))))
 
-(defun org-sql--format-tree-delete-statement (config hashpathpairs)
-  "Return a DELETE statement for an org-tree.
+(defun org-sql--format-outline-delete-statement (config hashpathpairs)
+  "Return a DELETE statement for an org outline.
 HASHPATHPAIRS are a list of cons cells like (FILE-HASH .
 FILE-PATH) which are to be deleted. CONFIG is a list like
 `org-sql-db-config'."
   (when hashpathpairs
-    (let ((tbl-name* (org-sql--format-table-name config 'tree_hashes))
-          (fmtr (org-sql--get-column-formatter config 'tree_hashes :tree_hash)))
+    (let ((tbl-name* (org-sql--format-table-name config 'outlines))
+          (fmtr (org-sql--get-column-formatter config 'outlines :outline_hash)))
         (->> (org-sql--hashpathpairs-to-hashes hashpathpairs)
              (--map (funcall fmtr it))
              (s-join ",")
-             (format "DELETE FROM %s WHERE tree_hash IN (%s);" tbl-name*)))))
+             (format "DELETE FROM %s WHERE outline_hash IN (%s);" tbl-name*)))))
 
 ;; bulk inserts
 
@@ -2316,13 +2318,13 @@ respective tables (which are :headline-id, :timestamp-id,
   (plist-put acc key 0))
 
 (defun org-sql--format-insert-statements (config paths-to-insert files-to-insert)
-  "Return list of multi-row INSERT statements for paths and trees.
+  "Return list of multi-row INSERT statements for paths and outlines.
 CONFIG is a list like `org-sql-db-config'. PATHS-TO-INSERT is a
 plist like (:hash FILE-HASH :path FILE-HASH :attrs
-FILE-ATTRIBUTES) and FILES-TO-INSERT is a list of TREE-CONFIG
+FILE-ATTRIBUTES) and FILES-TO-INSERT is a list of OUTLINE-CONFIG
 lists."
   (let* ((acc (org-sql--init-acc))
-         (acc* (--reduce-from (org-sql--tree-config-to-insert-alist acc it) acc files-to-insert)))
+         (acc* (--reduce-from (org-sql--outline-config-to-insert-alist acc it) acc files-to-insert)))
     (--> paths-to-insert
       (--reduce-from (-let (((&plist :hash :path :attrs) it))
                        (org-sql--insert-alist-add-file-metadata* acc path hash attrs))
@@ -2425,12 +2427,12 @@ Return a cons cell like (RETURNCODE . OUTPUT)."
     (let ((rc (apply #'call-process path file (current-buffer) nil args)))
       (cons rc (buffer-string)))))
     
-;;; hashpathpair -> tree-config
+;;; hashpathpair -> outline-config
 
-(defun org-sql--hashpathpair-get-tree-config (tree-hash file-paths)
-  "Return tree-config for TREE-HASH and FILE-PATHS.
+(defun org-sql--hashpathpair-get-outline-config (outline-hash file-paths)
+  "Return outline-config for OUTLINE-HASH and FILE-PATHS.
 Returned list will be constructed using
-`org-sql--to-tree-config'."
+`org-sql--to-outline-config'."
   (let ((paths-with-attributes (--map (cons it (file-attributes it 'integer))
                                       file-paths)))
     ;; just pick the first file path to open
@@ -2444,9 +2446,9 @@ Returned list will be constructed using
             (lines (save-excursion
                      (goto-char (point-max))
                      (line-number-at-pos))))
-        (org-sql--to-tree-config tree-hash paths-with-attributes
-                                 org-log-note-headings todo-keywords lb-config
-                                 size lines tree)))))
+        (org-sql--to-outline-config outline-hash paths-with-attributes
+                                    org-log-note-headings todo-keywords
+                                    lb-config size lines tree)))))
 
 ;;; reading hashpathpair from external state
 
@@ -2476,12 +2478,12 @@ Each hashpathpair will have it's :db-path set to nil. Only files in
   "Get a list of hashpathpair for the database.
 Each hashpathpair will have it's :disk-path set to nil."
   (let* ((tbl-name 'file_metadata)
-         (cols '(:file_path :tree_hash))
+         (cols '(:file_path :outline_hash))
          (cmd (org-sql--format-select-statement org-sql-db-config cols tbl-name)))
     (org-sql--on-success* (org-sql-send-sql cmd)
       (->> (s-trim it-out)
            (org-sql--parse-output-to-plist org-sql-db-config cols)
-           (--map (-let (((&plist :tree_hash h :file_path p) it))
+           (--map (-let (((&plist :outline_hash h :file_path p) it))
                     (cons h p)))))))
 
 (defun org-sql--get-transactions ()
@@ -2500,9 +2502,9 @@ state as the orgfiles on disk."
                             :attrs (file-attributes (cdr it)))
                       pi)))
     (list (org-sql--format-path-delete-statement org-sql-db-config pd)
-          (org-sql--format-tree-delete-statement org-sql-db-config fd)
+          (org-sql--format-outline-delete-statement org-sql-db-config fd)
           (->> (org-sql--group-hashpathpairs-by-hash fi)
-               (--map (org-sql--hashpathpair-get-tree-config (car it) (cdr it)))
+               (--map (org-sql--hashpathpair-get-outline-config (car it) (cdr it)))
                (org-sql--format-insert-statements org-sql-db-config pi*)))))
 
 (defun org-sql-dump-update-transactions ()
@@ -2970,7 +2972,7 @@ Permissions required: DELETE
 
 Setting `org-sql-async' to t will allow this function's client
 process to run asynchronously."
-  (->> (org-sql--format-table-name org-sql-db-config 'tree_hashes)
+  (->> (org-sql--format-table-name org-sql-db-config 'outlines)
        (format "DELETE FROM %s;")
        (list)
        (org-sql--send-transaction-with-hook nil org-sql-post-clear-hooks)))
