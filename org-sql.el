@@ -2901,12 +2901,10 @@ process to run asynchronously."
          (org-sql--case-mode org-sql-db-config
            ((mysql pgsql sqlserver)
             (org-sql--get-drop-table-statements org-sql-db-config))
-           (sqlite nil)))
-        (init-stmts
-         (org-sql--format-create-tables org-sql-db-config org-sql--table-alist)))
-    (->> (append drop-tbl-stmts init-stmts)
-         (org-sql--send-transaction-with-hook org-sql-pre-reset-hooks
-                                              org-sql-post-init-hooks))))
+           (sqlite nil))))
+    (org-sql--send-transaction-with-hook org-sql-pre-reset-hooks
+                                         org-sql-post-init-hooks
+                                         drop-tbl-stmts)))
 
 ;;; CRUD functions
 ;;
@@ -2981,46 +2979,74 @@ process to run asynchronously."
 ;;
 ;; these are wrappers around the more useful functions above
 
+;; TODO refactor these...
+(defun org-sql-user-init ()
+  "Init the database with default table layout.
+Calls `org-sql-init-db'."
+  (interactive)
+  (org-sql--on-success (org-sql-init-db)
+    (progn
+      (when org-sql-debug
+        (print "Debug output for org-sql-user-init")
+        (print (if (equal it-out "") "Run Successfully" it-out)))
+      (message "Org SQL init completed"))
+    (progn
+      (message "Org SQL init failed")
+      (when org-sql-debug
+        (message it-out)))))
+
 (defun org-sql-user-push ()
   "Push current org-file state to the database.
 Calls `org-sql-push-to-db'."
   (interactive)
-  (message "Updating Org SQL database")
-  (let ((out (org-sql-push-to-db)))
-    (when org-sql-debug
-      (print "Debug output for org-sql update")
-      (print (if (equal out "") "Run Successfully" out))))
-  (message "Org SQL update complete"))
+  (message "Pushing data to Org SQL database")
+  (org-sql--on-success (org-sql-push-to-db)
+    (progn
+      (when org-sql-debug
+        (print "Debug output for org-sql-user-push")
+        (print (if (equal it-out "") "Run Successfully" it-out)))
+      (message "Org SQL update complete"))
+    (progn
+      (message "Org SQL push failed")
+      (when org-sql-debug
+        (message it-out)))))
 
-(defun org-sql-user-clear-all ()
+(defun org-sql-user-clear ()
   "Remove all entries in the database.
 Calls `org-sql-clear-db'."
   (interactive)
   (if (y-or-n-p "Really clear all? ")
       (progn
         (message "Clearing Org SQL database")
-        (let ((out (org-sql-clear-db)))
-          (when org-sql-debug
-            (print "Debug output for org-sql clear-all")
-            (print (if (equal out "") "Run Successfully" out))))
-        (message "Org SQL clear completed"))
+        (org-sql--on-success (org-sql-clear-db)
+          (progn
+            (when org-sql-debug
+              (print "Debug output for org-sql-user-clear")
+              (print (if (equal it-out "") "Run Successfully" it-out)))
+            (message "Org SQL clear completed"))
+          (progn
+            (message "Org SQL clear failed")
+            (when org-sql-debug
+              (message it-out)))))
     (message "Aborted")))
 
 (defun org-sql-user-reset ()
   "Reset the database with default table layout.
-Calls `org-sql-reset-db' or `org-sql-init-db' depending on if the
-database exists."
+Calls `org-sql-reset-db'."
   (interactive)
-  (if (or (not (org-sql-db-exists))
-          (y-or-n-p "Really reset database? "))
+  (if (y-or-n-p "Really reset database? ")
       (progn
-        (org-sql-drop-db)
-        (message "Resetting Org SQL database")
-        (let ((out (org-sql-init-db)))
-          (when org-sql-debug
-            (print "Debug output for org-sql user-reset")
-            (print (if (equal out "") "Run Successfully" out))))
-        (message "Org SQL reset completed"))
+        (org-sql--on-success (org-sql-reset-db)
+          (progn
+            (message "Resetting Org SQL database")
+            (when org-sql-debug
+              (print "Debug output for org-sql-user-reset")
+              (print (if (equal it-out "") "Run Successfully" it-out)))
+            (message "Org SQL reset completed"))
+          (progn
+            (message "Org SQL reset failed")
+            (when org-sql-debug
+              (message it-out)))))
     (message "Aborted")))
 
 (provide 'org-sql)
