@@ -38,11 +38,14 @@ One can also use `use-package` to automate this entire process
 
 ## Dependencies
 
+Only Emacs 27.1+ has been tested
+
 ### Emacs packages
 
 - org-ml.el
 - dash.el
 - s.el
+- f.el
 
 ### Database Clients
 
