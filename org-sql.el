@@ -26,7 +26,7 @@
 ;; This code stores org buffers in a variety of SQL databases for use in
 ;; processing org-mode data outside of Emacs where SQL operations might be more
 ;; appropriate. Org files are stored according to the perspective of unique
-;; org tree, any tree might reside in multiple identical files.
+;; org outline; any outline might reside in multiple identical files.
 
 ;; The rough process by which this occurs is:
 ;;  1) query state of org files on disk and in db (if any) and classify
@@ -43,7 +43,7 @@
 ;;      files on disk
 ;;  3) send SQL statements to the configured database
 
-;; The code is roughly arranged as follows:
+;; The code is arranged as follows:
 ;; - constants
 ;; - customization variables
 ;; - stateless functions
@@ -581,49 +581,83 @@ to store them. This is in addition to any properties specifified by
 This is a list like (DB-TYPE [KEY VAL] [[KEY VAL] ...]).
 
 DB-TYPE is a symbol for the database to use and one of:
-- 'mysql': MySQL/MariaDB (requires the 'mysql' executable)
-- 'pgsql': PostgresSQL (requires the 'pgsql' executable)
-- 'sqlite': SQLite (requires the 'sqlite3' executable)
-- 'sqlserver': SQL-Server (requires the 'sqlcmd' executable)
+- `mysql': MySQL/MariaDB (requires the 'mysql' executable)
+- `pgsql': PostgresSQL (requires the 'pgsql' executable)
+- `sqlite': SQLite (requires the 'sqlite3' executable)
+- `sqlserver': SQL-Server (requires the 'sqlcmd' executable)
 
 KEY and VAL form a plist and allowed combinations depend on
 DB-TYPE.
 
 Each database type requires one key to specify which database to
-use. For SQLite, this key is ':path' and its value is a path to
-the SQLite database file to use. For all others, this key is
-':database' and specifies the name of the database on the
-server (perhaps local) to which to connect.
+use. For SQLite, this key is `:path' and its value is a path to
+the SQLite database file to use (or create if it doesn't exist).
+For all others, this key is `:database' and specifies the name of
+the database on the server (perhaps local) to which to connect.
 
 All other keys are optional.
 
-The following keys are database-specific:
-- ':hostname': (mysql pgsql) string for the hostname with which
-  to connect
-- ':port': (mysql pgsql) integer for the port by which to connect
-- ':schema' (pgsql sqlserver) string for the schema to use
-- ':username': (mysql pgsql sqlserver) string for the username
-  with which to connect
-- ':password': (mysql pgsql sqlserver) string for the password
-  with which to connect (NOTE use some combination of the other
-  options below if your don't want your password in your config)
-- ':server': (sqlserver) the server instance (used for the '-S'
-  parameter in 'sqlcmd')
-- ':pass-file' (pgsql): a string to be supplied to the PGPASSFILE
+The following additional keys are database-specific:
+
+SQLite
+- none
+
+Postgres
+- `:hostname': (string) the hostname with which to connect
+  (corresponds to the `-h' flag)
+- `:port': (integer) connection port (corresponds to the
+  `-p' flag)
+- `:username': (string) the username to use (corresponds to the
+  `-U' flag)
+- `:password': (string) the password to use (corresponds to the
+  `PGPASSWORD' environmental variable) NOTE use the `:pass-file'
+  or `:service-file' if you don't want to hardcode your password
+- `:pass-file': (string) value to be supplied to the `PGPASSFILE'
   environment variable
-- ':server-file' (pgsql): a string to be supplied to the
-  PGSERVICEFILE environment variable
-- ':defaults-file' (mysql): a string to the be supplied to the
-  '--defaults-file' argument
-- ':defaults-extra-file' (mysql): a string to be supplied to the
-  '--defaults-extra-file' argument
-- ':args': (mysql pgsql sqlserver): list of strings for arbitrary
-  command line arguments sent to the client executable
-- ':env': (mysql pgsql sqlserver): list of lists like (STRING
-  STRING) representing environmental variables with which each
-  database client will be run
-- ':unlogged' (pgsql) set to t to use unlogged tables and
-   potentially gain a huge speed improvement."
+- `:service-file': (string) to be supplied to the `PGSERVICEFILE'
+  environment variable
+- `:schema' (string) the schema to use
+- `:args': (list of strings) arbitrary command line arguments
+  sent to `psql'
+- `:env': (list of lists with strings like (ENV VAR))
+  environmental variables with which `psql' will run
+- `:unlogged' (boolean) set to t to use unlogged tables and
+   potentially gain a huge speed improvement.
+
+MySQL/MariaDB
+- `:hostname': (string) the hostname with which to connect
+  (corresponds to the `-h' flag)
+- `:port': (integer) connection port (corresponds to the
+  `-P' flag)
+- `:username': (string) the username to use (corresponds to the
+  `-U' flag)
+- `:password': (string) the password to use (corresponds to the
+  `-p' flag) NOTE use the `:defaults-file' or
+  `:defaults-extra-file' if you don't want to hardcode your
+  password
+- `:defaults-file' (string) path to the be supplied to the
+  `--defaults-file' flag
+- `:defaults-extra-file' (string): path to be supplied to the
+  `--defaults-extra-file' flag
+- `:args': (list of strings) arbitrary command line arguments
+  sent to `mysql'
+- `:env': (list of lists with strings like (ENV VAR))
+  environmental variables with which `mysql' will run
+
+SQL-Server
+- `:server': (string) the server instance (corresponds to the
+  `-S' flag)
+- `:username': (string) the username to use (corresponds to the
+  `-U' flag)
+- `:password': (string) the password to use (corresponds to the
+  `-P' flag) NOTE use the `:env' key to specify `SQLCMDINI'
+  which in turn can set the `SQLCMDPASSWORD' variable outside
+  emacs if you don't wish to hardcode this
+- `:schema' (string) the schema to use
+- `:args': (list of strings) arbitrary command line arguments
+   sent to `sqlcmd'
+- `:env': (list of lists with strings like (ENV VAR))
+  environmental variables with which `sqlcmd' will run"
         :type `(choice
                 ,(mk-db-choice "MySQL/MariaDB" 'mysql `(,database)
                                `(,hostname
@@ -695,14 +729,14 @@ considered. See function `org-sql-files'."
     (defcustom org-sql-post-init-hooks nil
       "Hooks to run after `org-sql-init-db'.
 
-This is a list of 2-membered lists where each 2-membered list is
-a 'hook'. The first member of a hook is a symbol like 'sql',
-'file', 'sql+', or 'file+'. If 'sql', the second member is a
-string representing a SQL statement which will be executed. If
-'file', the second member is a path to a SQL file that will be
-executed. The '+' flag signifies that the SQL string or file of
-the hook will be appended to the transaction sent by
-`org-sql-db-init' (eg inside the \"BEGIN;...COMMIT;\" block).
+This is a list of 2-membered lists like (SYM STRING) called
+'hooks'. The SYM of each hook is a symbol like `sql', `file',
+`sql+', or `file+'. If `sql', the second member is a string
+representing a SQL statement which will be executed. If 'file',
+the second member is a path to a SQL file that will be executed.
+The `+' suffix signifies that the SQL string or file of the hook
+will be appended to the transaction sent by `org-sql-db-init' (eg
+inside the \"BEGIN;...COMMIT;\" block).
 
 These hooks are generally useful for running arbitrary SQL
 statements after `org-sql' database operations. This could
