@@ -50,7 +50,9 @@
 (defun org-sql-er-format-table (config table)
   (-let* (((name . (&alist 'columns 'constraints)) table)
           (pks (plist-get (alist-get 'primary constraints) :keys))
-          (fks (plist-get (alist-get 'foreign constraints) :keys))
+          (fks (->> (--filter (eq (car it) 'foreign) constraints)
+                    (--mapcat (plist-get (cdr it) :keys))
+                    (-uniq)))
           (columns* (->> columns
                          (--map (org-sql-er-format-column pks fks config it))
                          (s-join "\n"))))
