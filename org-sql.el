@@ -329,7 +329,7 @@ to store them. This is in addition to any properties specifified by
                      :keys (:timestamp_id)
                      :parent-keys (:timestamp_id)
                      :on-delete cascade
-                     :cardinality one-to-one)))
+                     :cardinality one-or-none-to-one)))
 
           (file_tags
            (desc "Each row stores one tag denoted by the \"#+FILETAGS\" keyword")
@@ -394,7 +394,7 @@ to store them. This is in addition to any properties specifified by
             (foreign :ref properties
                      :keys (:property_id)
                      :parent-keys (:property_id)
-                     :cardinality one-to-one)
+                     :cardinality one-or-none-to-one)
                      ;; :on-delete cascade)
             (foreign :ref headlines
                      :keys (:headline_id)
@@ -476,7 +476,7 @@ to store them. This is in addition to any properties specifified by
             (foreign :ref timestamps
                      :keys (:timestamp_id)
                      :parent-keys (:timestamp_id)
-                     :cardinality one-to-one)
+                     :cardinality one-or-none-to-one)
                      ;; :on-delete cascade)
             (foreign :ref logbook_entries
                      :keys (:entry_id)
