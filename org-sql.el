@@ -2542,7 +2542,7 @@ process."
                            (format "--defaults-extra-file=%s")
                            (list)))
                      (-some->> hostname (list "-h"))
-                     (-some->> port (list "-P"))
+                     (-some->> port (number-to-string) (list "-P"))
                      (-some->> username (list "-u"))
                      ;; this makes the output tidy (no headers or extra output)
                      '("-Ns")
@@ -2561,7 +2561,7 @@ process."
       org-sql-db-config
     (let ((all-args (append
                      (-some->> hostname (list "-h"))
-                     (-some->> port (list "-p"))
+                     (-some->> port (number-to-string) (list "-p"))
                      (-some->> username (list "-U"))
                      ;; don't prompt for password
                      '("-w")

@@ -529,22 +529,20 @@
     `(describe "SQL IO Spec"
        ,@forms)))
 
-;; NOTE hooks are tested internally so they don't need to be specified in
-;; the configs here
 (describe-io-specs
   "SQLite"
   (sqlite :path "/tmp/org-sql-test.db")
 
   "Postgres"
   (pgsql :database "org_sql"
-            :port "60000"
+            :port 60000
             :hostname "localhost"
             :username "org_sql"
             :password "org_sql")
 
   "Postgres: non-default schema"
   (pgsql :database "org_sql"
-            :port "60000"
+            :port 60000
             :schema "nonpublic"
             :hostname "localhost"
             :username "org_sql"
@@ -552,22 +550,50 @@
 
   "Postgres: unlogged tables"
   (pgsql :database "org_sql"
-            :port "60000"
+            :port 60000
             :hostname "localhost"
             :username "org_sql"
             :password "org_sql"
             :unlogged t)
 
-  "MariaDB"
+  "MariaDB 10.5"
   (mysql :database "org_sql"
-         :port "60100"
+         :port 60100
          :hostname "127.0.0.1"
          :username "org_sql"
          :password "org_sql")
 
-  "MySQL"
+  "MariaDB 10.4"
   (mysql :database "org_sql"
-         :port "60200"
+         :port 60101
+         :hostname "127.0.0.1"
+         :username "org_sql"
+         :password "org_sql")
+
+  "MariaDB 10.3"
+  (mysql :database "org_sql"
+         :port 60102
+         :hostname "127.0.0.1"
+         :username "org_sql"
+         :password "org_sql")
+
+  "MariaDB 10.2"
+  (mysql :database "org_sql"
+         :port 60103
+         :hostname "127.0.0.1"
+         :username "org_sql"
+         :password "org_sql")
+
+  "MySQL 8.0"
+  (mysql :database "org_sql"
+         :port 60200
+         :hostname "127.0.0.1"
+         :username "org_sql"
+         :password "org_sql")
+  
+  "MySQL 5.7"
+  (mysql :database "org_sql"
+         :port 60201
          :hostname "127.0.0.1"
          :username "org_sql"
          :password "org_sql")
