@@ -252,6 +252,29 @@ inserted.
 
 Run `org-sql-user-clear-all`. This will clear all data but leave the schema.
 
+## Public API
+
+Besides the above interactive functions, `org-sql` exposes the following public
+functions for interacting with the database.
+
+- Table-level Operations
+  - `org-sql-create-tables`
+  - `org-sql-drop-tables`
+  - `org-sql-list-tables`
+- Database-level Operations
+  - `org-sql-create-db`
+  - `org-sql-drop-db`
+  - `org-sql-db-exists`
+- Init/Teardown Operations
+  - `org-sql-init-db`
+  - `org-sql-reset-db`
+- Data-level operations
+  - `org-sql-dump-table`
+  - `org-sql-push-to-db`
+  - `org-sql-clear-db`
+- Other SQL Commands
+  - `org-sql-send-sql`
+
 # Limitations
 
 ## OS support

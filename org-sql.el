@@ -2717,21 +2717,6 @@ spawned in an asynchronous process."
     (org-sql--exec-command-in-db args async)))
 
 ;;; database admin
-;;
-;; There are three "admin" layers which we care about: the database itself, the
-;; namespace, and the tables in which the data will live. And these three have
-;; three operations we care about: create, drop, and testing for existence. The
-;; namespace (aka the "schema") is only defined for postgres and sql server.
-;; Furthermore, we can't assume the normal user has permissions to create the
-;; database itself for any of the "server" implementations (everything but
-;; SQLite), so the create/drop commands aren't defined for these either. The
-;; only layer that is defined for all three operations and all database is the
-;; table layer.
-;;
-;; The reason this matters is because there needs to be a way to define
-;; "composite" functions like "initialize" and "reset" a database from emacs.
-;; Because all supported DBMSs have different layers, these will mean different
-;; things and must take these restrictions into account.
 
 ;; table layer
 
@@ -2793,6 +2778,9 @@ schema (or the schema defined by the :schema keyword)."
       (funcall parse-fun it-out))))
 
 ;; database layer
+
+;; NOTE for any server database it doesn't make any sense to "create" it here
+;; (way too many variables) so error and inform the user to do it themselves
 
 (defun org-sql-create-db ()
   "Create the org-sql database.
