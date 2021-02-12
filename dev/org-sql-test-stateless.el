@@ -538,16 +538,16 @@ list then join the cdr of IN with newlines."
                              `((timestamps (3 1 ,ts0 1 ,(org-ts-to-unixtime ts0) nil 0 nil)
                                            (2 1 ,ts1 1 ,(org-ts-to-unixtime ts1) nil 0 nil)
                                            (1 1 ,ts2 0 ,(org-ts-to-unixtime ts2) nil 0 nil))
-                               (planning_entries (1 scheduled 3)
-                                                 (1 deadline 2)
-                                                 (1 closed 1)))
+                               (planning_entries (3 scheduled)
+                                                 (2 deadline)
+                                                 (1 closed)))
 
                              "multiple (exclude some)"
                              ((org-sql-excluded-headline-planning-types '(:closed)))
                              `((timestamps (2 1  ,ts0 1 ,(org-ts-to-unixtime ts0) nil 0 nil)
                                            (1 1 ,ts1 1 ,(org-ts-to-unixtime ts1) nil 0 nil))
-                               (planning_entries (1 scheduled 2)
-                                                 (1 deadline 1)))
+                               (planning_entries (2 scheduled)
+                                                 (1 deadline)))
 
                              "multiple (exclude all)"
                              ((org-sql-excluded-headline-planning-types '(:closed :scheduled :deadline)))

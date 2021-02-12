@@ -91,13 +91,12 @@ Each row stores the repeater component for a timestamp
 
 ## planning_entries
 
-Each row stores the metadata for headline planning timestamps (the DEADLINE, SCHEDULED, or CLOSED parts).
+Each row denotes a timestamp which is a planning entry (eg DEADLINE, SCHEDULED, or CLOSED).
 
 | Column | Description |
 |  -  |  -  |
-| headline_id | id of the headline for this planning entry |
-| planning_type | the type of this planning entry (`closed`, `scheduled`, or `deadline`) |
 | timestamp_id | id of the timestamp for this planning entry |
+| planning_type | the type of this planning entry (`closed`, `scheduled`, or `deadline`) |
 
 ## file_tags
 

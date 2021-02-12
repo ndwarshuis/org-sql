@@ -313,18 +313,16 @@ to store them. This is in addition to any properties specifified by
                      :cardinality one-or-none-to-one)))
 
           (planning_entries
-           (desc "Each row stores the metadata for headline planning timestamps"
-                 "(the DEADLINE, SCHEDULED, or CLOSED parts).")
+           (desc "Each row denotes a timestamp which is a planning entry"
+                 "(eg DEADLINE, SCHEDULED, or CLOSED).")
            (columns
-            ,(headline-id-col "planning entry")
+            ,(timestamp-id-col "planning entry" t)
             (:planning_type :desc "the type of this planning entry"
                             :type enum
                             :length 9
-                            :allowed (closed scheduled deadline))
-            ,(timestamp-id-col "planning entry" t))
-           ;; TODO foreign key for headlines?
+                            :allowed (closed scheduled deadline)))
            (constraints
-            (primary :keys (:headline_id :planning_type))
+            (primary :keys (:timestamp_id))
             (foreign :ref timestamps
                      :keys (:timestamp_id)
                      :parent-keys (:timestamp_id)
@@ -1688,11 +1686,10 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
               (-if-let (ts (org-ml-get-property type planning))
                   (--> (org-sql--insert-alist-add-timestamp acc hstate ts)
                     (org-sql--insert-alist-add it planning_entries
-                      :headline_id (org-sql--acc-get :headline-id acc)
+                      :timestamp_id (org-sql--acc-get :timestamp-id acc)
                       :planning_type (->> (symbol-name type)
                                           (s-chop-prefix ":")
-                                          (intern))
-                      :timestamp_id (org-sql--acc-get :timestamp-id acc))
+                                          (intern)))
                     (org-sql--acc-incr :timestamp-id it))
                 acc)))
           (--> '(:closed :deadline :scheduled)
