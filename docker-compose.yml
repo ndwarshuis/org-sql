@@ -2,7 +2,7 @@ version: '3.7'
 
 services:
   psql12:
-    build: ./docker/postgres
+    build: ./test/docker/postgres
     container_name: org-sql-postgres-12
     restart: 'no'
     environment:    
@@ -36,7 +36,7 @@ services:
       - 60200:3306
 
   sqlserver2019:
-    build: ./docker/sql-server
+    build: ./test/docker/sql-server
     container_name: org-sql-sqlserver-2019
     restart: 'no'
     environment:
