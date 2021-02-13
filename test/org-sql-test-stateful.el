@@ -172,11 +172,11 @@
 (defmacro describe-sql-init-spec (config)
   (let ((should-exist (org-sql--case-mode config
                         (sqlite
-                         (it "database should not exist"
-                           (expect (not (org-sql-db-exists)))))
+                         '(it "database should not exist"
+                            (expect (not (org-sql-db-exists)))))
                         ((mysql pgsql sqlserver)
-                         (it "database should still exist"
-                           (expect (org-sql-db-exists)))))))
+                         '(it "database should still exist"
+                            (expect (org-sql-db-exists)))))))
     (cl-flet
         ((mk-form
           (async)
