@@ -329,10 +329,10 @@
      (describe-reset-db "altered file"
        ;; in order to make this test work, make a file in /tmp and alter
        ;; its contents
-       ;; TODO what about windows users? (or people without a /tmp folder?)
        (describe "insert file"
          (before-all
-           (setq test-path "/tmp/org-sql-test-file.org"))
+           (setq test-path (f-join (temporary-file-directory)
+                                   "org-sql-test-file.org")))
          (it "update database"
            (let ((contents1 "* foo1")
                  (org-sql-files (list test-path)))
@@ -344,7 +344,8 @@
              `("ece424e0090cff9b6f1ac50722c336c0" "6" "1"))))
        (describe "alter the file"
          (before-all
-           (setq test-path "/tmp/org-sql-test-file.org"))
+           (setq test-path (f-join (temporary-file-directory)
+                                   "org-sql-test-file.org")))
          (it "update with new contents"
            (let ((contents2 "* foo2")
                  (org-sql-files (list test-path)))
@@ -521,7 +522,8 @@
            (append key-vals)
            (mk-io-spec "SQL-Server" 'sqlserver version alt-title))))
   (let* ((sqlite (list "SQLite"
-                       '(sqlite :path "/tmp/org-sql-test.db")))
+                       `(sqlite :path ,(f-join (temporary-file-directory)
+                                               "org-sql-test.db"))))
          (postgres
           (append
            (mk-postgres 13 60013)
