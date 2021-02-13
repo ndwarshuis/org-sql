@@ -109,7 +109,7 @@
                           (pgsql "postgres")
                           (sqlite "sqlite")
                           (sqlserver "sqlserver"))
-                        (format "erd-%s.pdf")
+                        (format "erd-%s.png")
                         (f-join org-sql-doc-dir "erd"))))
       (f-write-text er 'utf-8 inpath)
       (call-process "erd" nil nil nil "-i" inpath "-o" outpath)
