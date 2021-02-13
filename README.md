@@ -198,7 +198,7 @@ authorization to create tables and insert/delete rows from those tables on the
 configured schema.
 
 See init files for [Postgres](test/docker/postgres/init/org_sql.sql) and 
-[SQL-Server](test/docker/sql-server/init/org_sql.sql) for bare-bones examples.
+[SQL-Server](test/docker/sql-server/setup.sql) for bare-bones examples.
 
 ### MySQL/MariaDB
 
