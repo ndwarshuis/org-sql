@@ -529,81 +529,69 @@
     `(describe "SQL IO Spec"
        ,@forms)))
 
-(describe-io-specs
-  "SQLite"
-  (sqlite :path "/tmp/org-sql-test.db")
-
-  "Postgres"
-  (pgsql :database "org_sql"
-            :port 60000
-            :hostname "localhost"
-            :username "org_sql"
-            :password "org_sql")
-
-  "Postgres: non-default schema"
-  (pgsql :database "org_sql"
-            :port 60000
-            :schema "nonpublic"
-            :hostname "localhost"
-            :username "org_sql"
-            :password "org_sql")
-
-  "Postgres: unlogged tables"
-  (pgsql :database "org_sql"
-            :port 60000
-            :hostname "localhost"
-            :username "org_sql"
-            :password "org_sql"
-            :unlogged t)
-
-  "MariaDB 10.5"
-  (mysql :database "org_sql"
-         :port 60100
-         :hostname "127.0.0.1"
-         :username "org_sql"
-         :password "org_sql")
-
-  "MariaDB 10.4"
-  (mysql :database "org_sql"
-         :port 60101
-         :hostname "127.0.0.1"
-         :username "org_sql"
-         :password "org_sql")
-
-  "MariaDB 10.3"
-  (mysql :database "org_sql"
-         :port 60102
-         :hostname "127.0.0.1"
-         :username "org_sql"
-         :password "org_sql")
-
-  "MariaDB 10.2"
-  (mysql :database "org_sql"
-         :port 60103
-         :hostname "127.0.0.1"
-         :username "org_sql"
-         :password "org_sql")
-
-  "MySQL 8.0"
-  (mysql :database "org_sql"
-         :port 60200
-         :hostname "127.0.0.1"
-         :username "org_sql"
-         :password "org_sql")
-  
-  "MySQL 5.7"
-  (mysql :database "org_sql"
-         :port 60201
-         :hostname "127.0.0.1"
-         :username "org_sql"
-         :password "org_sql")
-
-  ;; TODO add default schema
-  "SQL Server: non-default schema"
-  (sqlserver :database "org_sql"
-             :schema "nondbo"
-             :server "tcp:localhost,60300"
-             :username "org_sql"
-             :password "org_sql333###"))
+(cl-flet*
+    ((mk-io-spec
+      (db-name db-sym version alt-title key-vals)
+      `(,(if alt-title (format "%s (v%s - %s)" db-name version alt-title)
+           (format "%s (v%s)" db-name version))
+        (,db-sym ,@key-vals)))
+     (mk-postgres
+      (version port &optional alt-title key-vals)
+      (->> (list :database "org_sql"
+                 :port port
+                 :hostname "localhost"
+                 :username "org_sql"
+                 :password "org_sql")
+           (append key-vals)
+           (mk-io-spec "Postgres" 'pgsql version alt-title)))
+     (mk-mysql
+      (title version port &optional alt-title key-vals)
+      (->> (list :database "org_sql"
+                 :port port
+                 :hostname "127.0.0.1"
+                 :username "org_sql"
+                 :password "org_sql")
+           (append key-vals)
+           (mk-io-spec title 'mysql version alt-title)))
+     (mk-sqlserver
+      (version port &optional alt-title key-vals)
+      (->> (list :database "org_sql"
+                 :server (format "tcp:localhost,%s" port)
+                 :username "org_sql"
+                 :password "org_sql333###")
+           (append key-vals)
+           (mk-io-spec "SQL-Server" 'sqlserver version alt-title))))
+  (let* ((sqlite (list "SQLite"
+                       '(sqlite :path "/tmp/org-sql-test.db")))
+         (postgres
+          (append
+           (mk-postgres 13 60013)
+           (mk-postgres 13 60013 "Non-Default Schema" '(:schema "nonpublic"))
+           (mk-postgres 13 60013 "Unlogged tables" '(:unlogged t))
+           (mk-postgres 12 60012)
+           (mk-postgres 11 60011)
+           (mk-postgres 10 60010)
+           (mk-postgres 9 60009)))
+         (mariadb
+          (append
+           (mk-mysql "MariaDB" 10.5 60105)
+           (mk-mysql "MariaDB" 10.4 60104)
+           (mk-mysql "MariaDB" 10.3 60103)
+           (mk-mysql "MariaDB" 10.2 60102)))
+         (mysql
+          (append
+           (mk-mysql "MySQL" 8.0 60280)
+           (mk-mysql "MySQL" 5.7 60257)))
+         (sqlserver
+          (append
+           ;; TODO add default schema
+           (mk-sqlserver 2019 60300 "Non-default Schema" '(:schema "nondbo")))))
+  (eval
+   `(describe-io-specs
+      ,@sqlite
+      ,@postgres
+      ,@mariadb
+      ,@mysql
+      ,@sqlserver))))
 
 ;;; org-sql-test-stateful ends here
