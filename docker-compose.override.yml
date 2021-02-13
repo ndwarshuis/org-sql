@@ -60,7 +60,10 @@ services:
   mariadb-104:
     extends:
       service: mariadb-latest
-    image: mariadb:10.4.17
+    build:
+      context: ./test/docker/mariadb
+      args:
+        IMAGE: mariadb:10.4.17
     container_name: org-sql-mariadb-104
     ports:
       - 60104:3306
@@ -68,7 +71,10 @@ services:
   mariadb-103:
     extends:
       service: mariadb-latest
-    image: mariadb:10.3.17
+    build:
+      context: ./test/docker/mariadb
+      args:
+        IMAGE: mariadb:10.3.17
     container_name: org-sql-mariadb-103
     ports:
       - 60103:3306
@@ -76,7 +82,10 @@ services:
   mariadb-102:
     extends:
       service: mariadb-latest
-    image: mariadb:10.2.36
+    build:
+      context: ./test/docker/mariadb
+      args:
+        IMAGE: mariadb:10.2.36
     container_name: org-sql-mariadb-102
     ports:
       - 60102:3306
@@ -84,13 +93,23 @@ services:
   ## mysql
 
   mysql-latest:
+    extends:
+      service: mariadb-latest
+    build:
+      context: ./test/docker/mariadb
+      args:
+        IMAGE: mysql:8.0.23
+    container_name: org-sql-mysql-latest
     ports:
       - 60280:3306
 
   mysql57:
     extends:
-      service: mysql-latest
-    image: mysql:5.7.33
+      service: mariadb-latest
+    build:
+      context: ./test/docker/mariadb
+      args:
+        IMAGE: mysql:5.7.33
     container_name: org-sql-mysql-57
     ports:
       - 60257:3306

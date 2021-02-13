@@ -8,32 +8,14 @@ services:
     environment:    
       - POSTGRES_PASSWORD=toor
       - POSTGRES_USER=root
-    # ports:
-    #   - 60000:5432
 
+  ## ASSUME the mariadb and mysql docker images use the same service config
   mariadb-latest:
-    image: mariadb:10.5.8
+    build: ./test/docker/mariadb
     container_name: org-sql-mariadb-latest
     restart: 'no'
     environment:    
       - MYSQL_ROOT_PASSWORD=toor
-      - MYSQL_USER=org_sql
-      - MYSQL_PASSWORD=org_sql
-      - MYSQL_DATABASE=org_sql
-    # ports:
-    #   - 60100:3306
-
-  mysql-latest:
-    image: mysql:8.0.23
-    container_name: org-sql-mysql-latest
-    restart: 'no'
-    environment:    
-      - MYSQL_ROOT_PASSWORD=toor
-      - MYSQL_USER=org_sql
-      - MYSQL_PASSWORD=org_sql
-      - MYSQL_DATABASE=org_sql
-    # ports:
-    #   - 60200:3306
 
   sqlserver-latest:
     build: ./test/docker/sql-server
@@ -42,5 +24,3 @@ services:
     environment:
       - ACCEPT_EULA=Y
       - SA_PASSWORD=org_sql222@@@
-    # ports:
-    #   - 60300:1433
