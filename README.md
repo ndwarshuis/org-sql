@@ -59,12 +59,12 @@ are in your PATH):
 
 ### Database Servers
 
-The following databases servers are supported and tested:
+The following databases servers/versions are supported and tested:
 
-- PostgreSQL 12
-- MariaDB 10.5
-- MySQL 5.6
-- SQL-Server 2019-CU8
+- PostgreSQL (13, 12, 11, 10, 9)
+- MariaDB (10.5, 10.4, 10.3, 10.2)
+- MySQL (8.0, 5.6)
+- SQL-Server (2019, 2017)
 
 Many versions besides these will likely work; these are simply those that are in
 the testing suite.
@@ -89,7 +89,7 @@ details.
 
 The database connection is controlled by `org-sql-db-config`. This is where one
 would choose the database client (and server connection if applicable) as well
-as database specific behavior. The format for this variable is like `(DB-TYPE
+as database-specific behavior. The format for this variable is like `(DB-TYPE
 [KEY VAL] [[KEY VAL] ...])` where `DB-TYPE` is the type of database to use and
 the `KEY-VAL` pairs are options for that database.
 
@@ -111,12 +111,13 @@ file where the database will be stored).
 
 The only required key for these is `:database` which is the database name to use.
 
-Any needs not met by the the more specific keys below can be covered using the
-`:args` and `:env` keys. The former is a list of additional arguments to send to
-the client command, and the latter is a list of 2-membered lists like `(VAR
-VAL)` which sets the environmental values with which the client command will
-run. Consult the documentation for the client command (eg `psql`, `mysql`, or
-`sqlcmd`) for which arguments and environemtal variables make sense.
+Most other needs should be satisfied by the database-specific keys in each
+subsection below. If your configuration requires more than this, the `:args`
+and `:env` key exists as catchall keys. The former is a list of additional
+arguments to send to the client command, and the latter is a list of 2-membered
+lists like `(VAR VAL)` which sets the environmental values with which the client
+command will run. Consult the documentation for the client command (eg `psql`,
+`mysql`, or `sqlcmd`) for which arguments and environemtal variables make sense.
 
 #### Postgres
 
@@ -126,8 +127,8 @@ From here many other options are possible. A simple setup (eg one using a
 straightforward docker deployment) might define a username, password, and port
 (denoted by the `:username`, `:password`, and `:port` keys respectively). If the
 database stores other data alongside that from `org-sql`, one can create a
-schema specifically for `org-sql` set the `:schema` key with the name of this
-schema.
+schema specifically for `org-sql` and set the `:schema` key with the name of
+this schema.
 
 To prevent leaking a password in plain text, one can use a `.pgpass` file as
 normally used with the `psql` command, or set the `:pass-file` key to the path
@@ -138,14 +139,14 @@ As an additional performance optimization, set the `:unlogged` key as t to use
 unlogged tables. This may significantly boost performance, particularly for
 functions in `org-sql` that do bulk inserts (eg `org-sql-user-push` and
 `org-sql-push-to-db`). The tradeoff is data loss if the database crashes during
-a transaction, which may not be a terrible cost if the org-files denoted by
+a transaction, which may be acceptable if the org-files denoted by
 `org-sql-files` are more permanent than the database itself. NOTE: this only
 sets the unlogged property on the tables that `org-sql` uses; no other tables
 will be changed.
 
 #### MySQL/MariaDB
 
-Likely one would also set the `:hostname` key unless using the localhost.
+Likely one would set the `:hostname` key unless using the localhost.
 
 Similar to Postgres, a simple setup might define a username, password, and port
 (denoted by the `:username`, `:password`, and `:port` keys respectively). Unlike
@@ -162,12 +163,12 @@ for the defaults-extra file (`:defaults-extra-file`).
 
 Likely one would set the `:server` key to denote the instance of the server
 to use (eg `"tcp:example.com,1443"`). Note that this takes the place of the
-`:hostname`/`:port` keys for MySQL and Postgres 
+`:hostname`/`:port` keys for MySQL and Postgres.
 
 Specify the username and password using the keys `:username` and `password`
 respectively. If the database stores other data alongside that from `org-sql`,
-one can create a schema specifically for `org-sql` set the `:schema` key with
-the name of this schema.
+one can create a schema specifically for `org-sql` and set the `:schema` key
+with the name of this schema.
 
 To prevent hardcoding the password in Emacs code, one can set the `"SQLCMDINI"`
 environmental variable in the `:env` key (see above) to the path of a startup
@@ -177,7 +178,7 @@ variable.
 ## Database Preparation
 
 Since `org-sql` cannot assume it has superuser access to your database and/or
-filesystem, external configuration will be necessary in almost all cases before
+filesystem, external configuration will be necessary in many cases before
 running any commands with this package.
 
 ### SQLite
@@ -189,11 +190,15 @@ is writable to the same user running emacs.
 
 The database server as well as the database itself (eg the database defined by
 the `:database` key) must already exist. Additionally, there must be a role
-defined that `org-sql` can use for the connection. The schema defined by
-`:schema` itself must also already exist (or the `public` schema if `:schema` is
-not given should exist in the case of Postgres), and the role to be used by
-`org-sql` must have authorization to create tables and insert/delete rows from
-those tables on this schema.
+defined that `org-sql` can use for the connection. If `:schema` is non-nil, the
+schema defined by this key must already exist. If it is undefined, `org-sql`
+will use the default schema (`public` for Postgres and usually `dbo` for
+SQL-Server). In any case, the role to be used by `org-sql` must have
+authorization to create tables and insert/delete rows from those tables on the
+configured schema.
+
+See init files for [Postgres](test/docker/postgres/init/org_sql.sql) and 
+[SQL-Server](test/docker/sql-server/init/org_sql.sql) for bare-bones examples.
 
 ### MySQL/MariaDB
 
@@ -201,13 +206,17 @@ The database server must already exist and the database defined by the
 `:database` key must also already exist. The user used by `org-sql` to connect
 must have permissions to create tables and insert/delete data from said tables.
 
+See the init file for [MariaDB](test/docker/mariadb/init/org_sql.sql) for 
+bare-bones example.
+
 ## Database Customization
 
-Org-SQL by default will only create tables (with pimary and foreign keys) and
+`org-sql` by default will only create tables (with pimary and foreign keys) and
 insert/delete data in these tables. If you want to do anything beyond this such
 as creating additional indexes, adding triggers, defining and calling
-procedures, etc one can do so through 'hooks'. These are variables that hold
-additional SQL statements that will be run along with the functions in Org-SQL.
+procedures, etc, one can do so through 'hooks'. These are variables that hold
+additional SQL statements that will be run along with the functions in 
+`org-sql`.
 
 These variables are:
 - `org-sql-post-init-hooks`: run after `org-sql-init-db`
@@ -220,13 +229,17 @@ statements and how to control their execution.
 
 # Usage
 
-## Initializing
+## Interactive Functions
 
-Run `org-sql-user-reset`. This will create a new database and initialize it with
-the default table layout. It will also delete an existing database before
-creating the new one if it exists.
+The following functions can be invoked using `M-x` and should cover the simple
+use case of creating a database and syncing org files to it.
 
-## Updating
+### Initializing
+
+Run `org-sql-user-init`. In the case of SQLite, this will create a new database
+file. In all cases this will create the tables associated with `org-sql`.
+
+### Updating
 
 Run `org-sql-user-push`. This will synchronize the database with all files as
 indicated in `org-sql-files` by first checking if the file is in the database
@@ -248,14 +261,19 @@ efficient way to 'update' a file is to delete and reinsert it into the database,
 changing one character in a large file will cause that entire file to be
 inserted.
 
-## Removing all data
+### Removing all data
 
 Run `org-sql-user-clear-all`. This will clear all data but leave the schema.
 
+### Resetting
+
+Run `org-sql-user-reset`. This will drop all tables associated with `org-sql`.
+In the case of SQLite, this will also delete the database file.
+
 ## Public API
 
-Besides the above interactive functions, `org-sql` exposes the following public
-functions for interacting with the database.
+`org-sql` exposes the following public functions for interacting with the
+database beyond the use cases covered by the above interactive functions:
 
 - Table-level Operations
   - `org-sql-create-tables`
@@ -303,14 +321,6 @@ properly parse logbooks (particulary the latter).
 
 # Database Layout
 
-Generally, the database is arranged from the perspective of the 'org-tree' (each
-with a unique MD5 hash). Any org-tree might exists in identical files.
-Therefore, the toplevel table in the database stores hashes for org-trees and
-this is referenced by a child table which stores the file paths for the
-org-tree. This might seem backwards, but if the file paths were in the parent
-table rather than the org-trees, data for any identical org-trees would need to
-be duplicated.
-
 ## General design features
 
 - All foreign keys are set with `DELETE CASCADE`
@@ -345,11 +355,12 @@ servers).
 
 In addition to all required dependencies above:
 
-- cask
-- make
+- [cask](https://github.com/cask/cask)
 - docker
 - docker-compose
-- erd
+- [erd](https://github.com/BurntSushi/erd)
+- make
+
 
 ## Emacs setup
 
@@ -362,7 +373,8 @@ cask install --dev
 ## Test environment setup
 
 Except for SQLite, the each database for testing is encoded and set up using
-`docker-compose` (see the included `docker-compose.yml` file). These are
+`docker-compose` (see the included `docker-compose.yml` and
+`docker-compose.override.yml` files). These are
 necessary to run the stateful tests above.
 
 To set up the environment, start the docker-daemon (may require sudo).
@@ -376,6 +388,22 @@ To shut down the environment:
 ``` sh
 docker-compose down
 ```
+
+### Dockerfile/Docker-compose Layout
+
+Customization of the `docker-compose` files should not be necessary except when
+adding a new database for testing (or a new version). The 'base' docker images
+are defined using [Dockerfiles](test/docker), which in turn are built with SQL
+initialization scripts (which are necessary to test the containers with minimal
+privileges). Each Dockerfile has an overridable `IMAGE` argument whose default
+is set to the latest version of the container to pull. Note that MariaDB and
+MySQL are assumed to share the exact same container configuration, and thus they
+share the same Dockerfile.
+
+The `docker-compose` configuration is split between `docker-compose.yml` and
+`docker-compose.override.yml`, with the latter defining the ports (every
+container is bound to a separate port loosely matching its version) and `IMAGE`
+and the former defining everything else.
 
 ## Running tests
 

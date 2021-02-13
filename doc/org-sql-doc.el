@@ -141,13 +141,37 @@
             (rest* (s-join ", " rest)))
       (format "%s, or %s" rest* (car last)))))
 
+;; TODO this is a good idea but could be clearer, perhaps a separate column?
+;; (defun org-sql-doc-format-org-element-props (desc props)
+;;   (cl-flet
+;;       ((join-with-and
+;;         (xs)
+;;         (format "%s and %s" (s-join ", " (-drop-last 1 xs)) (-last-item xs))))
+;;     (cond
+;;      ((= 0 (length props))
+;;       desc)
+;;      ((= 1 (length props))
+;;       (->> (car props)
+;;            (format "%s (corresponds to the org-element `%s` property)" desc )))
+;;      ((< 1 (length props))
+;;       (->> (--map (format "`%s`" it) props)
+;;            (join-with-and)
+;;            (format "%s (corresponds to the org-element %s properties)" desc))))))
+
 (defun org-sql-doc-format-column (column-meta constraints-meta)
-  (-let* (((column-name . (&plist :desc :type :constraints :allowed)) column-meta)
+  (-let* (((column-name . (&plist :desc :type :properties :constraints :allowed))
+           column-meta)
           ((&alist 'primary) constraints-meta)
           (primary-keys (plist-get primary :keys))
           (column-name* (org-sql--format-column-name column-name))
           (allowed* (org-sql-doc-format-allowed-values allowed))
-          (desc* (org-sql-doc-format-quotes desc))
+          (desc* (-> (if (consp desc) (s-join " " desc) desc)))
+                     ;; (org-sql-doc-format-org-element-props properties)))
+                   ;; (org-sql-doc-format-quotes it)
+                   ;; (if property
+                   ;;     (format "%s (corresponds to the org-element `%s` property)"
+                   ;;             it property)
+                   ;;   it)))
           (desc-full (if allowed* (format "%s (%s)" desc* allowed*) desc*)))
     (->> (list column-name* desc-full)
          (org-sql-doc-format-table-row))))

@@ -2,7 +2,7 @@
 
 ## outlines
 
-Each row stores the hash and size for an org outline
+Each row stores the hash and size for the contents of one org file (here called an `outline`). Note that if there are identical org files, only one `outline` will be stored in the database (as determined by the unique hash) and the paths shared the outline will be reflected in the `file_metadata` table.
 
 | Column | Description |
 |  -  |  -  |
@@ -12,7 +12,7 @@ Each row stores the hash and size for an org outline
 
 ## file_metadata
 
-Each row stores filesystem metadata for one tracked org file. Note that one org outline can have multiple paths pointing to it.
+Each row stores filesystem metadata for one tracked org file.
 
 | Column | Description |
 |  -  |  -  |
@@ -26,25 +26,25 @@ Each row stores filesystem metadata for one tracked org file. Note that one org 
 
 ## headlines
 
-Each row stores one headline in a given org outline
+Each row stores one headline in a given org outline.
 
 | Column | Description |
 |  -  |  -  |
 | headline_id | id of this headline |
 | outline_hash | hash (MD5) of the org outline with this headline |
-| headline_text | raw text of the headline |
+| headline_text | raw text of the headline without leading stars or tags |
 | keyword | the TODO state keyword |
-| effort | the value of the Effort property in minutes |
+| effort | the value of the `Effort` property in minutes |
 | priority | character value of the priority |
-| stats_cookie_type | type of the statistics cookie (the "[n/d]" or "[p%]" at the end of some headlines) (`fraction`, or `percent`) |
+| stats_cookie_type | type of the statistics cookie (the `[n/d]` or `[p%]` at the end of some headlines) (`fraction`, or `percent`) |
 | stats_cookie_value | value of the statistics cookie (between 0 and 1) |
-| is_archived | true if the headline has an ARCHIVE tag |
-| is_commented | true if the headline has a COMMENT keyword |
-| content | the headline contents |
+| is_archived | TRUE if the headline has an ARCHIVE tag |
+| is_commented | TRUE if the headline has a COMMENT keyword |
+| content | the headline contents (everything after the planning entries, property-drawer, and/or logbook) |
 
 ## headline_closures
 
-Each row stores the ancestor and depth of a headline relationship. All headlines will have a 0-depth entry in which 'parent_id' and 'headline_id' are equal.
+Each row stores the ancestor and depth of a headline relationship. All headlines will have a 0-depth entry in which `parent_id` and `headline_id` are equal.
 
 | Column | Description |
 |  -  |  -  |
@@ -54,7 +54,7 @@ Each row stores the ancestor and depth of a headline relationship. All headlines
 
 ## timestamps
 
-Each row stores one timestamp. Any timestamps in this table that are not referenced in other tables are part of the headlines's contents (the part after the logbook
+Each row stores one timestamp. Any timestamps in this table that are not referenced in other tables are part of the headlines's contents (the part after the logbook).
 
 | Column | Description |
 |  -  |  -  |
@@ -64,12 +64,12 @@ Each row stores one timestamp. Any timestamps in this table that are not referen
 | is_active | true if the timestamp is active |
 | time_start | the start time (or only time) of this timestamp |
 | time_end | the end time of this timestamp |
-| start_is_long | true if the start time is in long format |
-| end_is_long | true if the end time is in long format |
+| start_is_long | true if the start time is in long format (eg `[YYYY-MM-DD DOW HH:MM]` vs `[YYYY-MM-DD DOW]`) |
+| end_is_long | true if the end time is in long format (see `start_is_long`) |
 
 ## timestamp_warnings
 
-Each row stores the warning component for a timestamp
+Each row stores the warning component for a timestamp.
 
 | Column | Description |
 |  -  |  -  |
@@ -80,7 +80,7 @@ Each row stores the warning component for a timestamp
 
 ## timestamp_repeaters
 
-Each row stores the repeater component for a timestamp
+Each row stores the repeater component for a timestamp.
 
 | Column | Description |
 |  -  |  -  |
@@ -91,7 +91,7 @@ Each row stores the repeater component for a timestamp
 
 ## planning_entries
 
-Each row denotes a timestamp which is a planning entry (eg DEADLINE, SCHEDULED, or CLOSED).
+Each row denotes a timestamp which is a planning entry (eg `DEADLINE`, `SCHEDULED`, or `CLOSED`).
 
 | Column | Description |
 |  -  |  -  |
@@ -100,7 +100,7 @@ Each row denotes a timestamp which is a planning entry (eg DEADLINE, SCHEDULED, 
 
 ## file_tags
 
-Each row stores one tag denoted by the "#+FILETAGS" keyword
+Each row stores one tag denoted by the `#+FILETAGS` keyword
 
 | Column | Description |
 |  -  |  -  |
@@ -109,17 +109,17 @@ Each row stores one tag denoted by the "#+FILETAGS" keyword
 
 ## headline_tags
 
-Each row stores one tag attached to a headline. This includes tags actively attached to a headlines as well as those in the "ACHIVE_ITAGS" property within archive files. The 'is_inherited' field will only be TRUE for the latter.
+Each row stores one tag attached to a headline. This includes tags actively attached to a headlines as well as those in the `ARCHIVE_ITAGS` property within archive files. The `is_inherited` field will only be TRUE for the latter.
 
 | Column | Description |
 |  -  |  -  |
 | headline_id | id of the headline for this tag |
 | tag | the text value of this tag |
-| is_inherited | true if this tag is from the ITAGS property |
+| is_inherited | TRUE if this tag is from the `ARCHIVE_ITAGS` property |
 
 ## properties
 
-Each row stores one property. Note this includes properties under headlines as well as properties defined at the file-level using "#+PROPERTY"
+Each row stores one property. Note this includes properties under headlines as well as properties defined at the file-level using `#+PROPERTY`.
 
 | Column | Description |
 |  -  |  -  |
@@ -130,7 +130,7 @@ Each row stores one property. Note this includes properties under headlines as w
 
 ## headline_properties
 
-Each row stores a property under a headline
+Each row stores a property under a headline.
 
 | Column | Description |
 |  -  |  -  |
@@ -151,20 +151,20 @@ Each row stores one clock entry.
 
 ## logbook_entries
 
-Each row stores one logbook entry (except for clocks).
+Each row stores one logbook entry (except for clocks). Note that the possible values of `entry_type` depend on `org-log-note-headlines`. By default, the possible types are: `reschedule`, `delschedule`, `redeadline`, `deldeadline`, `state`, `done`, `note`, and `refile`. Note that while `clock-out` is also a default type in `org-log-note-headings` but this is already covered by the `clock_note` column in the `clocks` table and thus won't be stored in this table.
 
 | Column | Description |
 |  -  |  -  |
 | entry_id | id of this entry |
 | headline_id | id of the headline for this logbook entry |
-| entry_type | type of this entry (see `org-log-note-headlines`) |
+| entry_type | type of this entry |
 | time_logged | timestamp for when this entry was taken |
 | header | the first line of this entry (usually standardized) |
-| note | the text of this entry underneath the header |
+| note | the text underneath the header of this entry  |
 
 ## state_changes
 
-Each row stores the new and old states for logbook entries of type 'state'.
+Each row stores the new and old states for logbook entries of type `state`.
 
 | Column | Description |
 |  -  |  -  |
@@ -174,7 +174,7 @@ Each row stores the new and old states for logbook entries of type 'state'.
 
 ## planning_changes
 
-Each row stores the former timestamp for logbook entries with type 'reschedule', 'delschedule', 'redeadline', and 'deldeadline'
+Each row stores the former timestamp for logbook entries with type `reschedule`, `delschedule`, `redeadline`, and `deldeadline`.
 
 | Column | Description |
 |  -  |  -  |
@@ -183,12 +183,12 @@ Each row stores the former timestamp for logbook entries with type 'reschedule',
 
 ## links
 
-Each row stores one link
+Each row stores one link.
 
 | Column | Description |
 |  -  |  -  |
 | link_id | id of this link |
 | headline_id | id of the headline for this link |
 | link_path | target of this link (eg url, file path, etc) |
-| link_text | text of this link |
+| link_text | text of this link that isn't part of the path |
 | link_type | type of this link (eg http, mu4e, file, etc) |1.1.0
