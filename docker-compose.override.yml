@@ -99,4 +99,15 @@ services:
 
   sqlserver-latest:
     ports:
-      - 60300:1433
+      - 60319:1433
+
+  sqlserver-2017:
+    extends:
+      service: sqlserver-latest
+    container_name: org-sql-sqlserver-2017
+    build:
+      context: ./test/docker/sql-server
+      args:
+        IMAGE: mcr.microsoft.com/mssql/server:2017-CU22-ubuntu-16.04
+    ports:
+      - 60317:1433

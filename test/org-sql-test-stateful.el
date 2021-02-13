@@ -584,8 +584,8 @@
            (mk-mysql "MySQL" 5.7 60257)))
          (sqlserver
           (append
-           ;; TODO add default schema
-           (mk-sqlserver 2019 60300 "Non-default Schema" '(:schema "nondbo")))))
+           (mk-sqlserver 2019 60319 nil '(:schema "nondbo"))
+           (mk-sqlserver 2017 60317 nil '(:schema "nondbo")))))
   (eval
    `(describe-io-specs
       ,@sqlite
