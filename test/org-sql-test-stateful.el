@@ -248,8 +248,8 @@
        (org-sql-init-db))
 
      (after-all
-       (ignore-error
-           (org-sq-reset-db)))
+       (ignore-errors
+         (org-sql-reset-db)))
 
      ,(mk-single nil)
      ,(mk-single t)
