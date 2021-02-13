@@ -2670,7 +2670,7 @@ STATEMENTS will be formated to a single transaction (eg with
        (org-sql-send-sql)))
 
 (defun org-sql--group-hooks (hooks)
-  "Return HOOK with statements grouped.
+  "Return HOOKS with statements grouped.
 Returned list will be like (INSIDE-TRANS OUTSIDE-TRANS)."
   (-some->> hooks
     ;; t = INSIDE
@@ -2687,8 +2687,8 @@ Returned list will be like (INSIDE-TRANS OUTSIDE-TRANS)."
 (defun org-sql--send-transaction-with-hook (pre-hooks post-hooks trans-stmts)
   "Send TRANS-STMTS to the configured database client.
 STATEMENTS will be formated to a single transaction (eg with
-\"BEGIN; ... COMMIT;\"). Additionally, any hook statements found
-using PRE-KEY and POST-KEY will be appended before or after
+\"BEGIN; ... COMMIT;\"). Additionally, any hook statements in
+using PRE-HOOKS and POST-HOOKS will be appended before or after
 TRANS-STATEMENTS (either inside or outside the transaction
 boundaries depending on the hook)."
   (-let* (((pre-in-trans before-trans) (org-sql--group-hooks pre-hooks))
