@@ -2978,37 +2978,34 @@ process to run asynchronously."
 ;;
 ;; these are wrappers around the more useful functions above
 
-;; TODO refactor these...
+(defmacro org-sql--on-user-success (form name)
+  "Execute FORM with optional messaging for failure and success.
+NAME is an identifier used in the success/error messages if
+printed."
+  `(org-sql--on-success ,form
+    (progn
+      (when org-sql-debug
+        (message "Debug output for %s" ,name)
+        (message (if (equal it-out "") "Run Successfully" it-out)))
+      (message "%s completed" ,name))
+    (progn
+      (message "%s failed" ,name)
+      (when org-sql-debug
+        (message it-out)))))
+
 (defun org-sql-user-init ()
   "Init the database with default table layout.
 Calls `org-sql-init-db'."
   (interactive)
-  (org-sql--on-success (org-sql-init-db)
-    (progn
-      (when org-sql-debug
-        (print "Debug output for org-sql-user-init")
-        (print (if (equal it-out "") "Run Successfully" it-out)))
-      (message "Org SQL init completed"))
-    (progn
-      (message "Org SQL init failed")
-      (when org-sql-debug
-        (message it-out)))))
+  (message "Initializing the Org SQL database")
+  (org-sql--on-user-success (org-sql-init-db) "org-sql-init-db"))
 
 (defun org-sql-user-push ()
   "Push current org-file state to the database.
 Calls `org-sql-push-to-db'."
   (interactive)
   (message "Pushing data to Org SQL database")
-  (org-sql--on-success (org-sql-push-to-db)
-    (progn
-      (when org-sql-debug
-        (print "Debug output for org-sql-user-push")
-        (print (if (equal it-out "") "Run Successfully" it-out)))
-      (message "Org SQL update complete"))
-    (progn
-      (message "Org SQL push failed")
-      (when org-sql-debug
-        (message it-out)))))
+  (org-sql--on-user-success (org-sql-push-to-db) "org-sql-push-to-db"))
 
 (defun org-sql-user-clear ()
   "Remove all entries in the database.
@@ -3016,17 +3013,8 @@ Calls `org-sql-clear-db'."
   (interactive)
   (if (y-or-n-p "Really clear all? ")
       (progn
-        (message "Clearing Org SQL database")
-        (org-sql--on-success (org-sql-clear-db)
-          (progn
-            (when org-sql-debug
-              (print "Debug output for org-sql-user-clear")
-              (print (if (equal it-out "") "Run Successfully" it-out)))
-            (message "Org SQL clear completed"))
-          (progn
-            (message "Org SQL clear failed")
-            (when org-sql-debug
-              (message it-out)))))
+        (message "Clearing the Org SQL database")
+        (org-sql--on-user-success (org-sql-clear-db) "org-sql-clear-db"))
     (message "Aborted")))
 
 (defun org-sql-user-reset ()
@@ -3035,17 +3023,8 @@ Calls `org-sql-reset-db'."
   (interactive)
   (if (y-or-n-p "Really reset database? ")
       (progn
-        (org-sql--on-success (org-sql-reset-db)
-          (progn
-            (message "Resetting Org SQL database")
-            (when org-sql-debug
-              (print "Debug output for org-sql-user-reset")
-              (print (if (equal it-out "") "Run Successfully" it-out)))
-            (message "Org SQL reset completed"))
-          (progn
-            (message "Org SQL reset failed")
-            (when org-sql-debug
-              (message it-out)))))
+        (message "Resetting the Org SQL database")
+        (org-sql--on-user-success (org-sql-reset-db) "org-sql-reset-db"))
     (message "Aborted")))
 
 (provide 'org-sql)
