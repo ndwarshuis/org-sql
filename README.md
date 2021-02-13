@@ -332,13 +332,13 @@ properly parse logbooks (particulary the latter).
 The table layouts for each implementation are more or less identical; the only
 differences are the types.
 
-[MySQL/MariaDB](doc/erd/erd-mysql.pdf) 
+[MySQL/MariaDB](doc/erd/erd-mysql.png) 
 
-[PostgreSQL](doc/erd/erd-postgres.pdf) 
+[PostgreSQL](doc/erd/erd-postgres.png) 
 
-[SQLite](doc/erd/erd-sqlite.pdf) 
+[SQLite](doc/erd/erd-sqlite.png) 
 
-[SQL Server](doc/erd/erd-sql-server.pdf) 
+[SQL Server](doc/erd/erd-sql-server.png) 
 
 ## Table Descriptions
 
