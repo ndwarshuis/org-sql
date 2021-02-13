@@ -113,50 +113,15 @@
            (org-sql-drop-db)))
        ,@it-forms)))
 
-;; (defmacro describe-sql-namespace-spec (config)
-;;   (let ((it-forms
-;;          (org-sql--case-mode config
-;;            ((mysql sqlite)
-;;             '((it "create namespace should error"
-;;                 (should-error (org-sql-create-namespace)))
-;;               (it "drop namespace should error"
-;;                 (should-error (org-sql-drop-namespace)))
-;;               (it "testing for existence should error"
-;;                 (should-error (org-sql-namespace-exists)))))
-;;            ((postgres sqlserver)
-;;             '((it "create namespace"
-;;                 (expect-exit-success (org-sql-create-namespace)))
-;;               (it "namespace should exist"
-;;                 (expect (org-sql-namespace-exists)))
-;;               (it "drop namespace"
-;;                 (expect-exit-success (org-sql-drop-namespace)))
-;;               (it "namespace should not exist"
-;;                 (expect (not (org-sql-namespace-exists)))))))))
-;;     `(describe "Namespace Admin Spec"
-;;        (before-all
-;;          (setq org-sql-db-config ',config)
-;;          (ignore-errors
-;;            (org-sql-create-db)))
-;;        (after-all
-;;          (ignore-errors
-;;            (org-sql-drop-namespace))
-;;          (ignore-errors
-;;            (org-sql-drop-db)))
-;;        ,@it-forms)))
-
 (defmacro describe-sql-table-spec (config)
   `(describe "Table Admin Spec"
      (before-all
        (setq org-sql-db-config ',config)
        (ignore-errors
          (org-sql-create-db)))
-       ;; (ignore-errors
-       ;;   (org-sql-create-namespace)))
      (after-all
        (ignore-errors
          (org-sql-drop-tables))
-       ;; (ignore-errors
-       ;;   (org-sql-drop-namespace))
        (ignore-errors
          (org-sql-drop-db)))
      (it "create tables"

@@ -533,7 +533,6 @@ to store them. This is in addition to any properties specifified by
   :group 'org)
 
 ;; TODO add sqlite pragma (synchronous and journalmode)
-;; TODO add postgres transaction options
 
 ;; I could use `define-widget' here but it doesn't seem to work with a type this
 ;; complex (it lets me configure the type properly but then says MISCONFIGURED
