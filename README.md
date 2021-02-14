@@ -270,6 +270,21 @@ Run `org-sql-user-clear-all`. This will clear all data but leave the schema.
 Run `org-sql-user-reset`. This will drop all tables associated with `org-sql`.
 In the case of SQLite, this will also delete the database file.
 
+### Debugging
+
+The interactive functions above will print a "success" message if the client
+command returns an exit code of 0. While a non-zero exit code almost certainly
+means something went wrong, **the transaction may still have failed even if the
+client returned 0.** If running a command seems to have no effect on the
+database, set `org-sql-debug` to t and run the command again. This will print
+any additional output given by the client (which are configured when called by
+`org-sql` to print errors to stdout/stderr) and will likely explain what went
+wrong.
+
+Additionally, the command `org-sql-dump-push-transaction` will print the
+transaction used by the `org-sql-push-to-db` and `org-sql-user-push` commands.
+
+
 ## Public API
 
 `org-sql` exposes the following public functions for interacting with the

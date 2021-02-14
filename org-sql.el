@@ -2609,8 +2609,8 @@ state as the orgfiles on disk."
                (--map (org-sql--hashpathpair-get-outline-config (car it) (cdr it)))
                (org-sql--format-insert-statements org-sql-db-config max-ids pi*)))))
 
-(defun org-sql-dump-update-transactions ()
-  "Dump the update transaction to a separate buffer."
+(defun org-sql-dump-push-transaction ()
+  "Dump the push transaction to a separate buffer."
   (let ((out (->> (org-sql--get-transactions)
                   (org-sql--format-sql-transaction org-sql-db-config))))
     (switch-to-buffer "SQL: Org-update-dump")
