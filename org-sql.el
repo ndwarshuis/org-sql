@@ -1758,7 +1758,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
         (s)
         (when (org-duration-p s)
           (round (org-duration-to-minutes s)))))
-    (-let* (((&plist :file-path :lb-config :headline) hstate)
+    (-let* (((&plist :outline-hash :lb-config :headline) hstate)
             (supercontents (org-ml-headline-get-supercontents lb-config headline))
             (logbook (org-ml-supercontents-get-logbook supercontents))
             (sc (-some->> (org-ml-headline-get-statistics-cookie headline)
