@@ -1756,12 +1756,8 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
   (cl-flet
       ((effort-to-int
         (s)
-        (pcase (-some->> s
-                 (string-trim)
-                 (s-match "^\\(\\([0-9]+\\)\\|\\([0-9]+\\):\\([0-6][0-9]\\)\\)$")
-                 (-drop 2))
-          (`(nil ,h ,m) (+ (* 60 (string-to-number h)) (string-to-number m)))
-          (`(,m) (string-to-number m)))))
+        (when (org-duration-p s)
+          (round (org-duration-to-minutes s)))))
     (-let* (((&plist :outline-hash :lb-config :headline) hstate)
             (supercontents (org-ml-headline-get-supercontents lb-config headline))
             (logbook (org-ml-supercontents-get-logbook supercontents))
