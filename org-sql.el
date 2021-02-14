@@ -2130,8 +2130,8 @@ of the table."
                          (org-sql--format-enum-name config))))
            (sqlite "TEXT")
            (sqlserver (-if-let (length (plist-get (cdr column) :length))
-                          (format "VARCHAR(%s)" length)
-                        "TEXT"))))
+                          (format "NVARCHAR(%s)" length)
+                        "NVARCHAR(MAX)"))))
         (integer
          "INTEGER")
         (real

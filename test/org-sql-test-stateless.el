@@ -1074,49 +1074,99 @@ list then join the cdr of IN with newlines."
 
 (defun expect-formatter (type input &rest value-plist)
   (declare (indent 2))
-  (-let (((&plist :sqlite :postgres) value-plist))
+  (-let (((&plist :sqlite :postgres :mysql :sqlserver) value-plist))
+    (expect (format-with '(mysql) type input) :to-equal mysql)
+    (expect (format-with '(pgsql) type input) :to-equal postgres)
     (expect (format-with '(sqlite) type input) :to-equal sqlite)
-    (expect (format-with '(pgsql) type input) :to-equal postgres)))
+    (expect (format-with '(sqlserver) type input) :to-equal sqlserver)))
 
-(describe "meta-query language type formatting spec"
-  (it "boolean (NULL)"
-    (expect-formatter 'boolean nil :sqlite "NULL" :postgres "NULL"))
+(describe "type formatting spec"
+  (describe "boolean"
+    (it "NULL"
+      (expect-formatter 'boolean nil
+        :mysql "NULL"
+        :postgres "NULL"
+        :sqlite "NULL"
+        :sqlserver "NULL"))
 
-  (it "boolean (TRUE)"
-    (expect-formatter 'boolean 1 :sqlite "1" :postgres "TRUE"))
+    (it "TRUE"
+      (expect-formatter 'boolean 1
+        :mysql "TRUE"
+        :postgres "TRUE"
+        :sqlite "1"
+        :sqlserver "1"))
 
-  (it "boolean (FALSE)"
-    (expect-formatter 'boolean 0 :sqlite "0" :postgres "FALSE"))
+    (it "FALSE"
+      (expect-formatter 'boolean 0
+        :mysql "FALSE"
+        :postgres "FALSE"
+        :sqlite "0"
+        :sqlserver "0")))
 
-  (it "enum (NULL)"
-    (expect-formatter 'enum nil :sqlite "NULL" :postgres "NULL"))
+  (describe "enum"
+    (it "NULL"
+      (expect-formatter 'enum nil
+        :mysql "NULL"
+        :postgres "NULL"
+        :sqlite "NULL"
+        :sqlserver "NULL"))
 
-  (it "enum (defined)"
-    (expect-formatter 'enum 'foo :sqlite "'foo'" :postgres "'foo'"))
+    (it "defined"
+      (expect-formatter 'enum 'foo
+        :mysql "'foo'"
+        :postgres "'foo'"
+        :sqlite "'foo'"
+        :sqlserver "'foo'")))
 
-  (it "integer (NULL)"
-    (expect-formatter 'integer nil :sqlite "NULL" :postgres "NULL"))
+  ;; ASSUME this is the same as REAL
+  (describe "integer"
+    (it "NULL"
+      (expect-formatter 'integer nil
+        :mysql "NULL"
+        :postgres "NULL"
+        :sqlite "NULL"
+        :sqlserver "NULL"))
 
-  (it "integer (defined)"
-    (expect-formatter 'integer 123456 :sqlite "123456" :postgres "123456"))
+    (it "defined"
+      (expect-formatter 'integer 123456
+        :mysql "123456"
+        :postgres "123456"
+        :sqlite "123456"
+        :sqlserver "123456")))
 
-  (it "text (NULL)"
-    (expect-formatter 'text nil :sqlite "NULL" :postgres "NULL"))
+  ;; ASSUME this is the same as VARCHAR and CHAR
+  (describe "text"
+    (it "NULL"
+      (expect-formatter 'text nil
+        :mysql "NULL"
+        :postgres "NULL"
+        :sqlite "NULL"
+        :sqlserver "NULL"))
 
-  (it "text (plain)"
-    (expect-formatter 'text "foo" :sqlite "'foo'" :postgres "'foo'"))
-  
-  (it "text (newlines)"
-    (expect-formatter 'text "foo\nbar"
-                      :sqlite "'foo'||char(10)||'bar'"
-                      :postgres "'foo'||chr(10)||'bar'"))
+    (it "plain"
+      (expect-formatter 'text "foo"
+        :mysql "'foo'"
+        :postgres "'foo'"
+        :sqlite "'foo'"
+        :sqlserver "'foo'"))
+    
+    (it "newlines"
+      (expect-formatter 'text "foo\nbar"
+        :mysql "'foo\\\\nbar'"
+        :postgres "'foo'||chr(10)||'bar'"
+        :sqlite "'foo'||char(10)||'bar'"
+        :sqlserver "'foo+Char(10)+bar'"))
 
-  (it "text (quotes)"
-    (expect-formatter 'text "'foo'" :sqlite "'''foo'''" :postgres "'''foo'''")))
+    (it "quotes"
+      (expect-formatter 'text "'foo'"
+        :mysql "'\\\\'foo\\\\''"
+        :postgres "'''foo'''"
+        :sqlite "'''foo'''"
+        :sqlserver "'''foo'''"))))
 
 (describe "meta-query language statement formatting spec"
   (before-all
-    (setq test-schema
+    (setq org-sql--table-alist
           '((table-foo
              (columns
               (:bool :type boolean)
@@ -1135,42 +1185,145 @@ list then join the cdr of IN with newlines."
                        :keys (:inttwo)
                        :parent-keys (:int)
                        ;; :on_update cascade
-                       :on-delete cascade))))))
+                       :on-delete cascade))))
+          test-insert-alist
+          '((table-foo (0 bim 0 "xxx") (1 bam 1 "yyy"))
+            (table-bar (0 1) (2 3)))))
 
-  (it "create table (SQLite)"
-    (let ((config '(sqlite)))
-      (expect
-       (org-sql--format-create-tables config test-schema)
-       :to-equal
-       (list
-        "CREATE TABLE IF NOT EXISTS table-foo (bool INTEGER,enum TEXT,int INTEGER,text TEXT,PRIMARY KEY (int));"
-        "CREATE TABLE IF NOT EXISTS table-bar (intone INTEGER,inttwo INTEGER,PRIMARY KEY (intone),FOREIGN KEY (inttwo) REFERENCES table-foo (int) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED);"))))
+  (describe "bulk insert"
+    (it "SQLite"
+      (let ((config '(sqlite)))
+        (expect
+         (org-sql--format-bulk-inserts config test-insert-alist)
+         :to-equal
+         (concat "INSERT INTO table-foo (bool,enum,int,text) VALUES (0,'bim',0,'xxx'),(1,'bam',1,'yyy');"
+                 "INSERT INTO table-bar (intone,inttwo) VALUES (0,1),(2,3);"))))
 
-  (it "create table (postgres)"
-    (let ((config '(pgsql)))
-      (expect
-       (org-sql--format-create-tables config test-schema)
-       :to-equal
-       (list
-        "CREATE TYPE enum_table-foo_enum AS ENUM ('bim','bam','boo');"
-        "CREATE TABLE IF NOT EXISTS table-foo (bool BOOLEAN,enum enum_table-foo_enum,int INTEGER,text TEXT,PRIMARY KEY (int));"
-        "CREATE TABLE IF NOT EXISTS table-bar (intone INTEGER,inttwo INTEGER,PRIMARY KEY (intone),FOREIGN KEY (inttwo) REFERENCES table-foo (int) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED);"))))
+    (it "Postgres"
+      (let ((config '(pgsql)))
+        (expect
+         (org-sql--format-bulk-inserts config test-insert-alist)
+         :to-equal
+         (concat "INSERT INTO table-foo (bool,enum,int,text) VALUES (FALSE,'bim',0,'xxx'),(TRUE,'bam',1,'yyy');"
+                 "INSERT INTO table-bar (intone,inttwo) VALUES (0,1),(2,3);"))))
 
-  (it "transaction (sqlite)"
-    (let ((mode 'sqlite)
-          (statements (list "INSERT INTO foo (bar) values (1);")))
-      (expect
-       (org-sql--format-sql-transaction '(sqlite) statements)
-       :to-equal
-       "PRAGMA foreign_keys = ON;BEGIN;INSERT INTO foo (bar) values (1);COMMIT;")))
+    (it "MySQL"
+      (let ((config '(mysql)))
+        (expect
+         (org-sql--format-bulk-inserts config test-insert-alist)
+         :to-equal
+         (concat "INSERT INTO table-foo (bool,enum,int,text) VALUES (FALSE,'bim',0,'xxx'),(TRUE,'bam',1,'yyy');"
+                 "INSERT INTO table-bar (intone,inttwo) VALUES (0,1),(2,3);"))))
 
-  (it "transaction (postgres)"
-    (let ((mode 'pgsql)
-          (statements (list "INSERT INTO foo (bar) values (1);")))
-      (expect
-       (org-sql--format-sql-transaction '(pgsql) statements)
-       :to-equal
-       "BEGIN;INSERT INTO foo (bar) values (1);COMMIT;"))))
+    (it "SQL-Server"
+      (let ((config '(sqlserver)))
+        (expect
+         (org-sql--format-bulk-inserts config test-insert-alist)
+         :to-equal
+         (concat "INSERT INTO table-foo (bool,enum,int,text) VALUES (0,'bim',0,'xxx'),(1,'bam',1,'yyy');"
+                 "INSERT INTO table-bar (intone,inttwo) VALUES (0,1),(2,3);")))))
+
+  ;; TODO add bulk deletes...eventually
+
+  (describe "create table"
+    (it "SQLite"
+      (let ((config '(sqlite)))
+        (expect
+         (org-sql--format-create-tables config org-sql--table-alist)
+         :to-equal
+         (list
+          "CREATE TABLE IF NOT EXISTS table-foo (bool INTEGER,enum TEXT,int INTEGER,text TEXT,PRIMARY KEY (int));"
+          "CREATE TABLE IF NOT EXISTS table-bar (intone INTEGER,inttwo INTEGER,PRIMARY KEY (intone),FOREIGN KEY (inttwo) REFERENCES table-foo (int) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED);"))))
+
+    (it "postgres"
+      (let ((config '(pgsql)))
+        (expect
+         (org-sql--format-create-tables config org-sql--table-alist)
+         :to-equal
+         (list
+          "CREATE TYPE enum_table-foo_enum AS ENUM ('bim','bam','boo');"
+          "CREATE TABLE IF NOT EXISTS table-foo (bool BOOLEAN,enum enum_table-foo_enum,int INTEGER,text TEXT,PRIMARY KEY (int));"
+          "CREATE TABLE IF NOT EXISTS table-bar (intone INTEGER,inttwo INTEGER,PRIMARY KEY (intone),FOREIGN KEY (inttwo) REFERENCES table-foo (int) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED);"))))
+
+    (it "postgres - unlogged"
+      (let ((config '(pgsql :unlogged t)))
+        (expect
+         (org-sql--format-create-tables config org-sql--table-alist)
+         :to-equal
+         (list
+          "CREATE TYPE enum_table-foo_enum AS ENUM ('bim','bam','boo');"
+          "CREATE UNLOGGED TABLE IF NOT EXISTS table-foo (bool BOOLEAN,enum enum_table-foo_enum,int INTEGER,text TEXT,PRIMARY KEY (int));"
+          "CREATE UNLOGGED TABLE IF NOT EXISTS table-bar (intone INTEGER,inttwo INTEGER,PRIMARY KEY (intone),FOREIGN KEY (inttwo) REFERENCES table-foo (int) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED);"))))
+
+    (it "postgres - nonpublic"
+      (let ((config '(pgsql :schema "nonpublic")))
+        (expect
+         (org-sql--format-create-tables config org-sql--table-alist)
+         :to-equal
+         (list
+          "CREATE TYPE nonpublic.enum_table-foo_enum AS ENUM ('bim','bam','boo');"
+          "CREATE TABLE IF NOT EXISTS nonpublic.table-foo (bool BOOLEAN,enum nonpublic.enum_table-foo_enum,int INTEGER,text TEXT,PRIMARY KEY (int));"
+          "CREATE TABLE IF NOT EXISTS nonpublic.table-bar (intone INTEGER,inttwo INTEGER,PRIMARY KEY (intone),FOREIGN KEY (inttwo) REFERENCES nonpublic.table-foo (int) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED);"))))
+
+    (it "mysql"
+      (let ((config '(mysql)))
+        (expect
+         (org-sql--format-create-tables config org-sql--table-alist)
+         :to-equal
+         (list
+          "CREATE TABLE IF NOT EXISTS table-foo (bool BOOLEAN,enum ENUM('bim','bam','boo'),int INTEGER,text TEXT,PRIMARY KEY (int));"
+          "CREATE TABLE IF NOT EXISTS table-bar (intone INTEGER,inttwo INTEGER,PRIMARY KEY (intone),FOREIGN KEY (inttwo) REFERENCES table-foo (int) ON DELETE CASCADE);"))))
+
+    (it "sqlserver"
+      (let ((config '(sqlserver)))
+        (expect
+         (org-sql--format-create-tables config org-sql--table-alist)
+         :to-equal
+         (list
+          "IF NOT EXISTS (SELECT * FROM sys.tables where name = 'table-foo') CREATE TABLE table-foo (bool BIT,enum NVARCHAR(MAX),int INTEGER,text NVARCHAR(MAX),PRIMARY KEY (int));"
+          "IF NOT EXISTS (SELECT * FROM sys.tables where name = 'table-bar') CREATE TABLE table-bar (intone INTEGER,inttwo INTEGER,PRIMARY KEY (intone),FOREIGN KEY (inttwo) REFERENCES table-foo (int) ON DELETE CASCADE);"))))
+
+    (it "sqlserver - nonpublic"
+      (let ((config '(sqlserver :schema "nonpublic")))
+        (expect
+         (org-sql--format-create-tables config org-sql--table-alist)
+         :to-equal
+         (list
+          "IF NOT EXISTS (SELECT * FROM sys.tables where name = 'nonpublic.table-foo') CREATE TABLE nonpublic.table-foo (bool BIT,enum NVARCHAR(MAX),int INTEGER,text NVARCHAR(MAX),PRIMARY KEY (int));"
+          "IF NOT EXISTS (SELECT * FROM sys.tables where name = 'nonpublic.table-bar') CREATE TABLE nonpublic.table-bar (intone INTEGER,inttwo INTEGER,PRIMARY KEY (intone),FOREIGN KEY (inttwo) REFERENCES nonpublic.table-foo (int) ON DELETE CASCADE);")))))
+
+  (describe "transaction"
+    (it "sqlite"
+      (let ((config '(sqlite))
+            (statements (list "INSERT INTO foo (bar) values (1);")))
+        (expect
+         (org-sql--format-sql-transaction config statements)
+         :to-equal
+         "PRAGMA foreign_keys = ON;BEGIN;INSERT INTO foo (bar) values (1);COMMIT;")))
+
+    (it "postgres"
+      (let ((config '(pgsql))
+            (statements (list "INSERT INTO foo (bar) values (1);")))
+        (expect
+         (org-sql--format-sql-transaction config statements)
+         :to-equal
+         "BEGIN;INSERT INTO foo (bar) values (1);COMMIT;")))
+
+    (it "mysql"
+      (let ((config '(mysql))
+            (statements (list "INSERT INTO foo (bar) values (1);")))
+        (expect
+         (org-sql--format-sql-transaction config statements)
+         :to-equal
+         "BEGIN;INSERT INTO foo (bar) values (1);COMMIT;")))
+
+    (it "sqlserver"
+      (let ((config '(sqlserver))
+            (statements (list "INSERT INTO foo (bar) values (1);")))
+        (expect
+         (org-sql--format-sql-transaction config statements)
+         :to-equal
+         "BEGIN TRANSACTION;INSERT INTO foo (bar) values (1);COMMIT;")))))
 
 (describe "file metadata spec"
   (it "classify file metadata"
