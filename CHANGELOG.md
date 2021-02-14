@@ -31,9 +31,10 @@
   - warning and repeater information in the `timestamps` table has been split
     off into separate tables
   - removed `ON UPDATE CASCADE` from all tables (no longer needed)
-  - `org-sql-user-update` was renamed to `org-sql-user-push`...to make room for
-    a `-pull` ;)
-
+  - split `org-sql-user-reset` into `-reset` and `-init` functions (which are
+    functionally inverses of each other)
+  - `org-sql-user-update` was renamed to `org-sql-user-push` ...to make room
+    for a `-pull` ;)
 ## 1.1.0
 
 - use latest logbook/contents code from `org-ml`
