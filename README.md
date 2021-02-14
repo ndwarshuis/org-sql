@@ -5,23 +5,6 @@ stores them in a database, which can then be used for comprehensive data
 analysis and visualization. Supports SQLite, PostgreSQL, MySQL/MariaDB, and
 Microsoft SQL-Server.
 
-# Upcoming breaking changes for 2.x.x release
-
-* The `file_path` column will be replaced by the `md5` column in all tables
-  except the `files` table, `file_path` will be removed from the `files` table,
-  and another table will be created to map `file_path` to `md5` (exact table
-  names subject to change). This is necessary because the current assumption is
-  that all files denoted by different `file_paths` are unique, which will make
-  updating impossible and will duplicate data in the unlikely but conceivable
-  case where there are identical org files inserted into the database.
-  Performance will also likely be improved since we can use fixed-length primary
-  keys in all cases and file renames will be much simpler to update in the
-  database (no more `ON UPDATE CASCADE`)
-* The `warning` and `repeater` columns in the `timestamps` table will be moved
-  to their own separate tables. This will clean up the `timestamps` table as
-  these columns are very sparely populated anyways (mostly `NULL`s) and will
-  make adding future timestamp decorators such as habits much easier.
-
 # Installation
 
 Download the package from MELPA
