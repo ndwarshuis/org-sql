@@ -1,12 +1,26 @@
 version: '3.7'
 
 services:
-  db:
-    image: postgres:12.4-alpine
-    container_name: org-sql-postgres
-    restart: always
+  psql-latest:
+    build: ./test/docker/postgres
+    container_name: org-sql-postgres-latest
+    restart: 'no'
     environment:    
-      - POSTGRES_PASSWORD=org_sql_postgres
-      - POSTGRES_USER=org_sql
-    ports:
-      - 60001:5432
+      - POSTGRES_PASSWORD=toor
+      - POSTGRES_USER=root
+
+  ## ASSUME the mariadb and mysql docker images use the same service config
+  mariadb-latest:
+    build: ./test/docker/mariadb
+    container_name: org-sql-mariadb-latest
+    restart: 'no'
+    environment:    
+      - MYSQL_ROOT_PASSWORD=toor
+
+  sqlserver-latest:
+    build: ./test/docker/sql-server
+    container_name: org-sql-sqlserver-latest
+    restart: 'no'
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=org_sql222@@@

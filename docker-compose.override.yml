@@ -1,0 +1,132 @@
+version: '3.7'
+
+services:
+  ## postgres
+
+  psql-latest:
+    ports:
+      - 60013:5432
+
+  psql-12:
+    extends:
+      service: psql-latest
+    build:
+      context: ./test/docker/postgres
+      args:
+        IMAGE: postgres:12.6-alpine
+    container_name: org-sql-postgres-12
+    ports:
+      - 60012:5432
+
+  psql-11:
+    extends:
+      service: psql-latest
+    build:
+      context: ./test/docker/postgres
+      args:
+        IMAGE: postgres:11.11-alpine
+    container_name: org-sql-postgres-11
+    ports:
+      - 60011:5432
+
+  psql-10:
+    extends:
+      service: psql-latest
+    build:
+      context: ./test/docker/postgres
+      args:
+        IMAGE: postgres:10.16-alpine
+    container_name: org-sql-postgres-10
+    ports:
+      - 60010:5432
+
+  psql-9:
+    extends:
+      service: psql-latest
+    build:
+      context: ./test/docker/postgres
+      args:
+        IMAGE: postgres:9.6.21-alpine
+    container_name: org-sql-postgres-9
+    ports:
+      - 60009:5432
+
+  ## mariadb
+
+  mariadb-latest:
+    ports:
+      - 60105:3306
+
+  mariadb-104:
+    extends:
+      service: mariadb-latest
+    build:
+      context: ./test/docker/mariadb
+      args:
+        IMAGE: mariadb:10.4.17
+    container_name: org-sql-mariadb-104
+    ports:
+      - 60104:3306
+
+  mariadb-103:
+    extends:
+      service: mariadb-latest
+    build:
+      context: ./test/docker/mariadb
+      args:
+        IMAGE: mariadb:10.3.17
+    container_name: org-sql-mariadb-103
+    ports:
+      - 60103:3306
+
+  mariadb-102:
+    extends:
+      service: mariadb-latest
+    build:
+      context: ./test/docker/mariadb
+      args:
+        IMAGE: mariadb:10.2.36
+    container_name: org-sql-mariadb-102
+    ports:
+      - 60102:3306
+
+  ## mysql
+
+  mysql-latest:
+    extends:
+      service: mariadb-latest
+    build:
+      context: ./test/docker/mariadb
+      args:
+        IMAGE: mysql:8.0.23
+    container_name: org-sql-mysql-latest
+    ports:
+      - 60280:3306
+
+  mysql57:
+    extends:
+      service: mariadb-latest
+    build:
+      context: ./test/docker/mariadb
+      args:
+        IMAGE: mysql:5.7.33
+    container_name: org-sql-mysql-57
+    ports:
+      - 60257:3306
+
+  ## sql server
+
+  sqlserver-latest:
+    ports:
+      - 60319:1433
+
+  sqlserver-2017:
+    extends:
+      service: sqlserver-latest
+    container_name: org-sql-sqlserver-2017
+    build:
+      context: ./test/docker/sql-server
+      args:
+        IMAGE: mcr.microsoft.com/mssql/server:2017-CU22-ubuntu-16.04
+    ports:
+      - 60317:1433

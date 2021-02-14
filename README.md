@@ -2,7 +2,8 @@
 
 This package converts org-mode files to Structured Query Language (SQL) and
 stores them in a database, which can then be used for comprehensive data
-analysis and visualization.
+analysis and visualization. Supports SQLite, PostgreSQL, MySQL/MariaDB, and
+Microsoft SQL-Server.
 
 # Upcoming breaking changes for 2.x.x release
 
@@ -54,26 +55,44 @@ One can also use `use-package` to automate this entire process
 
 ## Dependencies
 
+Only Emacs 27.1+ has been tested
+
 ### Emacs packages
 
 - org-ml.el
 - dash.el
 - s.el
+- f.el
 
-### Databases
+### Database Clients
 
-Only the programs for your desired implementation are required:
+Only the client binary for your desired implementation are required (ensure they
+are in your PATH):
 
 - sqlite3
-- postgres (specifically createdb, dropdb, psql)
+- psql (PostgreSQL)
+- mysql (MariaDB/MySQL)
+- sqlcmd (SQL-Server)
+
+### Database Servers
+
+The following databases servers/versions are supported and tested:
+
+- PostgreSQL (13, 12, 11, 10, 9)
+- MariaDB (10.5, 10.4, 10.3, 10.2)
+- MySQL (8.0, 5.6)
+- SQL-Server (2019, 2017)
+
+Many versions besides these will likely work; these are simply those that are in
+the testing suite.
 
 # Configuration
 
 ## General Behavior
 
-- `org-sql-db-config`: a list describing the database implementation to use and
-  how to connect to it (see this variable's help page for more details)
-- `org-sql-files`: list of org files to insert into the database
+- `org-sql-files`: list of org files to sync with the database
+- `org-sql-async`: turn on to spawn the database client process asynchronously
+  (and hence not block Emacs while the client is updating the database)
 - `org-sql-debug`: turn on SQL transaction debug output in the message buffer
 
 ## Database Storage
@@ -83,30 +102,228 @@ dictate what not to store in the database. By default all these variables are
 nil (include everything). See the help page for each of these for further
 details.
 
+## Database Connection
+
+The database connection is controlled by `org-sql-db-config`. This is where one
+would choose the database client (and server connection if applicable) as well
+as database-specific behavior. The format for this variable is like `(DB-TYPE
+[KEY VAL] [[KEY VAL] ...])` where `DB-TYPE` is the type of database to use and
+the `KEY-VAL` pairs are options for that database.
+
+`DB-TYPE` is one of `sqlite`, `pgsql`, `mysql`, or `sqlserver` (a symbol).
+
+An explanation of the `KEY-VAL` pairs is below.
+
+### General Guidelines
+
+While the docstring of `org-sql-db-config` is a good reference, the following
+are some sane guidelines for each database configuration.
+
+#### SQLite
+
+This is by far the simplest and only requires the `:path` key (the path to the
+file where the database will be stored).
+
+#### All Databases Except SQLite
+
+The only required key for these is `:database` which is the database name to use.
+
+Most other needs should be satisfied by the database-specific keys in each
+subsection below. If your configuration requires more than this, the `:args`
+and `:env` key exists as catchall keys. The former is a list of additional
+arguments to send to the client command, and the latter is a list of 2-membered
+lists like `(VAR VAL)` which sets the environmental values with which the client
+command will run. Consult the documentation for the client command (eg `psql`,
+`mysql`, or `sqlcmd`) for which arguments and environemtal variables make sense.
+
+#### Postgres
+
+Likely one would set the `:hostname` key unless using the localhost.
+
+From here many other options are possible. A simple setup (eg one using a
+straightforward docker deployment) might define a username, password, and port
+(denoted by the `:username`, `:password`, and `:port` keys respectively). If the
+database stores other data alongside that from `org-sql`, one can create a
+schema specifically for `org-sql` and set the `:schema` key with the name of
+this schema.
+
+To prevent leaking a password in plain text, one can use a `.pgpass` file as
+normally used with the `psql` command, or set the `:pass-file` key to the path
+of the password file. More advanced setups can utilize the `.pg_service` file as
+normal, or set the `:service-file` key to the desired path to the service file.
+
+As an additional performance optimization, set the `:unlogged` key as t to use
+unlogged tables. This may significantly boost performance, particularly for
+functions in `org-sql` that do bulk inserts (eg `org-sql-user-push` and
+`org-sql-push-to-db`). The tradeoff is data loss if the database crashes during
+a transaction, which may be acceptable if the org-files denoted by
+`org-sql-files` are more permanent than the database itself. NOTE: this only
+sets the unlogged property on the tables that `org-sql` uses; no other tables
+will be changed.
+
+#### MySQL/MariaDB
+
+Likely one would set the `:hostname` key unless using the localhost.
+
+Similar to Postgres, a simple setup might define a username, password, and port
+(denoted by the `:username`, `:password`, and `:port` keys respectively). Unlike
+Postgres, one might also need to set the `:args` key with `"--protocol=TCP"` if
+using a TCP connection (see above for explanation of `:args`).
+
+To prevent leaking a password in plain text, one can use an options file as
+normally used with the `mysql` command (eg `.my.cnf`), as well as any other
+connection parameters in the place of keys. If the options file is in a
+non-default location, set it with the `:defaults-file` key. A similar key exists
+for the defaults-extra file (`:defaults-extra-file`).
+
+#### SQL Server
+
+Likely one would set the `:server` key to denote the instance of the server
+to use (eg `"tcp:example.com,1443"`). Note that this takes the place of the
+`:hostname`/`:port` keys for MySQL and Postgres.
+
+Specify the username and password using the keys `:username` and `password`
+respectively. If the database stores other data alongside that from `org-sql`,
+one can create a schema specifically for `org-sql` and set the `:schema` key
+with the name of this schema.
+
+To prevent hardcoding the password in Emacs code, one can set the `"SQLCMDINI"`
+environmental variable in the `:env` key (see above) to the path of a startup
+file which sets the password using the `"SQLCMDPASSWORD"` environmental
+variable.
+
+## Database Preparation
+
+Since `org-sql` cannot assume it has superuser access to your database and/or
+filesystem, external configuration will be necessary in many cases before
+running any commands with this package.
+
+### SQLite
+
+The only configuration necessary is to ensure that the path denoted by `:path`
+is writable to the same user running emacs.
+
+### Postgres and SQL-Server
+
+The database server as well as the database itself (eg the database defined by
+the `:database` key) must already exist. Additionally, there must be a role
+defined that `org-sql` can use for the connection. If `:schema` is non-nil, the
+schema defined by this key must already exist. If it is undefined, `org-sql`
+will use the default schema (`public` for Postgres and usually `dbo` for
+SQL-Server). In any case, the role to be used by `org-sql` must have
+authorization to create tables and insert/delete rows from those tables on the
+configured schema.
+
+See init files for [Postgres](test/docker/postgres/init/org_sql.sql) and 
+[SQL-Server](test/docker/sql-server/setup.sql) for bare-bones examples.
+
+### MySQL/MariaDB
+
+The database server must already exist and the database defined by the
+`:database` key must also already exist. The user used by `org-sql` to connect
+must have permissions to create tables and insert/delete data from said tables.
+
+See the init file for [MariaDB](test/docker/mariadb/init/org_sql.sql) for 
+bare-bones example.
+
+## Database Customization
+
+`org-sql` by default will only create tables (with pimary and foreign keys) and
+insert/delete data in these tables. If you want to do anything beyond this such
+as creating additional indexes, adding triggers, defining and calling
+procedures, etc, one can do so through 'hooks'. These are variables that hold
+additional SQL statements that will be run along with the functions in 
+`org-sql`.
+
+These variables are:
+- `org-sql-post-init-hooks`: run after `org-sql-init-db`
+- `org-sql-post-push-hooks`: run after `org-sql-push-to-db`
+- `org-sql-post-clear-hooks`: run after `org-sql-clear-db` 
+- `org-sql-pre-reset-hooks`: run before `org-sql-reset-db`
+
+See the docstrings of these variables for how to define the custom SQL
+statements and how to control their execution.
+
 # Usage
 
-## Initializing
+## Interactive Functions
 
-Run `org-sql-user-reset`. This will create a new database and initialize it with
-the default schema. It will also delete an existing database before creating the
-new one if it exists.
+The following functions can be invoked using `M-x` and should cover the simple
+use case of creating a database and syncing org files to it.
 
-## Updating
+### Initializing
 
-Run `org-sql-user-update`. This will synchronize the database with all files as
+Run `org-sql-user-init`. In the case of SQLite, this will create a new database
+file. In all cases this will create the tables associated with `org-sql`.
+
+### Updating
+
+Run `org-sql-user-push`. This will synchronize the database with all files as
 indicated in `org-sql-files` by first checking if the file is in the database
-and inserting it if not. If the file is already present, it will check the md5
-to assess if updates are needed. Note that for any file in the database,
-changing even one character in the file on disk will trigger an deletion of the
-file in the database followed by an insertion of the *entire* org file.
+and inserting it if not. Any renamed files will also be updated. If the contents
+of a file are changed, the entire file is deleted from the database and
+reinserted. Files with identical contents are only stored once (with the
+exception of the file paths and attributes that point to the identical files).
 
 This may take several seconds/minutes if inserting many files depending on the
 speed of your device (particularly IO) and the size/number of files. This
-operation will also block Emacs until complete.
+operation will also block Emacs until complete. Even if `org-sql-async` is t,
+Emacs will still block for all computation internal to Emacs (getting the
+org-element trees and converting them to SQL statements that will sync their
+contents).
 
-## Removing all data
+If performance/blocking is a concern, the best way to improve update speeds is
+to use many small org files rather than a few big ones. Because the only
+efficient way to 'update' a file is to delete and reinsert it into the database,
+changing one character in a large file will cause that entire file to be
+inserted.
+
+### Removing all data
 
 Run `org-sql-user-clear-all`. This will clear all data but leave the schema.
+
+### Resetting
+
+Run `org-sql-user-reset`. This will drop all tables associated with `org-sql`.
+In the case of SQLite, this will also delete the database file.
+
+### Debugging
+
+The interactive functions above will print a "success" message if the client
+command returns an exit code of 0. While a non-zero exit code almost certainly
+means something went wrong, **the transaction may still have failed even if the
+client returned 0.** If running a command seems to have no effect on the
+database, set `org-sql-debug` to t and run the command again. This will print
+any additional output given by the client (which are configured when called by
+`org-sql` to print errors to stdout/stderr) and will likely explain what went
+wrong.
+
+Additionally, the command `org-sql-dump-push-transaction` will print the
+transaction used by the `org-sql-push-to-db` and `org-sql-user-push` commands.
+
+
+## Public API
+
+`org-sql` exposes the following public functions for interacting with the
+database beyond the use cases covered by the above interactive functions:
+
+- Table-level Operations
+  - `org-sql-create-tables`
+  - `org-sql-drop-tables`
+  - `org-sql-list-tables`
+- Database-level Operations
+  - `org-sql-create-db`
+  - `org-sql-drop-db`
+  - `org-sql-db-exists`
+- Init/Teardown Operations
+  - `org-sql-init-db`
+  - `org-sql-reset-db`
+- Data-level operations
+  - `org-sql-dump-table`
+  - `org-sql-push-to-db`
+  - `org-sql-clear-db`
+- Other SQL Commands
+  - `org-sql-send-sql`
 
 # Limitations
 
@@ -138,195 +355,27 @@ properly parse logbooks (particulary the latter).
 
 ## General design features
 
-- with the exception of a few types, the schema are identical between all
-  database implementations (SQLite, Postgres, etc)
-- all foreign keys are set with `UPDATE CASCADE` and `DELETE CASCADE`
-- all time values are stores as unixtime (integers in seconds)
+- All foreign keys are set with `DELETE CASCADE`
+- All time values are stores as unixtime (integers in seconds)
+- No triggers or indexes (outside of the primary keys) are created by `org-sql`
 
-## Schema
+## Entity Relationship Diagrams
 
-### files
+The table layouts for each implementation are more or less identical; the only
+differences are the types.
 
-Each row stores metadata for one tracked org file
+[MySQL/MariaDB](doc/erd/erd-mysql.png) 
 
-| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
-|  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x |  |  | TEXT / TEXT | path to the org file |
-| md5 |  |  |  | TEXT / TEXT | md5 checksum of the org file |
-| size |  |  |  | INTEGER / INTEGER | size of the org file in bytes |
+[PostgreSQL](doc/erd/erd-postgres.png) 
 
-### headlines
+[SQLite](doc/erd/erd-sqlite.png) 
 
-Each row stores one headline in a given org file and its metadata
+[SQL Server](doc/erd/erd-sql-server.png) 
 
-| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
-|  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - files |  | TEXT / TEXT | path to file containing the headline |
-| headline_offset | x |  |  | INTEGER / INTEGER | file offset of the headline's first character |
-| headline_text |  |  |  | TEXT / TEXT | raw text of the headline |
-| keyword |  |  | x | TEXT / TEXT | the TODO state keyword |
-| effort |  |  | x | INTEGER / INTEGER | the value of the Effort property in minutes |
-| priority |  |  | x | TEXT / TEXT | character value of the priority |
-| is_archived |  |  |  | INTEGER / BOOLEAN | true if the headline has an archive tag |
-| is_commented |  |  |  | INTEGER / BOOLEAN | true if the headline has a comment keyword |
-| content |  |  | x | TEXT / TEXT | the headline contents |
+## Table Descriptions
 
-### headline_closures
-
-Each row stores the ancestor and depth of a headline relationship (eg closure table)
-
-| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
-|  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - headlines, file_path - headlines |  | TEXT / TEXT | path to the file containing this headline |
-| headline_offset | x | headline_offset - headlines |  | INTEGER / INTEGER | offset of this headline |
-| parent_offset | x | headline_offset - headlines |  | INTEGER / INTEGER | offset of this headline's parent |
-| depth |  |  | x | INTEGER / INTEGER | levels between this headline and the referred parent |
-
-### timestamps
-
-Each row stores one timestamp
-
-| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
-|  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - headlines |  | TEXT / TEXT | path to the file containing this timestamp |
-| headline_offset |  | headline_offset - headlines |  | INTEGER / INTEGER | offset of the headline containing this timestamp |
-| timestamp_offset | x |  |  | INTEGER / INTEGER | offset of this timestamp |
-| raw_value |  |  |  | TEXT / TEXT | text representation of this timestamp |
-| is_active |  |  |  | INTEGER / BOOLEAN | true if the timestamp is active |
-| warning_type |  |  | x | TEXT / ENUM | warning type of this timestamp (`all`, or `first`) |
-| warning_value |  |  | x | INTEGER / INTEGER | warning shift of this timestamp |
-| warning_unit |  |  | x | TEXT / ENUM | warning unit of this timestamp  (`hour`, `day`, `week`, `month`, or `year`) |
-| repeat_type |  |  | x | TEXT / ENUM | repeater type of this timestamp (`catch-up`, `restart`, or `cumulate`) |
-| repeat_value |  |  | x | INTEGER / INTEGER | repeater shift of this timestamp |
-| repeat_unit |  |  | x | TEXT / ENUM | repeater unit of this timestamp (`hour`, `day`, `week`, `month`, or `year`) |
-| time_start |  |  |  | INTEGER / INTEGER | the start time (or only time) of this timestamp |
-| time_end |  |  | x | INTEGER / INTEGER | the end time of this timestamp |
-| start_is_long |  |  |  | INTEGER / BOOLEAN | true if the start time is in long format |
-| end_is_long |  |  | x | INTEGER / BOOLEAN | true if the end time is in long format |
-
-### planning_entries
-
-Each row stores the metadata for headline planning timestamps.
-
-| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
-|  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - timestamps |  | TEXT / TEXT | path to the file containing the entry |
-| headline_offset | x |  |  | INTEGER / INTEGER | file offset of the headline with this tag |
-| planning_type | x |  |  | TEXT / ENUM | the type of this planning entry (`closed`, `scheduled`, or `deadline`) |
-| timestamp_offset |  | timestamp_offset - timestamps |  | INTEGER / INTEGER | file offset of this entries timestamp |
-
-### file_tags
-
-Each row stores one tag at the file level
-
-| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
-|  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - files |  | TEXT / TEXT | path to the file containing the tag |
-| tag | x |  |  | TEXT / TEXT | the text value of this tag |
-
-### headline_tags
-
-Each row stores one tag
-
-| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
-|  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - headlines |  | TEXT / TEXT | path to the file containing the tag |
-| headline_offset | x | headline_offset - headlines |  | INTEGER / INTEGER | file offset of the headline with this tag |
-| tag | x |  |  | TEXT / TEXT | the text value of this tag |
-| is_inherited | x |  |  | INTEGER / BOOLEAN | true if this tag is from the ITAGS property |
-
-### properties
-
-Each row stores one property
-
-| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
-|  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - files |  | TEXT / TEXT | path to the file containing this property |
-| property_offset | x |  |  | INTEGER / INTEGER | file offset of this property in the org file |
-| key_text |  |  |  | TEXT / TEXT | this property's key |
-| val_text |  |  |  | TEXT / TEXT | this property's value |
-
-### file_properties
-
-Each row stores a property at the file level
-
-| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
-|  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - files, file_path - properties |  | TEXT / TEXT | path to file containin the property |
-| property_offset | x | property_offset - properties |  | INTEGER / INTEGER | file offset of this property in the org file |
-
-### headline_properties
-
-Each row stores a property at the headline level
-
-| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
-|  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - headlines |  | TEXT / TEXT | path to file containin the property |
-| property_offset | x |  |  | INTEGER / INTEGER | file offset of this property in the org file |
-| headline_offset |  | headline_offset - headlines |  | INTEGER / INTEGER | file offset of the headline with this property |
-
-### clocks
-
-Each row stores one clock entry
-
-| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
-|  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - headlines |  | TEXT / TEXT | path to the file containing this clock |
-| headline_offset |  | headline_offset - headlines |  | INTEGER / INTEGER | offset of the headline with this clock |
-| clock_offset | x |  |  | INTEGER / INTEGER | file offset of this clock |
-| time_start |  |  | x | INTEGER / INTEGER | timestamp for the start of this clock |
-| time_end |  |  | x | INTEGER / INTEGER | timestamp for the end of this clock |
-| clock_note |  |  | x | TEXT / TEXT | the note entry beneath this clock |
-
-### logbook_entries
-
-Each row stores one logbook entry (except for clocks)
-
-| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
-|  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - headlines |  | TEXT / TEXT | path to the file containing this entry |
-| headline_offset |  | headline_offset - headlines |  | INTEGER / INTEGER | offset of the headline with this entry |
-| entry_offset | x |  |  | INTEGER / INTEGER | offset of this logbook entry |
-| entry_type |  |  | x | TEXT / TEXT | type of this entry (see `org-log-note-headlines`) |
-| time_logged |  |  | x | INTEGER / INTEGER | timestamp for when this entry was taken |
-| header |  |  | x | TEXT / TEXT | the first line of this entry (usually standardized) |
-| note |  |  | x | TEXT / TEXT | the text of this entry underneath the header |
-
-### state_changes
-
-Each row stores additional metadata for a state change logbook entry
-
-| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
-|  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - logbook_entries |  | TEXT / TEXT | path to the file containing this entry |
-| entry_offset | x | entry_offset - logbook_entries |  | INTEGER / INTEGER | offset of the logbook entry for this state change |
-| state_old |  |  |  | TEXT / TEXT | former todo state keyword |
-| state_new |  |  |  | TEXT / TEXT | updated todo state keyword |
-
-### planning_changes
-
-Each row stores additional metadata for a planning change logbook entry
-
-| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
-|  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - timestamps, file_path - logbook_entries |  | TEXT / TEXT | path to the file containing this entry |
-| entry_offset | x | entry_offset - logbook_entries |  | INTEGER / INTEGER | offset of the logbook entry for this planning change |
-| timestamp_offset |  | timestamp_offset - timestamps |  | INTEGER / INTEGER | offset of the former timestamp |
-
-### links
-
-Each rows stores one link
-
-| Column | Is Primary | Foreign Keys (parent - table) | NULL Allowed | Type (SQLite / Postgres) | Description |
-|  -  |  -  |  -  |  -  |  -  |  -  |
-| file_path | x | file_path - headlines |  | TEXT / TEXT | path to the file containing this link |
-| headline_offset |  | headline_offset - headlines |  | INTEGER / INTEGER | offset of the headline with this link |
-| link_offset | x |  |  | INTEGER / INTEGER | file offset of this link |
-| link_path |  |  |  | TEXT / TEXT | target of this link (eg url, file path, etc) |
-| link_text |  |  | x | TEXT / TEXT | text of this link |
-| link_type |  |  |  | TEXT / TEXT | type of this link (eg http, mu4e, file, etc) |
-
-<!-- 1.1.0 -->
+See [here](doc/table-descriptions.md) for
+a description of each table and its columns.
 
 # Contributing
 
@@ -338,10 +387,12 @@ servers).
 
 In addition to all required dependencies above:
 
-- cask
-- make
+- [cask](https://github.com/cask/cask)
 - docker
 - docker-compose
+- [erd](https://github.com/BurntSushi/erd)
+- make
+
 
 ## Emacs setup
 
@@ -354,13 +405,14 @@ cask install --dev
 ## Test environment setup
 
 Except for SQLite, the each database for testing is encoded and set up using
-`docker-compose` (see the included `docker-compose.yml` file). These are
+`docker-compose` (see the included `docker-compose.yml` and
+`docker-compose.override.yml` files). These are
 necessary to run the stateful tests above.
 
-To set up the environment, start the docker-daemon (may require sudo):
+To set up the environment, start the docker-daemon (may require sudo).
 
 ``` sh
-docker-compose up -d
+docker-compose up -d -V
 ```
 
 To shut down the environment:
@@ -368,6 +420,22 @@ To shut down the environment:
 ``` sh
 docker-compose down
 ```
+
+### Dockerfile/Docker-compose Layout
+
+Customization of the `docker-compose` files should not be necessary except when
+adding a new database for testing (or a new version). The 'base' docker images
+are defined using [Dockerfiles](test/docker), which in turn are built with SQL
+initialization scripts (which are necessary to test the containers with minimal
+privileges). Each Dockerfile has an overridable `IMAGE` argument whose default
+is set to the latest version of the container to pull. Note that MariaDB and
+MySQL are assumed to share the exact same container configuration, and thus they
+share the same Dockerfile.
+
+The `docker-compose` configuration is split between `docker-compose.yml` and
+`docker-compose.override.yml`, with the latter defining the ports (every
+container is bound to a separate port loosely matching its version) and `IMAGE`
+and the former defining everything else.
 
 ## Running tests
 
@@ -401,7 +469,7 @@ make test
 
 ## Building documentation
 
-To generate documentation from the readme template:
+To generate documentation:
 
 ```
 make docs
@@ -409,5 +477,5 @@ make docs
 
 # Acknowledgements
 
-The idea for this is based on ![John Kitchin's](http://kitchingroup.cheme.cmu.edu/blog/2017/01/03/Find-stuff-in-org-mode-anywhere/)
+The idea for this is based on [John Kitchin's](http://kitchingroup.cheme.cmu.edu/blog/2017/01/03/Find-stuff-in-org-mode-anywhere/)
 implementation, which uses `emacsql` as the SQL backend.

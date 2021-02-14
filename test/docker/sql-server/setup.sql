@@ -1,0 +1,12 @@
+CREATE DATABASE org_sql;
+GO
+CREATE LOGIN org_sql WITH PASSWORD = 'org_sql333###';
+GO
+USE org_sql;
+GO
+CREATE USER org_sql;
+GO
+CREATE SCHEMA nondbo AUTHORIZATION org_sql;
+GO
+GRANT CREATE TABLE TO org_sql;
+GO

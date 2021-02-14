@@ -16,7 +16,7 @@ CLOCK: [2020-09-15 Tue 17:57]--[2020-09-15 Tue 17:57] =>  0:00
 - this is a clock note
 :END:
 ** TODO other child
-SCHEDULED: <2020-09-18 Fri> DEADLINE: <2020-09-22 Tue>
+SCHEDULED: <2020-09-18 Fri> DEADLINE: <2020-09-22 Tue +2d -1m>
 :LOGBOOK:
 - Rescheduled from "[2020-09-17 Thu]" on [2020-09-15 Tue 17:58]
 - Not scheduled, was "[2020-09-19 Sat]" on [2020-09-15 Tue 17:58]
