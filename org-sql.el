@@ -618,7 +618,7 @@ This is a list like (DB-TYPE [KEY VAL] [[KEY VAL] ...]).
 
 DB-TYPE is a symbol for the database to use and one of:
 - `mysql': MySQL/MariaDB (requires the 'mysql' executable)
-- `pgsql': PostgresSQL (requires the 'pgsql' executable)
+- `postgres': PostgresSQL (requires the 'psql' executable)
 - `sqlite': SQLite (requires the 'sqlite3' executable)
 - `sqlserver': SQL-Server (requires the 'sqlcmd' executable)
 
@@ -704,7 +704,7 @@ SQL-Server
                                  ,defx
                                  ,args
                                  ,env))
-                ,(mk-db-choice "PostgreSQL" 'pgsql `(,database)
+                ,(mk-db-choice "PostgreSQL" 'postgres `(,database)
                                `(,hostname
                                  ,(mk-port 5432)
                                  ,username
@@ -942,21 +942,21 @@ A compile error will be triggered if TYPE is invalid."
 A compile error will be triggered if the car of CONFIG (eg the
 database to be used) is invalid."
   (declare (indent 1))
-  (-let (((keys &as &alist 'mysql 'pgsql 'sqlserver 'sqlite)
+  (-let (((keys &as &alist 'mysql 'postgres 'sqlserver 'sqlite)
           (--splice (listp (car it))
                     (-let (((keys . form) it))
                       (--map (cons it form) keys))
                     alist-forms)))
-    (when (-any? #'null (list mysql pgsql sqlserver sqlite))
+    (when (-any? #'null (list mysql postgres sqlserver sqlite))
       (error "Must provide form for all modes"))
-    (-some->> (-difference (-map #'car keys) '(mysql pgsql sqlserver sqlite))
+    (-some->> (-difference (-map #'car keys) '(mysql postgres sqlserver sqlite))
       (-map #'symbol-name)
       (s-join ",")
       (format "Unknown forms: %s")
       (error))
     `(cl-case (car ,config)
        (mysql ,@mysql)
-       (pgsql ,@pgsql)
+       (postgres ,@postgres)
        (sqlite ,@sqlite)
        (sqlserver ,@sqlserver)
        (t (error "Invalid mode: %s" (car ,config))))))
@@ -1231,7 +1231,7 @@ values of one row from OUT."
   (unless (equal out "")
     (let ((sep (org-sql--case-mode config
                  (mysql "\t")
-                 ((pgsql sqlite sqlserver) "|"))))
+                 ((postgres sqlite sqlserver) "|"))))
       (->> (s-trim out)
            (s-split "\n")
            (--map (-map #'s-trim (s-split sep it)))))))
@@ -1978,7 +1978,7 @@ The function will be compiled according to CONFIG, a list like
          (org-sql--case-type type
            (boolean
             (org-sql--case-mode config
-              ((mysql pgsql)
+              ((mysql postgres)
                '(if (= it 1) "TRUE" "FALSE"))
               ((sqlite sqlserver)
                '(if (= it 1) "1" "0"))))
@@ -1994,7 +1994,7 @@ The function will be compiled according to CONFIG, a list like
                      ;; TODO not sure if these also needs Char(13) in front of
                      ;; Char(10) for the carriage return if using on windows
                      ;; (alas...newline war)
-                     (pgsql '(("'" . "''")
+                     (postgres '(("'" . "''")
                               ("\n" . "'||chr(10)||'")))
                      (sqlite '(("'" . "''")
                                ("\n" . "'||char(10)||'")))
@@ -2040,7 +2040,7 @@ same meaning as it has here."
     ((mysql sqlite)
      (symbol-name tbl-name))
     ;; these require a custom namespace (aka schema) prefix if available
-    ((pgsql sqlserver)
+    ((postgres sqlserver)
      (-let (((&plist :schema) (cdr config)))
        (if (not schema) (symbol-name tbl-name)
          (format "%s.%s" schema tbl-name))))))
@@ -2108,7 +2108,7 @@ of the table."
       (org-sql--case-type type
         (boolean
          (org-sql--case-mode config
-           ((mysql pgsql) "BOOLEAN")
+           ((mysql postgres) "BOOLEAN")
            (sqlite "INTEGER")
            (sqlserver "BIT")))
         (char
@@ -2116,17 +2116,17 @@ of the table."
            ((mysql sqlserver)
             (-let (((&plist :length) (cdr column)))
               (if length (format "CHAR(%s)" length) "CHAR")))
-           ;; pgsql should use TEXT here because (according to the docs) "there
+           ;; postgres should use TEXT here because (according to the docs) "there
            ;; is no performance difference among char/varchar/text except for
            ;; the length-checking"
-           ((pgsql sqlite) "TEXT")))
+           ((postgres sqlite) "TEXT")))
         (enum
          (org-sql--case-mode config
            (mysql (->> (plist-get (cdr column) :allowed)
                        (--map (format "'%s'" it))
                        (s-join ",")
                        (format "ENUM(%s)")))
-           (pgsql (if type-id type-id
+           (postgres (if type-id type-id
                     (->> (org-sql--format-column-name column-name)
                          (format "enum_%s_%s" tbl-name)
                          (org-sql--format-enum-name config))))
@@ -2139,16 +2139,16 @@ of the table."
         (real
          (org-sql--case-mode config
            (mysql "FLOAT")
-           ((pgsql sqlite sqlserver) "REAL")))
+           ((postgres sqlite sqlserver) "REAL")))
         (text
          (org-sql--case-mode config
-           ((mysql pgsql sqlite) "TEXT")
+           ((mysql postgres sqlite) "TEXT")
            (sqlserver "NVARCHAR(MAX)")))
         (varchar
          (org-sql--case-mode config
            (mysql (fmt-varchar column "VARCHAR(%s)" "VARCHAR"))
-           ;; see above why pgsql uses TEXT here
-           ((pgsql sqlite) "TEXT")
+           ;; see above why postgres uses TEXT here
+           ((postgres sqlite) "TEXT")
            (sqlserver (fmt-varchar column "NVARCHAR(%s)" "NVARCHAR(MAX)"))))))))
 
 (defun org-sql--format-create-table-columns (config tbl-name columns)
@@ -2211,11 +2211,11 @@ CONFIG is the `org-sql-db-config' list."
           (tbl-name* (org-sql--format-table-name config tbl-name))
           (defer (org-sql--case-mode config
                    ((mysql sqlserver) nil)
-                   ((pgsql sqlite) t)))
+                   ((postgres sqlite) t)))
           (fmt (org-sql--case-mode config
                  ((mysql sqlite)
                   "CREATE TABLE IF NOT EXISTS %s (%s);")
-                 (pgsql
+                 (postgres
                   (org-sql--with-config-keys (:unlogged) config
                     (s-join " " (list "CREATE"
                                       (if unlogged "UNLOGGED TABLE" "TABLE")
@@ -2233,7 +2233,7 @@ CONFIG is the `org-sql-db-config' list."
 CONFIG is the `org-sql-db-config' list."
   (let ((create-tbl-stmts (--map (org-sql--format-create-table config it) tables)))
     (org-sql--case-mode config
-      (pgsql
+      (postgres
        (-> (org-sql--format-create-enum-types config tables)
            (append create-tbl-stmts)))
       ((mysql sqlite sqlserver)
@@ -2374,7 +2374,7 @@ SQL-STATEMENTS is a list of SQL statements to be included in the
 transaction. CONFIG is a list like `org-sql-db-config'."
   (let ((fmt (org-sql--case-mode config
                (sqlite "PRAGMA foreign_keys = ON;BEGIN;%sCOMMIT;")
-               ((mysql pgsql) "BEGIN;%sCOMMIT;")
+               ((mysql postgres) "BEGIN;%sCOMMIT;")
                (sqlserver "BEGIN TRANSACTION;%sCOMMIT;"))))
     (-some->> sql-statements
       (s-join "")
@@ -2448,7 +2448,7 @@ CONFIG is a list like `org-sql-db-config'."
      (list "SET FOREIGN_KEY_CHECKS = 0;"
            (format "DROP TABLE IF EXISTS %s;" (s-join "," org-sql-table-names))
            "SET FOREIGN_KEY_CHECKS = 1;"))
-    (pgsql
+    (postgres
      (org-sql--with-config-keys (:schema) org-sql-db-config
        (let ((drop-tables (->> (if schema
                                    (--map (format "%s.%s" schema it)
@@ -2731,7 +2731,7 @@ t, the client will be run in an asynchronous process."
   (org-sql--case-mode org-sql-db-config
     (mysql
      (send #'org-sql--exec-mysql-command-nodb "-D" :database args async))
-    (pgsql
+    (postgres
      (send #'org-sql--exec-postgres-command-nodb "-d" :database args async))
     (sqlite
      (org-sql--exec-sqlite-command args async))
@@ -2746,13 +2746,13 @@ process."
   (-let ((tmp-path (->> (round (float-time))
                         (format "%sorg-sql-cmd-%s" (temporary-file-directory))))
          (sql-cmd (org-sql--case-mode org-sql-db-config
-                    ((mysql pgsql sqlite) sql-cmd)
+                    ((mysql postgres sqlite) sql-cmd)
                     (sqlserver (format "set nocount on; %s" sql-cmd)))))
     (f-write sql-cmd 'utf-8 tmp-path)
     (let ((res (org-sql--case-mode org-sql-db-config
                  (mysql
                   (org-sql-send-sql (format "source %s" tmp-path) async))
-                 (pgsql
+                 (postgres
                   (org-sql-send-sql (format "\\i %s" tmp-path) async))
                  (sqlite
                   (org-sql-send-sql (format ".read %s" tmp-path) async))
@@ -2815,7 +2815,7 @@ database connection. If ASYNC is t, the client command will be
 spawned in an asynchronous process."
   (let ((args (org-sql--case-mode org-sql-db-config
                 (mysql `("-e" ,sql-cmd))
-                (pgsql `("-c" ,sql-cmd))
+                (postgres `("-c" ,sql-cmd))
                 (sqlite `(,sql-cmd))
                 (sqlserver `("-Q" ,(format "SET NOCOUNT ON; %s" sql-cmd))))))
     (org-sql--exec-command-in-db args async)))
@@ -2852,7 +2852,7 @@ schema (or the schema defined by the :schema keyword)."
                    (lambda (s)
                      (let ((s* (s-trim s)))
                        (unless (equal s* "") (s-lines s*))))))
-            (pgsql
+            (postgres
              (org-sql--with-config-keys (:schema) org-sql-db-config
                (let ((schema* (or schema "public")))
                  (list (format "\\dt %s.*" schema*)
@@ -2893,7 +2893,7 @@ connection. Note that this will error on all by SQLite since
 org-sql does not assume you have full root privileges on the
 server implementations."
   (org-sql--case-mode org-sql-db-config
-    ((mysql pgsql sqlserver)
+    ((mysql postgres sqlserver)
      (error "Must manually create database using admin privileges"))
     (sqlite
      ;; this is a silly command that should work on all platforms (eg doesn't
@@ -2909,7 +2909,7 @@ connection. Note that this will error on all by SQLite since
 org-sql does not assume you have full root privileges on the
 server implementations."
   (org-sql--case-mode org-sql-db-config
-    ((mysql pgsql sqlserver)
+    ((mysql postgres sqlserver)
      (error "Must manually drop database using admin privileges"))
     (sqlite
      (org-sql--with-config-keys (:path) org-sql-db-config
@@ -2927,7 +2927,7 @@ connection."
        (let ((cmd (format "SHOW DATABASES LIKE '%s';" database)))
          (org-sql--on-success* (org-sql--exec-mysql-command-nodb `("-e" ,cmd) nil)
            (equal database (car (s-lines it-out)))))))
-    (pgsql
+    (postgres
      (org-sql--with-config-keys (:database) org-sql-db-config
        (let ((cmd (format "SELECT 1 FROM pg_database WHERE datname='%s';" database)))
          (org-sql--on-success* (org-sql--exec-postgres-command-nodb `("-c" ,cmd) nil)
@@ -2949,11 +2949,12 @@ This means the database will be created (in the case of SQLite if
 it does not already exist) and the required tables will be
 created.
 
-Note that in the case of all but SQLite, additional
-steps outside this package is required to set up the database
-itself, the schema (in the case of Postgres and SQL-Server), and
-permissions/access. In the case of SQLite, the only permission required
-is the filesystem permissions to create the database file.
+Note that in the case of all but SQLite, additional steps outside
+this package is required to set up the database itself, the
+schema (in the case of Postgres and SQL-Server), and
+permissions/access. In the case of SQLite, the only permission
+required is the filesystem permissions to create the database
+file.
 
 Permissions required: CREATE TABLE (and CREATE TYPE in the case
 of Postgres)
@@ -2966,7 +2967,7 @@ provides (eg setting up indexes, triggers, etc as desired).
 Setting `org-sql-async' to t will allow this function's client
 process to run asynchronously."
   (org-sql--case-mode org-sql-db-config
-    ((mysql pgsql sqlserver)
+    ((mysql postgres sqlserver)
      nil)
     (sqlite
      (org-sql-create-db)))
@@ -2997,13 +2998,13 @@ explicit DROP for this key might not be necessary.
 Setting `org-sql-async' to t will allow this function's client
 process to run asynchronously."
   (org-sql--case-mode org-sql-db-config
-    ((mysql pgsql sqlserver)
+    ((mysql postgres sqlserver)
      nil)
     (sqlite
      (org-sql-drop-db)))
   (let ((drop-tbl-stmts
          (org-sql--case-mode org-sql-db-config
-           ((mysql pgsql sqlserver)
+           ((mysql postgres sqlserver)
             (org-sql--get-drop-table-statements org-sql-db-config))
            (sqlite nil))))
     (org-sql--send-transaction-with-hook org-sql-pre-reset-hooks

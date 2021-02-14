@@ -1076,7 +1076,7 @@ list then join the cdr of IN with newlines."
   (declare (indent 2))
   (-let (((&plist :sqlite :postgres :mysql :sqlserver) value-plist))
     (expect (format-with '(mysql) type input) :to-equal mysql)
-    (expect (format-with '(pgsql) type input) :to-equal postgres)
+    (expect (format-with '(postgres) type input) :to-equal postgres)
     (expect (format-with '(sqlite) type input) :to-equal sqlite)
     (expect (format-with '(sqlserver) type input) :to-equal sqlserver)))
 
@@ -1200,7 +1200,7 @@ list then join the cdr of IN with newlines."
                  "INSERT INTO table-bar (intone,inttwo) VALUES (0,1),(2,3);"))))
 
     (it "Postgres"
-      (let ((config '(pgsql)))
+      (let ((config '(postgres)))
         (expect
          (org-sql--format-bulk-inserts config test-insert-alist)
          :to-equal
@@ -1236,7 +1236,7 @@ list then join the cdr of IN with newlines."
           "CREATE TABLE IF NOT EXISTS table-bar (intone INTEGER,inttwo INTEGER,PRIMARY KEY (intone),FOREIGN KEY (inttwo) REFERENCES table-foo (int) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED);"))))
 
     (it "postgres"
-      (let ((config '(pgsql)))
+      (let ((config '(postgres)))
         (expect
          (org-sql--format-create-tables config org-sql--table-alist)
          :to-equal
@@ -1246,7 +1246,7 @@ list then join the cdr of IN with newlines."
           "CREATE TABLE IF NOT EXISTS table-bar (intone INTEGER,inttwo INTEGER,PRIMARY KEY (intone),FOREIGN KEY (inttwo) REFERENCES table-foo (int) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED);"))))
 
     (it "postgres - unlogged"
-      (let ((config '(pgsql :unlogged t)))
+      (let ((config '(postgres :unlogged t)))
         (expect
          (org-sql--format-create-tables config org-sql--table-alist)
          :to-equal
@@ -1256,7 +1256,7 @@ list then join the cdr of IN with newlines."
           "CREATE UNLOGGED TABLE IF NOT EXISTS table-bar (intone INTEGER,inttwo INTEGER,PRIMARY KEY (intone),FOREIGN KEY (inttwo) REFERENCES table-foo (int) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED);"))))
 
     (it "postgres - nonpublic"
-      (let ((config '(pgsql :schema "nonpublic")))
+      (let ((config '(postgres :schema "nonpublic")))
         (expect
          (org-sql--format-create-tables config org-sql--table-alist)
          :to-equal
@@ -1302,7 +1302,7 @@ list then join the cdr of IN with newlines."
          "PRAGMA foreign_keys = ON;BEGIN;INSERT INTO foo (bar) values (1);COMMIT;")))
 
     (it "postgres"
-      (let ((config '(pgsql))
+      (let ((config '(postgres))
             (statements (list "INSERT INTO foo (bar) values (1);")))
         (expect
          (org-sql--format-sql-transaction config statements)

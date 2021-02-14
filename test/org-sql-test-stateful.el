@@ -88,7 +88,7 @@
 (defmacro describe-sql-database-spec (config)
   (let ((it-forms
          (org-sql--case-mode config
-           ((mysql pgsql sqlserver)
+           ((mysql postgres sqlserver)
             '((it "create database should error"
                 (should-error (org-sql-create-db)))
               (it "drop database should error"
@@ -139,7 +139,7 @@
                         (sqlite
                          '(it "database should not exist"
                             (expect (not (org-sql-db-exists)))))
-                        ((mysql pgsql sqlserver)
+                        ((mysql postgres sqlserver)
                          '(it "database should still exist"
                             (expect (org-sql-db-exists)))))))
     (cl-flet
@@ -503,7 +503,7 @@
                  :username "org_sql"
                  :password "org_sql")
            (append key-vals)
-           (mk-io-spec "Postgres" 'pgsql version alt-title)))
+           (mk-io-spec "Postgres" 'postgres version alt-title)))
      (mk-mysql
       (title version port &optional alt-title key-vals)
       (->> (list :database "org_sql"

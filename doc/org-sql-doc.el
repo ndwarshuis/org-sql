@@ -36,7 +36,7 @@
   (-let* (((name . (&plist :type :constraints)) column)
           (type* (if (eq type 'enum)
                      (org-sql--case-mode config
-                       ((mysql pgsql) "ENUM")
+                       ((mysql postgres) "ENUM")
                        ((sqlite sqlserver)
                         (org-sql--format-create-tables-type config name column)))
                    (org-sql--format-create-tables-type config name column)))
@@ -91,7 +91,7 @@
 (defun org-sql-format-er-file (config)
   (let* ((db-name (org-sql--case-mode config
                     (mysql "MySQL/MariaDB")
-                    (pgsql "PostgreSQL")
+                    (postgres "PostgreSQL")
                     (sqlite "SQLite")
                     (sqlserver "SQL Server")))
          (title (format "title {label: \"Org-SQL ERD (%s)\"}" db-name))
@@ -106,7 +106,7 @@
           (inpath (f-join (temporary-file-directory) "org-sql-erd.er"))
           (outpath (->> (org-sql--case-mode config
                           (mysql "mysql")
-                          (pgsql "postgres")
+                          (postgres "postgres")
                           (sqlite "sqlite")
                           (sqlserver "sqlserver"))
                         (format "erd-%s.png")
@@ -116,7 +116,7 @@
       (f-delete inpath t))))
 
 (defun org-sql-create-all-erds ()
-  (-each '((mysql) (pgsql) (sqlite) (sqlserver)) #'org-sql-write-erd))
+  (-each '((mysql) (postgres) (sqlite) (sqlserver)) #'org-sql-write-erd))
 
 ;;; table descriptions
 
