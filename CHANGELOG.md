@@ -35,6 +35,7 @@
     functionally inverses of each other)
   - `org-sql-user-update` was renamed to `org-sql-user-push` ...to make room
     for a `-pull` ;)
+
 ## 1.1.0
 
 - use latest logbook/contents code from `org-ml`

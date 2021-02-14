@@ -191,4 +191,6 @@ Each row stores one link.
 | headline_id | id of the headline for this link |
 | link_path | target of this link (eg url, file path, etc) |
 | link_text | text of this link that isn't part of the path |
-| link_type | type of this link (eg http, mu4e, file, etc) |1.1.0
+| link_type | type of this link (eg http, mu4e, file, etc) |
+
+Version: 2.0.0

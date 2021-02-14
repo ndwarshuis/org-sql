@@ -205,6 +205,8 @@
                  (-map #'org-sql-doc-format-schema)
                  (s-join "\n\n")))
 
-    (insert (org-sql-get-package-version))))
+    (insert "\n\n")
+
+    (insert (format "Version: %s" (org-sql-get-package-version)))))
 
 ;;; org-sql-doc.el ends here
