@@ -1768,6 +1768,8 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
             (sc (-some->> (org-ml-headline-get-statistics-cookie headline)
                   (org-ml-get-property :value)))
             ((sc-value sc-type) (pcase sc
+                                  ;; divide-by-zero -> NULL
+                                  (`(,n 0) '(nil fraction))
                                   (`(,n ,d) `(,(/ (* 1.0 n) d) fraction))
                                   (`(,p) `(,p percent))))
             (contents (org-ml-supercontents-get-contents supercontents)))
