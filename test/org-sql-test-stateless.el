@@ -73,6 +73,14 @@ list then join the cdr of IN with newlines."
 (defconst testing-outlines
   `(outlines (,testing-hash ,testing-size ,testing-lines)))
 
+(defconst init-ids
+  (list :headline-id 1
+        :timestamp-id 1
+        :entry-id 1
+        :link-id 1
+        :property-id 1
+        :clock-id 1))
+
 (defmacro expect-sql* (in tbl res-form)
   `(progn
      (insert (list-to-lines ,in))
@@ -84,7 +92,7 @@ list then join the cdr of IN with newlines."
                          :clock-into-drawer org-clock-into-drawer
                          :clock-out-notes org-log-note-clock-out))
         (paths-with-attributes (list (cons testing-filepath testing-attributes)))
-        (acc (org-sql--init-acc)))
+        (acc (org-sql--init-acc (-clone init-ids))))
     (--> (org-ml-parse-this-buffer)
       (org-sql--to-outline-config testing-hash paths-with-attributes
                                   org-log-note-headings '("TODO" "DONE")

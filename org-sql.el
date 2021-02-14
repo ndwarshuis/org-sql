@@ -2323,21 +2323,16 @@ FILE-PATH) which are to be deleted. CONFIG is a list like
 
 ;; bulk inserts
 
-(defun org-sql--init-acc ()
+(defun org-sql--init-acc (init-ids)
   "Return an initialized accumulator for bulk insertion.
 The accumulator will be a plist. The :inserts key will hold the
 alist (initialized with `org-sql--empty-insert-alist') which will
 hold the rows to be inserted. The remaining keys will hold the ID
 surrogate key values for corresponding columns in their
 respective tables (which are :headline-id, :timestamp-id,
-:entry-id, :link-id, :property-id, and :clock-id)."
-  (list :inserts (-clone org-sql--empty-insert-alist)
-        :headline-id 1
-        :timestamp-id 1
-        :entry-id 1
-        :link-id 1
-        :property-id 1
-        :clock-id 1))
+:entry-id, :link-id, :property-id, and :clock-id). INIT-IDS
+is a plist with the id's to use for initialization."
+  (append (list :inserts (-clone org-sql--empty-insert-alist)) init-ids))
 
 (defun org-sql--acc-get (key acc)
   "Return KEY from ACC."
@@ -2351,13 +2346,16 @@ respective tables (which are :headline-id, :timestamp-id,
   "Return ACC with KEY set to 1."
   (plist-put acc key 0))
 
-(defun org-sql--format-insert-statements (config paths-to-insert files-to-insert)
+(defun org-sql--format-insert-statements (config max-ids paths-to-insert files-to-insert)
   "Return list of multi-row INSERT statements for paths and outlines.
 CONFIG is a list like `org-sql-db-config'. PATHS-TO-INSERT is a
 plist like (:hash FILE-HASH :path FILE-HASH :attrs
 FILE-ATTRIBUTES) and FILES-TO-INSERT is a list of OUTLINE-CONFIG
-lists."
-  (let* ((acc (org-sql--init-acc))
+lists. MAX-IDS is plist of the max id's currently in the database."
+  (let* ((acc (->> (-partition 2 max-ids)
+                   (--map (list (car it) (1+ (cadr it))))
+                   (-flatten-n 1)
+                   (org-sql--init-acc)))
          (acc* (--reduce-from (org-sql--outline-config-to-insert-alist acc it) acc files-to-insert)))
     (--> paths-to-insert
       (--reduce-from (-let (((&plist :hash :path :attrs) it))
@@ -2400,6 +2398,44 @@ This is like `org-sql--on-success' but with '(error it-out)'
 supplied for ERROR-FORM. FIRST-FORM has the same meaning."
   (declare (indent 1))
   `(org-sql--on-success ,first-form (progn ,@success-forms) (error it-out)))
+
+(defmacro org-sql--fmap (io-return form)
+  "Apply FORM to OUT field of IO-RETURN.
+Do nothing if the return code is non-zero. OUT is bound to
+`it-out`"
+  (declare (indent 1))
+  (let ((r (make-symbol "rc")))
+    `(-let (((,r . it-out) ,io-return))
+       (if (= 0 ,r) (cons ,r ,form) ,io-return))))
+
+(defmacro org-sql--do (let-forms &rest success-forms)
+  "Execute LET-FORMS in order.
+
+LET-FORMS is a series of let-like forms (eg (SYM FORM)) where
+FORM is a form to be executed which returns a list like (RC .
+OUT) where RC is the return code and OUT is the output from
+stdout and/or stderr. If RC is 0, OUT will be bound to SYM. If
+the return code is non-zero, all other forms in LET-FORMS will
+not be executed and instead the error message from OUT will be
+printed. When all LET-FORM are complete, execute SUCCESS-FORMS
+\(which may use the values bound in LET-FORMS.
+
+To those who have experienced the glory of Haskell, this is
+basically a hacky Lisp version of a do-block with an Either type
+\(or IO + ExceptT, which I don't feel like writing):
+
+lameExample :: Either a b
+lameExample x = do
+  a <- f1 x
+  b <- f2 x
+  c <- f3 x
+  return $ youWin a b c"
+  (declare (indent 1))
+  (car (--reduce-from `((org-sql--on-success* ,(cadr it)
+                          (let ((,(car it) it-out))
+                            ,@acc)))
+                      success-forms
+                      (nreverse let-forms))))
 
 (defun org-sql--get-drop-table-statements (config)
   "Return a list of DROP TABLE statements.
@@ -2520,12 +2556,42 @@ Each hashpathpair will have it's :disk-path set to nil."
            (--map (-let (((&plist :outline_hash h :file_path p) it))
                     (cons h p)))))))
 
+(defun org-sql--get-max-ids ()
+  "Return the max ids for all surrogate keys."
+  (cl-flet
+      ((get-maxid
+        (table-names col name)
+        (if (not (member (symbol-name name) table-names))
+            ;; TODO this is just 'return bla' from Haskell
+            (0 . 0)
+          (--> (org-sql--format-table-name org-sql-db-config name)
+            (format "SELECT MAX(%s) FROM %s;" col it)
+            ;; NOTE this will never be asynchronous
+            (org-sql-send-sql it nil)
+            (org-sql--fmap it
+              (let ((s (s-trim it-out)))
+                (if (s-matches-p "[[:digit:]]+" s) (string-to-number s) 0)))))))
+    (let ((table-names (org-sql-list-tables)))
+      (org-sql--do ((hid (get-maxid table-names "headline_id" 'headlines))
+                    (tid (get-maxid table-names "timestamp_id" 'timestamps))
+                    (eid (get-maxid table-names "entry_id" 'logbook_entries))
+                    (lid (get-maxid table-names "link_id" 'links))
+                    (pid (get-maxid table-names "property_id" 'properties))
+                    (cid (get-maxid table-names "clock_id" 'clocks)))
+        (list :headline-id hid
+              :timestamp-id tid
+              :entry-id eid
+              :link-id lid
+              :property-id pid
+              :clock-id cid)))))
+
 (defun org-sql--get-transactions ()
   "Return SQL string of the update transaction.
 This transaction will bring the database to represent the same
 state as the orgfiles on disk."
   (-let* ((disk-hashpathpairs (org-sql--disk-get-hashpathpairs))
           (db-hashpathpairs (org-sql--db-get-hashpathpairs))
+          (max-ids (org-sql--get-max-ids))
           ((&alist 'files-to-insert fi
                    'files-to-delete fd
                    'paths-to-insert pi
@@ -2539,7 +2605,7 @@ state as the orgfiles on disk."
           (org-sql--format-outline-delete-statement org-sql-db-config fd)
           (->> (org-sql--group-hashpathpairs-by-hash fi)
                (--map (org-sql--hashpathpair-get-outline-config (car it) (cdr it)))
-               (org-sql--format-insert-statements org-sql-db-config pi*)))))
+               (org-sql--format-insert-statements org-sql-db-config max-ids pi*)))))
 
 (defun org-sql-dump-update-transactions ()
   "Dump the update transaction to a separate buffer."
