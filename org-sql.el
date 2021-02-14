@@ -3113,7 +3113,7 @@ Calls `org-sql-push-to-db'."
   (message "Pushing data to Org SQL database")
   (org-sql--on-user-success (org-sql-push-to-db) "org-sql-push-to-db"))
 
-(defun org-sql-user-clear ()
+(defun org-sql-user-clear-all ()
   "Remove all entries in the database.
 Calls `org-sql-clear-db'."
   (interactive)
