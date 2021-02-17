@@ -503,7 +503,7 @@ to store them. This is in addition to any properties specifified by
             ,(entry-id-col "planning change")
             (:timestamp_id :desc "id of the former timestamp"
                            :type integer
-                           :constraints (notnull)))
+                           :constraints (notnull unique)))
            (constraints
             (primary :keys (:entry_id))
             (foreign :ref timestamps
