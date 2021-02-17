@@ -199,7 +199,11 @@ to store them. This is in addition to any properties specifified by
                             :constraints (notnull))
             (:level :desc "the level of this headline"
                     :properties (:level)
-                    :type integer)
+                    :type integer
+                    :constriants (notnull))
+            (:headline_index :desc "the order of this headline relative to its neighbors"
+                             :type integer
+                             :constriants (notnull))
             (:keyword :desc "the TODO state keyword"
                       :properties (:todo-keyword)
                       :type text)
@@ -1740,9 +1744,10 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
            (reverse)
            (--reduce-from (apply #'add-closure acc it) acc)))))
 
-(defun org-sql--insert-alist-add-headline (acc hstate)
+(defun org-sql--insert-alist-add-headline (acc index hstate)
   "Add row the current headline's metadata to ACC.
-HSTATE is a plist as returned by `org-sql--to-hstate'."
+INDEX is the order of the headline relative to its neighbors.
+ HSTATE is a plist as returned by `org-sql--to-hstate'."
   (cl-flet
       ((effort-to-int
         (s)
@@ -1764,6 +1769,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
              :outline_hash outline-hash
              :headline_text (org-ml-get-property :raw-value headline)
              :level (org-ml-get-property :level headline)
+             :headline_index index
              :keyword (org-ml-get-property :todo-keyword headline)
              :effort (-> (org-ml-headline-get-node-property "Effort" headline)
                          (effort-to-int))
@@ -1791,7 +1797,7 @@ OUTLINE-CONFIG is a list given by `org-sql--to-outline-config'."
   (-let (((&plist :headlines) outline-config))
     (cl-labels
         ((add-headline
-          (acc hstate hl)
+          (acc hstate index hl)
           (let* ((sub (org-ml-headline-get-subheadlines hl))
                  (headline-id (org-sql--acc-get :headline-id acc))
                  (hstate* (if hstate (org-sql--update-hstate headline-id hstate hl)
@@ -1799,9 +1805,12 @@ OUTLINE-CONFIG is a list given by `org-sql--to-outline-config'."
             (if (and org-sql-exclude-headline-predicate
                      (funcall org-sql-exclude-headline-predicate hl))
                 acc
-              (--> (org-sql--insert-alist-add-headline acc hstate*)
-                (--reduce-from (add-headline acc hstate* it) it sub))))))
-      (--reduce-from (add-headline acc nil it) acc headlines))))
+              (let ((acc* (org-sql--insert-alist-add-headline acc index hstate*)))
+                ;; TODO this isn't DRY
+                (->> (--map-indexed (cons it-index it) sub)
+                     (--reduce-from (add-headline acc hstate* (car it) (cdr it)) acc*)))))))
+      (->> (--map-indexed (cons it-index it) headlines)
+           (--reduce-from (add-headline acc nil (car it) (cdr it)) acc)))))
 
 (defun org-sql--insert-alist-add-file-tags (acc outline-config)
   "Add row for each file tag in file to ACC.
