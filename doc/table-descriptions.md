@@ -33,6 +33,7 @@ Each row stores one headline in a given org outline.
 | headline_id | id of this headline |
 | outline_hash | hash (MD5) of the org outline with this headline |
 | headline_text | raw text of the headline without leading stars or tags |
+| level | the level of this headline |
 | keyword | the TODO state keyword |
 | effort | the value of the `Effort` property in minutes |
 | priority | character value of the priority |

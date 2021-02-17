@@ -197,6 +197,9 @@ to store them. This is in addition to any properties specifified by
                             :properties (:raw-value)
                             :type text
                             :constraints (notnull))
+            (:level :desc "the level of this headline"
+                    :properties (:level)
+                    :type integer)
             (:keyword :desc "the TODO state keyword"
                       :properties (:todo-keyword)
                       :type text)
@@ -1760,6 +1763,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
              :headline_id (org-sql--acc-get :headline-id acc)
              :outline_hash outline-hash
              :headline_text (org-ml-get-property :raw-value headline)
+             :level (org-ml-get-property :level headline)
              :keyword (org-ml-get-property :todo-keyword headline)
              :effort (-> (org-ml-headline-get-node-property "Effort" headline)
                          (effort-to-int))
