@@ -657,7 +657,16 @@ list then join the cdr of IN with newlines."
                          (list "* parent"
                                planning)
                          `((timestamps (1 1 ,ts 1 ,(org-ts-to-unixtime ts) nil 0 nil))
-                           (timestamp_repeaters (1 2 day cumulate))))))
+                           (timestamp_repeaters (1 2 day cumulate nil nil))))))
+
+    (it "deadline (repeater + habit)"
+      (let* ((ts "<2112-01-01 Thu +2d/3d>")
+             (planning (format "DEADLINE: %s" ts)))
+        (expect-sql-tbls (timestamps timestamp_modifiers timestamp_repeaters)
+                         (list "* parent"
+                               planning)
+                         `((timestamps (1 1 ,ts 1 ,(org-ts-to-unixtime ts) nil 0 nil))
+                           (timestamp_repeaters (1 2 day cumulate 3 day))))))
 
     (it "deadline (warning)"
       (let* ((ts "<2112-01-01 Thu -2d>")

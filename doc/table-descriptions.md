@@ -82,7 +82,7 @@ Each row stores the warning component for a timestamp.
 
 ## timestamp_repeaters
 
-Each row stores the repeater component for a timestamp.
+Each row stores the repeater component for a timestamp. If the repeater also has a habit appended to it, this will be stored as well.
 
 | Column | Description |
 |  -  |  -  |
@@ -90,6 +90,8 @@ Each row stores the repeater component for a timestamp.
 | repeater_value | shift of this repeater |
 | repeater_unit | unit of this repeater (`hour`, `day`, `week`, `month`, or `year`) |
 | repeater_type | type of this repeater (`catch-up`, `restart`, or `cumulate`) |
+| habit_value | shift of this repeater's habit |
+| habit_unit | unit of this repeaters habit (`hour`, `day`, `week`, `month`, or `year`) |
 
 ## planning_entries
 

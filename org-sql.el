@@ -5,7 +5,7 @@
 ;; Author: Nathan Dwarshuis <natedwarshuis@gmail.com>
 ;; Keywords: org-mode, data
 ;; Homepage: https://github.com/ndwarshuis/org-sql
-;; Package-Requires: ((emacs "27.1") (s "1.12") (f "0.20.0") (dash "2.17") (org-ml "5.4.3"))
+;; Package-Requires: ((emacs "27.1") (s "1.12") (f "0.20.0") (dash "2.17") (org-ml "5.6.0"))
 ;; Version: 2.0.0
 
 ;; This program is free software; you can redistribute it and/or modify
@@ -323,20 +323,30 @@ to store them. This is in addition to any properties specifified by
                      :cardinality one-or-none-to-one)))
           
           (timestamp_repeaters
-           (desc "Each row stores the repeater component for a timestamp.")
+           (desc "Each row stores the repeater component for a timestamp."
+                 "If the repeater also has a habit appended to it, this will"
+                 "be stored as well.")
            (columns
             ,(timestamp-id-col "repeater")
             (:repeater_value :desc "shift of this repeater"
                              :properties (:repeater-value)
-                             :type integer)
+                             :type integer
+                             :constraints (notnull))
             (:repeater_unit :desc "unit of this repeater"
                             :properties (:repeater-unit)
                             :type enum
-                            :allowed ,modifier-allowed-units)
+                            :allowed ,modifier-allowed-units
+                            :constraints (notnull))
             (:repeater_type :desc "type of this repeater"
                             :type enum
                             :properties (:repeater-type)
-                            :allowed (catch-up restart cumulate)))
+                            :allowed (catch-up restart cumulate)
+                            :constraints (notnull))
+            (:habit_value :desc "shift of this repeater's habit"
+                          :type integer)
+            (:habit_unit :desc "unit of this repeaters habit"
+                         :type enum
+                         :allowed ,modifier-allowed-units))
            (constraints
             (primary :keys (:timestamp_id))
             (foreign :ref timestamps
@@ -1640,34 +1650,28 @@ CONTENTS is a list corresponding to that returned by
               (org-sql--acc-incr :link-id it))))
         (-reduce-from #'add-link acc links)))))
 
-(defmacro org-sql--insert-alist-add-timestamp-mod (acc modifier-type timestamp)
-  "Add row for timestamp modifier of TIMESTAMP to ACC.
-MODIFIER-TYPE is one of 'warning' or 'repeater'."
-  (declare (indent 2))
-  (-let (((tbl-name value-col unit-col type-col type-prop value-prop unit-prop)
-          (cl-case modifier-type
-            (warning (list 'timestamp_warnings
-                           :warning_value
-                           :warning_unit
-                           :warning_type
-                           :warning-type
-                           :warning-value
-                           :warning-unit))
-            (repeater (list 'timestamp_repeaters
-                            :repeater_value
-                            :repeater_unit
-                            :repeater_type
-                            :repeater-type
-                            :repeater-value
-                            :repeater-unit))
-            (t (error "Unknown modifier type: %s" modifier-type)))))
-    `(-if-let (type (org-ml-get-property ,type-prop ,timestamp))
-         (org-sql--insert-alist-add ,acc ,tbl-name
-           :timestamp_id (org-sql--acc-get :timestamp-id acc)
-           ,value-col (org-ml-get-property ,value-prop ,timestamp)
-           ,unit-col (org-ml-get-property ,unit-prop ,timestamp)
-           ,type-col type)
-       ,acc)))
+(defun org-sql--insert-alist-add-timestamp-repeater (acc timestamp)
+  "Add row for the repeater/habit of TIMESTAMP to ACC."
+  (-let* ((org-ml-parse-habits t)
+          ((rt rv ru hv hu) (org-ml-timestamp-get-repeater timestamp)))
+    (if (not (or rt rv ru hv hu)) acc
+      (org-sql--insert-alist-add acc timestamp_repeaters
+        :timestamp_id (org-sql--acc-get :timestamp-id acc)
+        :repeater_type rt
+        :repeater_value rv
+        :repeater_unit ru
+        :habit_value hv
+        :habit_unit hu))))
+
+(defun org-sql--insert-alist-add-timestamp-warning (acc timestamp)
+  "Add row for the warning of TIMESTAMP to ACC."
+  (-let (((wt wv wu) (org-ml-timestamp-get-warning timestamp)))
+    (if (not (or wt wv wu)) acc
+      (org-sql--insert-alist-add acc timestamp_warnings
+        :timestamp_id (org-sql--acc-get :timestamp-id acc)
+        :warning_type wt
+        :warning_value wv
+        :warning_unit wu))))
 
 (defun org-sql--insert-alist-add-timestamp (acc timestamp)
   "Add row for TIMESTAMP to ACC."
@@ -1687,8 +1691,8 @@ MODIFIER-TYPE is one of 'warning' or 'repeater'."
           :time_end (-some-> end (org-ml-time-to-unixtime))
           :end_is_long (get-resolution end)
           :raw_value (org-ml-get-property :raw-value timestamp))
-        (org-sql--insert-alist-add-timestamp-mod it warning timestamp)
-        (org-sql--insert-alist-add-timestamp-mod it repeater timestamp)))))
+        (org-sql--insert-alist-add-timestamp-repeater it timestamp)
+        (org-sql--insert-alist-add-timestamp-warning it timestamp)))))
 
 (defun org-sql--insert-alist-add-headline-timestamps (acc contents)
   "Add row for each timestamp in the current headline to ACC.
@@ -3005,8 +3009,7 @@ process to run asynchronously."
            ((mysql postgres sqlserver)
             (org-sql--get-drop-table-statements org-sql-db-config))
            (sqlite nil))))
-    (org-sql--send-transaction-with-hook org-sql-pre-reset-hooks
-                                         org-sql-post-init-hooks
+    (org-sql--send-transaction-with-hook org-sql-pre-reset-hooks nil
                                          drop-tbl-stmts)))
 
 ;;; CRUD functions
