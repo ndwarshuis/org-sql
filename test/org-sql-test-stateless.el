@@ -471,7 +471,7 @@ list then join the cdr of IN with newlines."
       (expect-sql "* headline"
                   `(,testing-outlines
                     ,testing-file_metadata
-                    (headlines (1 ,testing-hash "headline" nil nil nil nil nil 0 0 nil))
+                    (headlines (1 ,testing-hash "headline" 1 0 nil nil nil nil nil 0 0 nil))
                     (headline_closures (1 1 0)))))
 
     (it "two"
@@ -479,8 +479,8 @@ list then join the cdr of IN with newlines."
                         "* another headline")
                   `(,testing-outlines
                     ,testing-file_metadata
-                    (headlines (2 ,testing-hash "another headline" nil nil nil nil nil 0 0 nil)
-                               (1 ,testing-hash "headline" nil nil nil nil nil 0 0 nil))
+                    (headlines (2 ,testing-hash "another headline" 1 1 nil nil nil nil nil 0 0 nil)
+                               (1 ,testing-hash "headline" 1 0 nil nil nil nil nil 0 0 nil))
                     (headline_closures (2 2 0)
                                        (1 1 0)))))
 
@@ -493,7 +493,7 @@ list then join the cdr of IN with newlines."
                   `(,testing-outlines
                     ,testing-file_metadata
                     (headlines
-                     (1 ,testing-hash "another headline [1/2]" "TODO" 30 "A" fraction 0.5
+                     (1 ,testing-hash "another headline [1/2]" 1 0 "TODO" 30 "A" fraction 0.5
                         0 1 "this /should/ appear\n"))
                     (headline_closures
                      (1 1 0)))))
@@ -514,24 +514,49 @@ list then join the cdr of IN with newlines."
                                (= 2 (org-ml-get-property :level h)))))
                            `(,testing-outlines
                              ,testing-file_metadata
-                             (headlines (1 ,testing-hash "headline" nil nil nil nil nil 0 0 nil))
+                             (headlines (1 ,testing-hash "headline" 1 0 nil nil nil nil nil 0 0 nil))
                              (headline_closures (1 1 0)))
                            
                            "nested (no predicate)"
                            nil
                            `(,testing-outlines
                              ,testing-file_metadata
-                             (headlines (2 ,testing-hash "nested headline" nil nil nil nil nil 0 0 nil)
-                                        (1 ,testing-hash "headline" nil nil nil nil nil 0 0 nil))
+                             (headlines (2 ,testing-hash "nested headline" 2 0 nil nil nil nil nil 0 0 nil)
+                                        (1 ,testing-hash "headline" 1 0 nil nil nil nil nil 0 0 nil))
                              (headline_closures (2 2 0)
                                                 (2 1 1)
                                                 (1 1 0))))
+
+    (it "two (many nested)"
+      (expect-sql (list "* a"
+                        "* b"
+                        "** c"
+                        "** d"
+                        "* e"
+                        "** f")
+                  `(,testing-outlines
+                    ,testing-file_metadata
+                    (headlines (6 ,testing-hash "f" 2 0 nil nil nil nil nil 0 0 nil)
+                               (5 ,testing-hash "e" 1 2 nil nil nil nil nil 0 0 nil)
+                               (4 ,testing-hash "d" 2 1 nil nil nil nil nil 0 0 nil)
+                               (3 ,testing-hash "c" 2 0 nil nil nil nil nil 0 0 nil)
+                               (2 ,testing-hash "b" 1 1 nil nil nil nil nil 0 0 nil)
+                               (1 ,testing-hash "a" 1 0 nil nil nil nil nil 0 0 nil))
+                    (headline_closures (6 6 0)
+                                       (6 5 1)
+                                       (5 5 0)
+                                       (4 4 0)
+                                       (4 2 1)
+                                       (3 3 0)
+                                       (3 2 1)
+                                       (2 2 0)
+                                       (1 1 0)))))
 
     (it "archived"
       (expect-sql "* headline :ARCHIVE:"
                   `(,testing-outlines
                     ,testing-file_metadata
-                    (headlines (1 ,testing-hash "headline" nil nil nil nil nil 1 0 nil))
+                    (headlines (1 ,testing-hash "headline" 1 0 nil nil nil nil nil 1 0 nil))
                     (headline_closures (1 1 0))))))
 
   (describe "planning entries"
@@ -632,7 +657,16 @@ list then join the cdr of IN with newlines."
                          (list "* parent"
                                planning)
                          `((timestamps (1 1 ,ts 1 ,(org-ts-to-unixtime ts) nil 0 nil))
-                           (timestamp_repeaters (1 2 day cumulate))))))
+                           (timestamp_repeaters (1 2 day cumulate nil nil))))))
+
+    (it "deadline (repeater + habit)"
+      (let* ((ts "<2112-01-01 Thu +2d/3d>")
+             (planning (format "DEADLINE: %s" ts)))
+        (expect-sql-tbls (timestamps timestamp_modifiers timestamp_repeaters)
+                         (list "* parent"
+                               planning)
+                         `((timestamps (1 1 ,ts 1 ,(org-ts-to-unixtime ts) nil 0 nil))
+                           (timestamp_repeaters (1 2 day cumulate 3 day))))))
 
     (it "deadline (warning)"
       (let* ((ts "<2112-01-01 Thu -2d>")

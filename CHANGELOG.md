@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1.0
+
+- add habits to the `timestamp_repeater` table
+- add headline_index column to `headlines` table to denote order
+- add level column to `headlines` table
+- fix constraints to agree with intended cardinality
+- fix compile errors
+
 ## 2.0.0
 
 - new features

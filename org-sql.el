@@ -5,8 +5,8 @@
 ;; Author: Nathan Dwarshuis <natedwarshuis@gmail.com>
 ;; Keywords: org-mode, data
 ;; Homepage: https://github.com/ndwarshuis/org-sql
-;; Package-Requires: ((emacs "27.1") (s "1.12") (f "0.20.0") (dash "2.17") (org-ml "5.4.3"))
-;; Version: 2.0.0
+;; Package-Requires: ((emacs "27.1") (s "1.12") (f "0.20.0") (dash "2.17") (org-ml "5.6.0"))
+;; Version: 2.1.0
 
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -103,7 +103,6 @@ to store them. This is in addition to any properties specifified by
         ;; ASSUME all filesystems we would ever want to use have a path limit of
         ;; 255 chars (which is almost always true)
         (file_path-varchar-length 255)
-        (tag-varchar-length 32)
         (tag-col '(:tag :desc "the text value of this tag"
                         :type varchar
                         :length 32))
@@ -198,6 +197,13 @@ to store them. This is in addition to any properties specifified by
                             :properties (:raw-value)
                             :type text
                             :constraints (notnull))
+            (:level :desc "the level of this headline"
+                    :properties (:level)
+                    :type integer
+                    :constriants (notnull))
+            (:headline_index :desc "the order of this headline relative to its neighbors"
+                             :type integer
+                             :constriants (notnull))
             (:keyword :desc "the TODO state keyword"
                       :properties (:todo-keyword)
                       :type text)
@@ -317,20 +323,30 @@ to store them. This is in addition to any properties specifified by
                      :cardinality one-or-none-to-one)))
           
           (timestamp_repeaters
-           (desc "Each row stores the repeater component for a timestamp.")
+           (desc "Each row stores the repeater component for a timestamp."
+                 "If the repeater also has a habit appended to it, this will"
+                 "be stored as well.")
            (columns
             ,(timestamp-id-col "repeater")
             (:repeater_value :desc "shift of this repeater"
                              :properties (:repeater-value)
-                             :type integer)
+                             :type integer
+                             :constraints (notnull))
             (:repeater_unit :desc "unit of this repeater"
                             :properties (:repeater-unit)
                             :type enum
-                            :allowed ,modifier-allowed-units)
+                            :allowed ,modifier-allowed-units
+                            :constraints (notnull))
             (:repeater_type :desc "type of this repeater"
                             :type enum
                             :properties (:repeater-type)
-                            :allowed (catch-up restart cumulate)))
+                            :allowed (catch-up restart cumulate)
+                            :constraints (notnull))
+            (:habit_value :desc "shift of this repeater's habit"
+                          :type integer)
+            (:habit_unit :desc "unit of this repeaters habit"
+                         :type enum
+                         :allowed ,modifier-allowed-units))
            (constraints
             (primary :keys (:timestamp_id))
             (foreign :ref timestamps
@@ -504,7 +520,7 @@ to store them. This is in addition to any properties specifified by
             ,(entry-id-col "planning change")
             (:timestamp_id :desc "id of the former timestamp"
                            :type integer
-                           :constraints (notnull)))
+                           :constraints (notnull unique)))
            (constraints
             (primary :keys (:entry_id))
             (foreign :ref timestamps
@@ -990,10 +1006,7 @@ database to be used) is invalid."
           (foreign-meta tbl-name)
           (-let* (((&plist :parent-keys :ref) foreign-meta)
                   (parent-meta (alist-get ref org-sql--table-alist))
-                  (parent-columns (-map #'car (alist-get 'columns parent-meta)))
-                  (parent-primary (--> (alist-get 'constraints parent-meta)
-                                       (alist-get 'primary it)
-                                       (plist-get it :keys))))
+                  (parent-columns (-map #'car (alist-get 'columns parent-meta))))
             ;; any parent keys must have corresponding columns in the referred
             ;; table
             (-some->> (-difference parent-keys parent-columns)
@@ -1411,7 +1424,7 @@ whose keys are a subset of `org-sql--entry-keys'."
   "Return entry list from ITEM.
 See `org-sql--to-entry' for the meaning of the returned list.
 HSTATE is a list given by `org-sql--to-hstate'."
-  (-let* (((&plist :outline-hash :headline) hstate)
+  (-let* (((&plist :outline-hash) hstate)
           ((header-node . rest) (org-sql--split-item item))
           (header-offset (org-ml-get-property :begin header-node))
           (header-text (org-ml-to-trimmed-string header-node))
@@ -1487,7 +1500,7 @@ to NOTE-TEXT; otherwise just as (CLOCK)."
 
 (defun org-sql--insert-alist-add-headline-logbook-item (acc entry)
   "Add row for item ENTRY to ACC."
-  (-let (((entry-type . (&plist :header-text :note-text :outline-hash :ts)) entry))
+  (-let (((entry-type . (&plist :header-text :note-text :ts)) entry))
     (org-sql--insert-alist-add acc logbook_entries
       :entry_id (org-sql--acc-get :entry-id acc)
       :headline_id (org-sql--acc-get :headline-id acc)
@@ -1507,12 +1520,11 @@ to NOTE-TEXT; otherwise just as (CLOCK)."
            :state_old old-state
            :state_new new-state))))
 
-(defun org-sql--insert-alist-add-planning-change (acc hstate entry)
-  "Add rows for planning change ENTRY to ACC.
-HSTATE is a plist as returned by `org-sql--to-hstate'."
+(defun org-sql--insert-alist-add-planning-change (acc entry)
+  "Add rows for planning change ENTRY to ACC."
   (-let (((&plist :old-ts) (cdr entry)))
     (--> (org-sql--insert-alist-add-headline-logbook-item acc entry)
-         (org-sql--insert-alist-add-timestamp it hstate old-ts)
+         (org-sql--insert-alist-add-timestamp it old-ts)
          (org-sql--insert-alist-add it planning_changes
            :entry_id (org-sql--acc-get :entry-id acc)
            :timestamp_id (org-sql--acc-get :timestamp-id acc))
@@ -1524,30 +1536,27 @@ LOGBOOK is the logbook value of the supercontents list returned
 by `org-ml-headline-get-supercontents'. HSTATE is a plist as
 returned by `org-sql--to-hstate'."
   ;; TODO what about unknown stuff?
-  (-let (((&plist :headline) hstate))
-    (cl-flet
-        ((add-entry
-          (acc entry)
-          (let ((entry-type (car entry)))
-            (cond
-             ((memq entry-type org-sql-excluded-logbook-types)
-              acc)
-             ((memq entry-type '(redeadline deldeadline reschedule delschedule))
-              (org-sql--insert-alist-add-planning-change acc hstate entry))
-             ((eq entry-type 'state)
-              (org-sql--insert-alist-add-state-change acc entry))
-             (t
-              (org-sql--insert-alist-add-headline-logbook-item acc entry))))))
-      (->> (org-ml-logbook-get-items logbook)
-           (--map (org-sql--item-to-entry hstate it))
-           (--reduce-from (org-sql--acc-incr :entry-id (add-entry acc it)) acc)))))
+  (cl-flet
+      ((add-entry
+        (acc entry)
+        (let ((entry-type (car entry)))
+          (cond
+           ((memq entry-type org-sql-excluded-logbook-types)
+            acc)
+           ((memq entry-type '(redeadline deldeadline reschedule delschedule))
+            (org-sql--insert-alist-add-planning-change acc entry))
+           ((eq entry-type 'state)
+            (org-sql--insert-alist-add-state-change acc entry))
+           (t
+            (org-sql--insert-alist-add-headline-logbook-item acc entry))))))
+    (->> (org-ml-logbook-get-items logbook)
+         (--map (org-sql--item-to-entry hstate it))
+         (--reduce-from (org-sql--acc-incr :entry-id (add-entry acc it)) acc))))
 
-(defun org-sql--insert-alist-add-clock (acc hstate clock note-text)
+(defun org-sql--insert-alist-add-clock (acc clock note-text)
   "Add rows for CLOCK to ACC.
-NOTE-TEXT is either a string or nil representing the clock-note.
-HSTATE is a plist as returned by `org-sql--to-hstate'."
-  (-let (((&plist :headline) hstate)
-         (value (org-ml-get-property :value clock)))
+NOTE-TEXT is either a string or nil representing the clock-note."
+  (let ((value (org-ml-get-property :value clock)))
     (--> (org-sql--insert-alist-add acc clocks
            :clock_id (org-sql--acc-get :clock-id acc)
            :headline_id (org-sql--acc-get :headline-id acc)
@@ -1568,7 +1577,7 @@ returned by `org-sql--to-hstate'."
   (->> (org-ml-logbook-get-clocks logbook)
        (org-sql--clocks-append-notes hstate)
        (--reduce-from
-        (org-sql--insert-alist-add-clock acc hstate (car it) (cdr it))
+        (org-sql--insert-alist-add-clock acc (car it) (cdr it))
         acc)))
 
 (defun org-sql--insert-alist-add-headline-properties (acc hstate)
@@ -1619,16 +1628,14 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
                (--reduce-from (add-tag acc it nil) it tags)
                (--reduce-from (add-tag acc it t) it i-tags)))))))
 
-(defun org-sql--insert-alist-add-headline-links (acc hstate contents)
+(defun org-sql--insert-alist-add-headline-links (acc contents)
   "Add row for each link in the current headline to ACC.
 CONTENTS is a list corresponding to that returned by
-`org-ml-headline-get-supercontents'. HSTATE is a plist as
-returned by `org-sql--to-hstate'."
+`org-ml-headline-get-supercontents'."
   (if (eq 'all org-sql-excluded-link-types) acc
-    (-let* (((&plist :headline) hstate)
-            (links (->> (--mapcat (org-ml-match '(:any * link) it) contents)
-                        (--remove (member (org-ml-get-property :type it)
-                                          org-sql-excluded-link-types)))))
+    (let ((links (->> (--mapcat (org-ml-match '(:any * link) it) contents)
+                      (--remove (member (org-ml-get-property :type it)
+                                        org-sql-excluded-link-types)))))
       (cl-flet
           ((add-link
             (acc link)
@@ -1643,45 +1650,37 @@ returned by `org-sql--to-hstate'."
               (org-sql--acc-incr :link-id it))))
         (-reduce-from #'add-link acc links)))))
 
-(defmacro org-sql--insert-alist-add-timestamp-mod (acc modifier-type timestamp)
-  "Add row for timestamp modifier of TIMESTAMP to ACC.
-MODIFIER-TYPE is one of 'warning' or 'repeater'."
-  (declare (indent 2))
-  (-let (((tbl-name value-col unit-col type-col type-prop value-prop unit-prop)
-          (cl-case modifier-type
-            (warning (list 'timestamp_warnings
-                           :warning_value
-                           :warning_unit
-                           :warning_type
-                           :warning-type
-                           :warning-value
-                           :warning-unit))
-            (repeater (list 'timestamp_repeaters
-                            :repeater_value
-                            :repeater_unit
-                            :repeater_type
-                            :repeater-type
-                            :repeater-value
-                            :repeater-unit))
-            (t (error "Unknown modifier type: %s" modifier-type)))))
-    `(-if-let (type (org-ml-get-property ,type-prop ,timestamp))
-         (org-sql--insert-alist-add ,acc ,tbl-name
-           :timestamp_id (org-sql--acc-get :timestamp-id acc)
-           ,value-col (org-ml-get-property ,value-prop ,timestamp)
-           ,unit-col (org-ml-get-property ,unit-prop ,timestamp)
-           ,type-col type)
-       ,acc)))
+(defun org-sql--insert-alist-add-timestamp-repeater (acc timestamp)
+  "Add row for the repeater/habit of TIMESTAMP to ACC."
+  (-let* ((org-ml-parse-habits t)
+          ((rt rv ru hv hu) (org-ml-timestamp-get-repeater timestamp)))
+    (if (not (or rt rv ru hv hu)) acc
+      (org-sql--insert-alist-add acc timestamp_repeaters
+        :timestamp_id (org-sql--acc-get :timestamp-id acc)
+        :repeater_type rt
+        :repeater_value rv
+        :repeater_unit ru
+        :habit_value hv
+        :habit_unit hu))))
 
-(defun org-sql--insert-alist-add-timestamp (acc hstate timestamp)
-  "Add row for TIMESTAMP to ACC.
-HSTATE is a plist as returned by `org-sql--to-hstate'."
+(defun org-sql--insert-alist-add-timestamp-warning (acc timestamp)
+  "Add row for the warning of TIMESTAMP to ACC."
+  (-let (((wt wv wu) (org-ml-timestamp-get-warning timestamp)))
+    (if (not (or wt wv wu)) acc
+      (org-sql--insert-alist-add acc timestamp_warnings
+        :timestamp_id (org-sql--acc-get :timestamp-id acc)
+        :warning_type wt
+        :warning_value wv
+        :warning_unit wu))))
+
+(defun org-sql--insert-alist-add-timestamp (acc timestamp)
+  "Add row for TIMESTAMP to ACC."
   (cl-flet
       ((get-resolution
         (time)
         (when time (if (org-ml-time-is-long time) 1 0))))
-    (-let* ((start (org-ml-timestamp-get-start-time timestamp))
-            (end (org-ml-timestamp-get-end-time timestamp))
-            ((&plist :headline) hstate))
+    (let ((start (org-ml-timestamp-get-start-time timestamp))
+          (end (org-ml-timestamp-get-end-time timestamp)))
       (--> acc
         (org-sql--insert-alist-add it timestamps
           :timestamp_id (org-sql--acc-get :timestamp-id acc)
@@ -1692,22 +1691,21 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
           :time_end (-some-> end (org-ml-time-to-unixtime))
           :end_is_long (get-resolution end)
           :raw_value (org-ml-get-property :raw-value timestamp))
-        (org-sql--insert-alist-add-timestamp-mod it warning timestamp)
-        (org-sql--insert-alist-add-timestamp-mod it repeater timestamp)))))
+        (org-sql--insert-alist-add-timestamp-repeater it timestamp)
+        (org-sql--insert-alist-add-timestamp-warning it timestamp)))))
 
-(defun org-sql--insert-alist-add-headline-timestamps (acc hstate contents)
+(defun org-sql--insert-alist-add-headline-timestamps (acc contents)
   "Add row for each timestamp in the current headline to ACC.
 CONTENTS is a list corresponding to that returned by
-`org-ml-headline-get-supercontents'. HSTATE is a plist as
-returned by `org-sql--to-hstate'."
+`org-ml-headline-get-supercontents'."
   (if (eq org-sql-excluded-contents-timestamp-types 'all) acc
+    ;; TODO only do this once
     (-if-let (pattern (-some--> org-sql--content-timestamp-types
                         (-difference it org-sql-excluded-contents-timestamp-types)
                         (--map `(:type ',it) it)
                         `(:any * (:and timestamp (:or ,@it)))))
-        (-let* (((&plist :headline) hstate)
-                (timestamps (--mapcat (org-ml-match pattern it) contents)))
-          (--reduce-from (->> (org-sql--insert-alist-add-timestamp acc hstate it)
+        (let ((timestamps (--mapcat (org-ml-match pattern it) contents)))
+          (--reduce-from (->> (org-sql--insert-alist-add-timestamp acc it)
                               (org-sql--acc-incr :timestamp-id))
                          acc timestamps))
       acc)))
@@ -1721,7 +1719,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
             ((add-planning-maybe
               (acc type)
               (-if-let (ts (org-ml-get-property type planning))
-                  (--> (org-sql--insert-alist-add-timestamp acc hstate ts)
+                  (--> (org-sql--insert-alist-add-timestamp acc ts)
                     (org-sql--insert-alist-add it planning_entries
                       :timestamp_id (org-sql--acc-get :timestamp-id acc)
                       :planning_type (->> (symbol-name type)
@@ -1737,7 +1735,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
 (defun org-sql--insert-alist-add-headline-closures (acc hstate)
   "Add row for parent closures from the current headline to ACC.
 HSTATE is a plist as returned by `org-sql--to-hstate'."
-  (-let* (((&plist :headline :parent-ids) hstate)
+  (-let* (((&plist :parent-ids) hstate)
           (headline-id (org-sql--acc-get :headline-id acc)))
     (cl-flet
         ((add-closure
@@ -1750,9 +1748,10 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
            (reverse)
            (--reduce-from (apply #'add-closure acc it) acc)))))
 
-(defun org-sql--insert-alist-add-headline (acc hstate)
+(defun org-sql--insert-alist-add-headline (acc index hstate)
   "Add row the current headline's metadata to ACC.
-HSTATE is a plist as returned by `org-sql--to-hstate'."
+INDEX is the order of the headline relative to its neighbors.
+ HSTATE is a plist as returned by `org-sql--to-hstate'."
   (cl-flet
       ((effort-to-int
         (s)
@@ -1765,7 +1764,7 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
                   (org-ml-get-property :value)))
             ((sc-value sc-type) (pcase sc
                                   ;; divide-by-zero -> NULL
-                                  (`(,n 0) '(nil fraction))
+                                  (`(,_ 0) '(nil fraction))
                                   (`(,n ,d) `(,(/ (* 1.0 n) d) fraction))
                                   (`(,p) `(,p percent))))
             (contents (org-ml-supercontents-get-contents supercontents)))
@@ -1773,6 +1772,8 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
              :headline_id (org-sql--acc-get :headline-id acc)
              :outline_hash outline-hash
              :headline_text (org-ml-get-property :raw-value headline)
+             :level (org-ml-get-property :level headline)
+             :headline_index index
              :keyword (org-ml-get-property :todo-keyword headline)
              :effort (-> (org-ml-headline-get-node-property "Effort" headline)
                          (effort-to-int))
@@ -1787,8 +1788,8 @@ HSTATE is a plist as returned by `org-sql--to-hstate'."
         (org-sql--insert-alist-add-headline-planning it hstate)
         (org-sql--insert-alist-add-headline-tags it hstate)
         (org-sql--insert-alist-add-headline-properties it hstate)
-        (org-sql--insert-alist-add-headline-timestamps it hstate contents)
-        (org-sql--insert-alist-add-headline-links it hstate contents)
+        (org-sql--insert-alist-add-headline-timestamps it contents)
+        (org-sql--insert-alist-add-headline-links it contents)
         (org-sql--insert-alist-add-headline-logbook-clocks it hstate logbook)
         (org-sql--insert-alist-add-headline-logbook-items it hstate logbook)
         (org-sql--insert-alist-add-headline-closures it hstate)
@@ -1800,7 +1801,7 @@ OUTLINE-CONFIG is a list given by `org-sql--to-outline-config'."
   (-let (((&plist :headlines) outline-config))
     (cl-labels
         ((add-headline
-          (acc hstate hl)
+          (acc hstate index hl)
           (let* ((sub (org-ml-headline-get-subheadlines hl))
                  (headline-id (org-sql--acc-get :headline-id acc))
                  (hstate* (if hstate (org-sql--update-hstate headline-id hstate hl)
@@ -1808,9 +1809,12 @@ OUTLINE-CONFIG is a list given by `org-sql--to-outline-config'."
             (if (and org-sql-exclude-headline-predicate
                      (funcall org-sql-exclude-headline-predicate hl))
                 acc
-              (--> (org-sql--insert-alist-add-headline acc hstate*)
-                (--reduce-from (add-headline acc hstate* it) it sub))))))
-      (--reduce-from (add-headline acc nil it) acc headlines))))
+              (let ((acc* (org-sql--insert-alist-add-headline acc index hstate*)))
+                ;; TODO this isn't DRY
+                (->> (--map-indexed (cons it-index it) sub)
+                     (--reduce-from (add-headline acc hstate* (car it) (cdr it)) acc*)))))))
+      (->> (--map-indexed (cons it-index it) headlines)
+           (--reduce-from (add-headline acc nil (car it) (cdr it)) acc)))))
 
 (defun org-sql--insert-alist-add-file-tags (acc outline-config)
   "Add row for each file tag in file to ACC.
@@ -2217,8 +2221,10 @@ CONFIG is the `org-sql-db-config' list."
                                       (if unlogged "UNLOGGED TABLE" "TABLE")
                                       "IF NOT EXISTS %s (%s);"))))
                  (sqlserver
-                  (org-sql--with-config-keys (:database) config
-                    (format "IF NOT EXISTS (SELECT * FROM sys.tables where name = '%%1$s') CREATE TABLE %%1$s (%%2$s);" database))))))
+                  (->> (list "IF NOT EXISTS"
+                             "(SELECT * FROM sys.tables where name = '%1$s')"
+                             "CREATE TABLE %1$s (%2$s);")
+                       (s-join " "))))))
     (->> (org-sql--format-create-table-constraints config constraints defer)
          (append (org-sql--format-create-table-columns config tbl-name columns))
          (s-join ",")
@@ -2561,7 +2567,7 @@ Each hashpathpair will have it's :disk-path set to nil."
         (table-names col name)
         (if (not (member (symbol-name name) table-names))
             ;; TODO this is just 'return bla' from Haskell
-            (0 . 0)
+            '(0 . 0)
           (--> (org-sql--format-table-name org-sql-db-config name)
             (format "SELECT MAX(%s) FROM %s;" col it)
             ;; NOTE this will never be asynchronous
@@ -2759,7 +2765,7 @@ process."
       (if (not async)
           (f-delete tmp-path)
         (if (process-live-p res)
-            (set-process-sentinel res (lambda (p e) (f-delete tmp-path)))
+            (set-process-sentinel res (lambda (_p _e) (f-delete tmp-path)))
           (f-delete tmp-path)))
       res)))
 
@@ -2865,7 +2871,7 @@ schema (or the schema defined by the :schema keyword)."
             (sqlserver
              (org-sql--with-config-keys (:schema) org-sql-db-config
                (let* ((schema* (or schema "dbo")))
-                 (list (format "SELECT schema_name(schema_id), name FROM sys.tables;" schema*)
+                 (list "SELECT schema_name(schema_id), name FROM sys.tables;"
                        (lambda (s)
                          (let ((s* (s-trim s)))
                            (unless (equal "" s*)
@@ -3003,8 +3009,7 @@ process to run asynchronously."
            ((mysql postgres sqlserver)
             (org-sql--get-drop-table-statements org-sql-db-config))
            (sqlite nil))))
-    (org-sql--send-transaction-with-hook org-sql-pre-reset-hooks
-                                         org-sql-post-init-hooks
+    (org-sql--send-transaction-with-hook org-sql-pre-reset-hooks nil
                                          drop-tbl-stmts)))
 
 ;;; CRUD functions
