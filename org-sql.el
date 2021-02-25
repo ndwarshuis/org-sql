@@ -3062,6 +3062,304 @@ process to run asynchronously."
   (->> (org-sql--get-transactions)
        (org-sql--send-transaction-with-hook nil org-sql-post-push-hooks)))
 
+(defun org-sql--row-to-headline (row)
+  (-let* (((ipath file-path headline-id headline-text keyword level effort
+                  priority is-archived is-commented content tags pkeys
+                  pvals scheduled deadline closed entries clock-starts
+                  clock-ends clock-notes)
+           row)
+          ;; TODO this won't format the effort number at all
+          (effort-prop (-some->> effort
+                         (number-to-string)
+                         (org-ml-build-node-property "Effort")))
+          (props (--zip-with (org-ml-build-node-property it other) pkeys pvals))
+          (all-props (if effort-prop (cons effort-prop props) props))
+          (closed* (-some->> closed
+                     (org-ml-from-string 'timestamp)
+                     (org-ml-timestamp-set-range 0)
+                     (org-ml-timestamp-set-active nil)))
+          (deadline* (-some->> deadline
+                       (org-ml-from-string 'timestamp)
+                       (org-ml-timestamp-set-range 0)))
+          (scheduled* (-some->> scheduled
+                        (org-ml-from-string 'timestamp)
+                        (org-ml-timestamp-set-range 0)))
+          (planning (when (or closed* scheduled* deadline*)
+                      (org-ml-build-planning
+                       :closed closed*
+                       :deadline deadline*
+                       :scheduled scheduled*)))
+          (logbook-items (-some->> entries
+                           (--map (org-ml-build-item! :paragraph it))))
+          (clocks (--zip-with (let ((s (-some->> it (org-ml-unixtime-to-time-long)))
+                                    (e (-some->> other (org-ml-unixtime-to-time-long))))
+                                (org-ml-build-clock! s :end e))
+                              clock-starts
+                              clock-ends))
+          (content-nodes (-some->> content
+                           (org-ml-from-string 'section)
+                           (org-ml-get-children)))
+          (priority* (when (and (stringp priority)
+                                (<= 1 (length priority)))
+                       (aref priority 0)))
+          ;; TODO somehow need to feed this the logbook config
+          (lb-config (list :log-into-drawer t
+                           :clock-into-drawer t)))
+    (->> (org-ml-build-headline! :title-text headline-text
+                                 :todo-keyword keyword
+                                 :level level
+                                 :tags tags
+                                 :priority priority*
+                                 :commentedp (= is-commented 1)
+                                 :archivedp (= is-archived 1))
+         (org-ml-headline-set-node-properties all-props)
+         (org-ml-headline-set-planning planning)
+         (org-ml-headline-set-logbook-items lb-config logbook-items)
+         (org-ml-headline-set-logbook-clocks lb-config clocks)
+         (org-ml-headline-set-contents lb-config content-nodes))))
+
+(defun org-sql--aggregate-headlines (level headlines)
+  (->> headlines
+       (-partition-before-pred (lambda (it) (org-ml--property-is-eq :level level it)))
+       (--map (-let (((parent . children) it))
+                (if (not children) parent
+                  (-> (org-sql--aggregate-headlines (1+ level) children)
+                      (org-ml-headline-set-subheadlines parent)))))))
+
+(defun org-sql--build-pull-query (config)
+  (cl-flet*
+      ;; TODO these feel pretty dumb and repetitive
+      ((list*
+        (ss)
+        (s-join " " ss))
+       (concat*
+        (&rest ss)
+        (list* ss))
+       (format*
+        (ss args)
+        (apply #'format (list* ss) args)))
+    (let* ((paths-select
+            (format* (list "select hc.headline_id as parent_id,"
+                           "h.headline_index as ipath"
+                           "from headline_closures hc"
+                           "join headlines h on h.headline_id = hc.parent_id"
+                           "where hc.depth = 0 and h.level = 1"
+                           "union"
+                           "select hc.headline_id,"
+                           ;; "p.ipath || char(31) || h.headline_index"
+                           "%s"
+                           "from headline_closures hc"
+                           "join headlines h using (headline_id)"
+                           "join paths p using (parent_id)"
+                           "where hc.depth = 1")
+                     (org-sql--case-mode config
+                       ((postgres mysql sqlserver) (error "TODO"))
+                       (sqlite '("p.ipath || char(31) || h.headline_index")))))
+           (logbooks-select
+            (format* (list "select headline_id,"
+                           "%s as entries"
+                           "from logbook_entries"
+                           "group by headline_id")
+                     (org-sql--case-mode config
+                       ((postgres mysql sqlserver) (error "TODO"))
+                       (sqlite (list (concat* "group_concat("
+                                              "  case"
+                                              "    when note is NULL then header"
+                                              "    else header||' \\\\\n  '||note"
+                                              "    end,"
+                                              "  char(31)"
+                                              ")"))))))
+           (clocks-select
+            (format* (list "select headline_id,"
+                           "%s as clock_starts,"
+                           "%s as clock_ends,"
+                           "%s as clock_notes from clocks"
+                           "group by headline_id")
+                     (org-sql--case-mode config
+                       ((postgres mysql sqlserver) (error "TODO"))
+                       (sqlite (list "group_concat(time_start, char(31))"
+                                     "group_concat(time_end, char(31))"
+                                     "group_concat(clock_note, char(31))")))))
+           (tags-select
+            (format* (list "select headline_id, %s as tags from headline_tags"
+                           "group by headline_id")
+                     (org-sql--case-mode config
+                       ((postgres mysql sqlserver) (error "TODO"))
+                       (sqlite '("group_concat(tag, char(31))")))))
+           (planning-fmt
+            (concat* "select t.headline_id, t.raw_value from timestamps t"
+                     "join planning_entries pe using (timestamp_id)"
+                     "left join timestamp_repeaters tr using (timestamp_id)"
+                     "where pe.planning_type = '%s'"))
+           (closed-select (format planning-fmt "closed"))
+           (scheduled-select (format planning-fmt "scheduled"))
+           (deadline-select (format planning-fmt "deadline"))
+           (properties-select
+            (format* (list "select h.headline_id, %s as pkeys, %s as pvals"
+                           "from headline_properties h"
+                           "join properties p using (property_id)"
+                           "group by h.headline_id")
+                     (org-sql--case-mode config
+                       ((postgres mysql sqlserver) (error "TODO"))
+                       (sqlite (list "group_concat(p.key_text, char(31))"
+                                     "group_concat(p.val_text, char(31))")))))
+           (cte (format* (list "with recursive paths as (%s),"
+                               "_logbooks as (%s),"
+                               "_clocks as (%s),"
+                               "_headline_tags as (%s),"
+                               "_scheduled as (%s),"
+                               "_deadline as (%s),"
+                               "_closed as (%s),"
+                               "_headline_properties as (%s)")
+                         (list paths-select
+                               logbooks-select
+                               clocks-select
+                               tags-select
+                               scheduled-select
+                               deadline-select
+                               closed-select
+                               properties-select))))
+      (concat cte (concat* "select"
+                           "  p.ipath,"
+                           "  f.file_path,"
+                           "  h.headline_id,"
+                           "  h.headline_text,"
+                           "  h.keyword,"
+                           "  h.level,"
+                           "  h.effort,"
+                           "  h.priority,"
+                           "  h.is_archived,"
+                           "  h.is_commented,"
+                           "  h.content,"
+                           "  t.tags,"
+                           "  hp.pkeys,"
+                           "  hp.pvals,"
+                           "  sch.raw_value as scheduled_timestamp,"
+                           "  dead.raw_value as deadline_timestamp,"
+                           "  cls.raw_value as closed_timestamp,"
+                           "  lb.entries,"
+                           "  c.clock_starts,"
+                           "  c.clock_ends,"
+                           "  c.clock_notes"
+                           "  from paths p"
+                           "join headlines h on p.parent_id = h.headline_id"
+                           "join file_metadata f using (outline_hash)"
+                           "left join _headline_properties hp using (headline_id)"
+                           "left join _headline_tags t using (headline_id)"
+                           "left join _scheduled sch using (headline_id)"
+                           "left join _deadline dead using (headline_id)"
+                           "left join _closed cls using (headline_id)"
+                           "left join _logbooks lb using (headline_id)"
+                           "left join _clocks c using (headline_id)"
+                           ;; TODO not all DBMSs will need this
+                           "order by f.file_path, p.ipath"
+                           "limit 50 offset 0;")))))
+
+(defun org-sql--compile-deserializers (config)
+  (cl-flet
+      ((wrap-null-check
+        (form)
+        `(unless (equal it "") ,form)))
+    (let ((deserialize-string-or-nil
+           `(lambda (it) ,(wrap-null-check 'it)))
+          (deserialize-int-array
+           (org-sql--case-mode config
+             ((postgres mysql sqlserver) (error "TODO"))
+             (sqlite
+              `(lambda (it)
+                 ,(wrap-null-check
+                   '(-map #'string-to-number (s-split "\C-_" it)))))))
+          (deserialize-number
+           (org-sql--case-mode config
+             ((postgres mysql sqlserver) (error "TODO"))
+             (sqlite `(lambda (it) ,(wrap-null-check '(string-to-number it))))))
+          (deserialize-agg-string
+           (org-sql--case-mode config
+             ((postgres mysql sqlserver) (error "TODO"))
+             (sqlite `(lambda (it) ,(wrap-null-check '(s-split "\C-_" it))))))
+          (deserialize-boolean
+           (let ((literals
+                  (org-sql--case-mode config
+                    ((postgres mysql sqlserver) (error "TODO"))
+                    (sqlite '(("1" 1) ("0" 0))))))
+             `(lambda (it)
+                ,(wrap-null-check
+                  `(pcase it
+                     ,@literals
+                     (e (error "Unrecognized boolean literal: %s" e))))))))
+      ;; TODO this is pain in the butt because it has to line up with that
+      ;; giant query thing above...I guess I could use a plist even though it
+      ;; will be slower, I could also just add comments and break it up into
+      ;; logical sections...
+      (list deserialize-int-array
+            #'identity
+            #'string-to-number
+            #'identity
+            deserialize-string-or-nil
+            #'string-to-number
+            deserialize-number
+            deserialize-string-or-nil
+            deserialize-boolean
+            deserialize-boolean
+            #'identity
+            deserialize-agg-string
+            deserialize-agg-string
+            deserialize-agg-string
+            deserialize-string-or-nil
+            deserialize-string-or-nil
+            deserialize-string-or-nil
+            deserialize-agg-string
+            deserialize-int-array
+            deserialize-int-array
+            deserialize-agg-string))))
+
+(defun org-sql--pull-from-db-sqlite ()
+  (cl-labels
+      ((compare-arrays
+        (A B)
+        (-let (((a . as) A)
+               ((b . bs) B))
+          (cond
+           ((and (not a) (not b))
+            (error "If this happens, the list has duplicates"))
+           ((null a) t)
+           ((null b) nil)
+           ((= a b) (compare-arrays as bs))
+           (t (< a b)))))
+       (deserialize-number
+        (s)
+        (unless (equal "" s)
+          (string-to-number s)))
+       (deserialize-int-array
+        (s)
+        (unless (equal "" s)
+          (-map #'string-to-number (s-split "\C-_" s))))
+       (deserialize-agg-string
+        (s)
+        (unless (equal "" s)
+          (s-split "\C-_" s)))
+       (deserialize-boolean
+        (s)
+        (pcase s
+          ("1" 1)
+          ("0" 0)
+          ("" nil)
+          (e (error "Unrecognized boolean literal: %s" e))))
+       (deserialize-string-or-nil
+        (s)
+        (if (equal s "") nil s)))
+    (let* ((get-hl-sql (org-sql--build-pull-query org-sql-db-config))
+           (headline-deserializers (org-sql--compile-deserializers org-sql-db-config)))
+      (org-sql--do ((headline-out (org-sql--exec-sqlite-command (list ".separator '\C-^' '\C-]'" get-hl-sql) nil)))
+        (->> (org-sql--parse-output-to-list org-sql-db-config (s-chop-suffix "\C-]" headline-out) "\C-^" "\C-]")
+             (--map (--zip-with (funcall it other) headline-deserializers it))
+             (--group-by (nth 1 it))
+             (--map (->> (cdr it)
+                         (--sort (compare-arrays (nth 0 it) (nth 0 other)))
+                         (-map #'org-sql--row-to-headline)
+                         (org-sql--aggregate-headlines 1)
+                         (cons (car it)))))))))
+
 (defun org-sql-pull-from-db ()
   "Pull the current state of the database or org-trees."
   ;; TODO this only works in postgres (so far)
@@ -3213,8 +3511,8 @@ process to run asynchronously."
                        "),"
                        "_headline_properties as ("
                        "  select"
-                       "    h.headline_id, string_agg(p.key_text, chr(31)) as pkeys,"
-                       "    string_agg(p.val_text, chr(31)) as pvals"
+                       "    h.headline_id, string_agg(p.key_text, char(31)) as pkeys,"
+                       "    string_agg(p.val_text, char(31)) as pvals"
                        "    from headline_properties h"
                        "  join properties p using (property_id)"
                        "  group by h.headline_id"
