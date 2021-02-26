@@ -1988,21 +1988,7 @@ The function will be compiled according to CONFIG, a list like
            ((integer real)
             '(number-to-string it))
            ((char text varchar)
-            (let ((escaped-chars
-                   (org-sql--case-mode config
-                     (mysql '(("'" . "''")))
-                     ;; TODO not sure if these also needs Char(13) in front of
-                     ;; Char(10) for the carriage return if using on windows
-                     ;; (alas...newline war)
-                     (postgres '(("'" . "''")
-                              ("\n" . "'||chr(10)||'")))
-                     (sqlite '(("'" . "''")
-                               ("\n" . "'||char(10)||'")))
-                     (sqlserver '(("'" . "''")
-                                  ("\n" . "+Char(10)+"))))))
-              `(->> ',escaped-chars
-                    (--reduce-from (s-replace (car it) (cdr it) acc) it)
-                    (format "'%s'")))))))
+            '(format "'%s'" (s-replace "'" "''" it))))))
     `(lambda (it) (if it ,formatter-form "NULL"))))
 
 (defun org-sql--get-column-formatter (config tbl-name column-name)

@@ -1186,14 +1186,14 @@ list then join the cdr of IN with newlines."
     
     (it "newlines"
       (expect-formatter 'text "foo\nbar"
-        :mysql "'foo\\\\nbar'"
-        :postgres "'foo'||chr(10)||'bar'"
-        :sqlite "'foo'||char(10)||'bar'"
-        :sqlserver "'foo+Char(10)+bar'"))
+        :mysql "'foo\nbar'"
+        :postgres "'foo\nbar'"
+        :sqlite "'foo\nbar'"
+        :sqlserver "'foo\nbar'"))
 
     (it "quotes"
       (expect-formatter 'text "'foo'"
-        :mysql "'\\\\'foo\\\\''"
+        :mysql "'''foo'''"
         :postgres "'''foo'''"
         :sqlite "'''foo'''"
         :sqlserver "'''foo'''"))))
