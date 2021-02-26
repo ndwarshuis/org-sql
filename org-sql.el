@@ -1990,8 +1990,7 @@ The function will be compiled according to CONFIG, a list like
            ((char text varchar)
             (let ((escaped-chars
                    (org-sql--case-mode config
-                     (mysql '(("'" . "\\\\'")
-                              ("\n" . "\\\\n")))
+                     (mysql '(("'" . "''")))
                      ;; TODO not sure if these also needs Char(13) in front of
                      ;; Char(10) for the carriage return if using on windows
                      ;; (alas...newline war)
