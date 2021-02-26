@@ -3359,10 +3359,11 @@ process to run asynchronously."
            ((null b) nil)
            ((= a b) (compare-arrays as bs))
            (t (< a b))))))
-    (let* ((get-hl-sql (org-sql--build-pull-query org-sql-db-config))
-           (headline-deserializers (org-sql--compile-deserializers org-sql-db-config)))
-      (org-sql--do ((headline-out (org-sql--exec-sqlite-command (list ".separator '\C-^' '\C-]'" get-hl-sql) nil)))
-        (->> (org-sql--parse-output-to-list org-sql-db-config (s-chop-suffix "\C-]" headline-out) "\C-^" "\C-]")
+    (let ((query (org-sql--build-pull-query org-sql-db-config))
+          (headline-deserializers (org-sql--compile-deserializers org-sql-db-config)))
+      (org-sql--on-success* (-> (list ".separator '\C-^' '\C-]'" query)
+                                (org-sql--exec-sqlite-command  nil))
+        (->> (org-sql--parse-output-to-list org-sql-db-config (s-chop-suffix "\C-]" it-out) "\C-^" "\C-]")
              (--map (--zip-with (funcall it other) headline-deserializers it))
              (--group-by (nth 1 it))
              (--map (->> (cdr it)
@@ -3371,39 +3372,27 @@ process to run asynchronously."
                          (org-sql--aggregate-headlines 1)
                          (cons (car it)))))))))
 
-(defun org-sql--compare-arrays (A B)
-  (-let (((a . as) A)
-         ((b . bs) B))
-    (cond
-     ((and (not a) (not b))
-      (error "If this happens, the list has duplicates"))
-     ((null a) t)
-     ((null b) nil)
-     ((= a b) (org-sql--compare-arrays as bs))
-     (t (< a b)))))
-
-(defun org-sql-pull-from-db ()
-  "Pull the current state of the database or org-trees."
-  (let ((get-hl-sql (org-sql--build-pull-query org-sql-db-config))
+(defun org-sql--pull-from-db-postgres ()
+  (let ((query (org-sql--build-pull-query org-sql-db-config))
         (headline-deserializers (org-sql--compile-deserializers org-sql-db-config))
-        (sort-fun
-         (org-sql--case-mode org-sql-db-config
-           ((sqlserver mysql) (error "TODO"))
-           (postgres #'identity)
-           (sqlite
-            (lambda (it)
-              (--sort (org-sql--compare-arrays (nth 0 it) (nth 0 other)) it))))))
-              
-    (org-sql--do ((headline-out (-> (list "-F" "\C-^" "-R" "\C-]" "-c" get-hl-sql)
-                                    (org-sql--exec-command-in-db nil))))
-      (->> (org-sql--parse-output-to-list org-sql-db-config headline-out "\C-^" "\C-]")
+        (col-sep "\C-^")
+        (row-sep "\C-]"))
+    (org-sql--on-success* (-> (list "-F" col-sep "-R" row-sep "-c" query)
+                              (org-sql--exec-command-in-db nil))
+      (->> (org-sql--parse-output-to-list org-sql-db-config it-out col-sep row-sep)
            (--map (--zip-with (funcall it other) headline-deserializers it))
            (--group-by (nth 1 it))
            (--map (->> (cdr it)
-                       (funcall sort-fun)
                        (-map #'org-sql--row-to-headline)
                        (org-sql--aggregate-headlines 1)
                        (cons (car it))))))))
+
+(defun org-sql-pull-from-db ()
+  "Pull the current state of the database or org-trees."
+  (org-sql--case-mode org-sql-db-config
+    ((sqlserver mysql) (error "TODO"))
+    (postgres (org-sql--pull-from-db-postgres))
+    (sqlite (org-sql--pull-from-db-sqlite))))
 
 (defun org-sql-clear-db ()
   "Clear the org-sql database.
