@@ -577,6 +577,15 @@ to store them. This is in addition to any properties specifified by
 (defconst org-sql--sqlserver-exe "sqlcmd"
   "The sqlserver client command.")
 
+(defconst org-sql--field-sep "\C-]"
+  "Character used for delimiting fields (when possible).")
+
+(defconst org-sql--row-sep "\C-^"
+  "Character used for delimiting rows (when possible).")
+
+(defconst org-sql--unit-sep "\C-_"
+  "Character used for delimiting array members (when possible).")
+
 ;;;
 ;;; CUSTOMIZATION OPTIONS
 ;;;
@@ -1234,7 +1243,7 @@ changed (the latter will be appended to the front of the current
 
 ;;; SQL string parsing functions
 
-(defun org-sql--parse-output-to-list (config out &optional colsep rowsep)
+(defun org-sql--parse-output-to-list (config out)
   "Return OUT as a LIST.
 OUT is assumed to be tabular output from one of the SQL client
 command line utilities. CONFIG is a list like `org-sql-db-config'
@@ -1242,13 +1251,15 @@ and contains the information for how to parse the output. The
 returned list will be a list of lists, with each list being the
 values of one row from OUT."
   (unless (equal out "")
-    (let ((colsep (or colsep (org-sql--case-mode config
-                               (mysql "\t")
-                               ((postgres sqlite sqlserver) "|")))))
-      ;; (->> (s-trim out)
-      (->> (s-chomp out)
-           (s-split (or rowsep "\n"))
-           (--map (-map #'s-trim (s-split colsep it)))))))
+    (let ((fsep (org-sql--case-mode config
+                  (mysql "\t")
+                  ((postgres sqlite sqlserver) org-sql--field-sep)))
+          (rsep (org-sql--case-mode config
+                  ((mysql sqlserver) "\n")
+                  ((postgres sqlite) org-sql--row-sep))))
+      (->> (s-chop-suffix rsep out)
+           (s-split rsep)
+           (--map (-map #'s-trim (s-split fsep it)))))))
 
 (defun org-sql--parse-output-to-plist (config cols out)
   "Parse OUT to a plist.
@@ -1991,6 +2002,7 @@ The function will be compiled according to CONFIG, a list like
             '(format "'%s'" (s-replace "'" "''" it))))))
     `(lambda (it) (if it ,formatter-form "NULL"))))
 
+
 (defun org-sql--get-column-formatter (config tbl-name column-name)
   "Return the formatter for COLUMN-NAME in TBL-NAME.
 The formatter will be compiled according to
@@ -2011,6 +2023,28 @@ same meaning as it has here."
        (alist-get tbl-name)
        (alist-get 'columns)
        (--map (org-sql--compile-value-format-function config (plist-get (cdr it) :type)))))
+
+(defun org-sql--compile-deserializer (config type)
+  (let ((form (org-sql--case-type type
+                (boolean
+                 (org-sql--case-mode config
+                   ((mysql postgres)
+                    '(pcase it ("t" 1) ("f" 0)))
+                   ((sqlite sqlserver)
+                    '(pcase it ("1" 1) ("0" 0)))))
+                (enum
+                 '(make-symbol it))
+                ((integer real)
+                 '(string-to-number it))
+                ((char text varchar)
+                 '(identity it)))))
+    `(lambda (it) (unless (equal it "") ,form))))
+
+(defun org-sql--get-column-deserializers (config tbl-name)
+  (->> org-sql--table-alist
+       (alist-get tbl-name)
+       (alist-get 'columns)
+       (--map (org-sql--compile-deserializer config (plist-get (cdr it) :type)))))
 
 ;; identifier formatters
 
@@ -2268,11 +2302,16 @@ has been populated with rows to insert. CONFIG is a list like
 TBL-NAME is the table name to select from and COLUMNS are the
 columns to return (nil will \"SELECT *\"). CONFIG is a list like
 `org-sql-db-config'."
-  (let ((tbl-name* (org-sql--format-table-name config tbl-name))
-        (columns* (or (-some->> (-map #'org-sql--format-column-name columns)
-                        (s-join ","))
-                      "*")))
-    (format "SELECT %s FROM %s;" columns* tbl-name*)))
+  (-let* ((tbl-name* (org-sql--format-table-name config tbl-name))
+          (columns* (or (-some->> (-map #'org-sql--format-column-name columns)
+                          (s-join ","))
+                        "*"))
+          ((&plist :keys) (->> (alist-get tbl-name org-sql--table-alist)
+                               (alist-get 'constraints)
+                               (alist-get 'primary)))
+          (primary-keys* (->> (-map #'org-sql--format-column-name keys)
+                              (s-join ","))))
+    (format "SELECT %s FROM %s ORDER BY %s;" columns* tbl-name* primary-keys*)))
 
 ;; bulk deletes
 
@@ -2656,6 +2695,9 @@ process."
                      (-some->> hostname (list "-h"))
                      (-some->> port (number-to-string) (list "-p"))
                      (-some->> username (list "-U"))
+                     ;; use control chars for delimiters
+                     `("-F" ,org-sql--field-sep)
+                     `("-R" ,org-sql--row-sep)
                      ;; don't prompt for password
                      '("-w")
                      ;; make output tidy (tabular, quiet, and no alignment)
@@ -2680,6 +2722,7 @@ process."
                      (-some->> server (list "-S"))
                      (-some->> username (list "-U"))
                      ;; use pipe char as the separator
+                     ;; TODO use the standard field separator here
                      '("-s" "|")
                      ;; don't use headers
                      '("-h" "-1")
@@ -2695,7 +2738,8 @@ If ASYNC is t, the client will be run in an asynchronous
 process."
   (org-sql--with-config-keys (:path) org-sql-db-config
     (if (not path) (error "No path specified")
-      (org-sql--run-command org-sql--sqlite-exe (cons path args) async))))
+      (let ((s (format ".separator %s %s" org-sql--field-sep org-sql--row-sep)))
+        (org-sql--run-command org-sql--sqlite-exe `(,path ,s ,@args) async)))))
 
 ;; TODO this is the only db that requires a command like this?
 (defun org-sql--exec-sqlserver-command (args async)
@@ -2845,15 +2889,19 @@ schema (or the schema defined by the :schema keyword)."
                (let ((schema* (or schema "public")))
                  (list (format "\\dt %s.*" schema*)
                        (lambda (s)
-                         (->> (s-trim s)
-                              (s-lines)
-                              (--map (s-split "|" it))
+                         (->> (s-chomp s)
+                              (s-chop-suffix org-sql--row-sep)
+                              (s-split org-sql--row-sep)
+                              (--map (s-split org-sql--field-sep it))
                               (--filter (equal schema* (car it)))
                               (--map (cadr it))))))))
             (sqlite
              (list ".tables"
                    (lambda (s)
-                     (--mapcat (s-split " " it t) (s-lines s)))))
+                     ;; NOTE apparently the '.tables' command ignores the
+                     ;; '.separator' command so I can use newlines to separate
+                     ;; rows
+                     (remove "" (--mapcat (s-split " " it t) (s-lines s))))))
             (sqlserver
              (org-sql--with-config-keys (:schema) org-sql-db-config
                (let* ((schema* (or schema "dbo")))
@@ -3018,14 +3066,20 @@ Permissions required: SELECT
 
 See `org-sql-db-config' for how to configure the database
 connection."
-  (let ((cmd (org-sql--format-select-statement org-sql-db-config nil tbl-name)))
+  (let ((cmd (org-sql--format-select-statement org-sql-db-config nil tbl-name))
+        (deserializers (org-sql--get-column-deserializers org-sql-db-config tbl-name)))
     (org-sql--on-success* (org-sql-send-sql cmd)
+    ;; (org-sql--on-success* (org-sql--case-mode org-sql-db-config
+    ;;                         ((mysql sqlserver) (error "TODO"))
+    ;;                         (postgres (org-sql--exec-command-in-db (list cmd) nil))
+    ;;                         (sqlite (org-sql--exec-sqlite-command (list cmd) nil)))
       (if as-plist
           (let ((col-names (->> (alist-get tbl-name org-sql--table-alist)
                                 (alist-get 'columns)
                                 (-map #'car))))
             (org-sql--parse-output-to-plist org-sql-db-config col-names it-out))
-        (org-sql--parse-output-to-list org-sql-db-config it-out)))))
+        (->> (org-sql--parse-output-to-list org-sql-db-config it-out)
+             (--map (--zip-with (funcall it other) deserializers it)))))))
 
 (defun org-sql-push-to-db ()
   "Push current org-file state to the org-sql database.

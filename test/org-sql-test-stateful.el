@@ -66,6 +66,10 @@
 
 (defun expect-db-has-table-contents (tbl-name &rest rows)
   (declare (indent 1))
+  (expect (org-sql-dump-table tbl-name) :to-equal rows))
+
+(defun expect-db-has-table-contents* (tbl-name &rest rows)
+  (declare (indent 1))
   (let ((out (->> (org-sql-dump-table tbl-name))))
     (->> (--zip-with (->> (--zip-with (if (functionp it)
                                           (funcall it other)
@@ -75,7 +79,15 @@
                      rows out)
          (--all? (eq t it))
          (expect))))
-    ;; (expect out :to-equal rows)))
+
+;; this will only work with one line and one field
+(defun expect-db-has-table-contents-raw (config tbl-name &rest rows)
+  (declare (indent 1))
+  (let* ((tbl-name* (org-sql--format-table-name config tbl-name))
+         (select (format "SELECT * FROM %s" tbl-name*)))
+    (org-sql--on-success* (org-sql-send-sql select)
+      (let ((out (list (substring it-out 0 -1))))
+        (expect out :to-equal rows)))))
 
 (defmacro describe-reset-db (header &rest body)
   (declare (indent 1))
@@ -266,28 +278,56 @@
          (clocks . 0)))
 
      (describe-reset-db "fancy file"
+       (before-all
+         (setq test-path (f-join test-files "fancy.org")
+               outline-hash "89f1c2be7084b1bf64e86b752e8cf6a2"))
        (it "update database"
-         (let ((org-sql-files (list (f-join test-files "fancy.org")))
+         (let ((org-sql-files (list test-path))
                (org-log-into-drawer "LOGBOOK"))
            (expect-exit-success (org-sql-push-to-db))))
-       (expect-db-has-tables ,config
-         (outlines . 1)
-         (file_metadata . 1)
-         (file_tags . 3)
-         (headlines . 5)
-         (headline_closures . 7)
-         (planning_entries . 3)
-         (timestamps . 8)
-         (timestamp_warnings . 1)
-         (timestamp_repeaters . 1)
-         (links . 1)
-         (headline_tags . 1)
-         (headline_properties . 1)
-         (properties . 2)
-         (logbook_entries . 5)
-         (state_changes . 1)
-         (planning_changes . 4)
-         (clocks . 1)))
+       (it "check metadata table"
+         (expect-db-has-table-contents* 'file_metadata
+           `(,test-path ,outline-hash integerp integerp integerp integerp "-rw-r--r--")))
+       (it "check outlines table"
+         (expect-db-has-table-contents 'outlines
+           `(,outline-hash 980 33)))
+       (it "check headlines table"
+         (expect-db-has-table-contents 'headlines
+           `(1 ,outline-hash "plain" 1 0 nil nil nil nil nil 0 0 nil)
+           `(2 ,outline-hash "archived" 1 1 nil nil nil nil nil 1 0 nil)
+           `(3 ,outline-hash "parent" 1 2 "TODO" nil nil nil nil 0 0 nil)
+           `(4 ,outline-hash "child" 2 0 "DONE" 60 "B" nil nil 0 1 nil)
+           `(5 ,outline-hash "other child" 2 1 "TODO" nil nil nil nil 0 0
+               ,(s-join "\n" (list "https://downloadmoreram.gov"
+                                   "<2020-09-15 Tue>"
+                                   "hopefully this hits all the relevant code paths :)"
+                                   ""
+                                   "here's some"
+                                   "newlines for"
+                                   "good measures"))))))
+
+       ;; (expect-db-has-table-contents 'file_metadata
+       ;;   `(,test-path "4a374dde85114a7838950003337bf869" org-sql-is-number
+       ;;                org-sql-is-number org-sql-is-number org-sql-is-number
+       ;;                "-rw-r--r--")))
+       ;; (expect-db-has-tables ,config
+       ;;   (outlines . 1)
+       ;;   (file_metadata . 1)
+       ;;   (file_tags . 3)
+       ;;   (headlines . 5)
+       ;;   (headline_closures . 7)
+       ;;   (planning_entries . 3)
+       ;;   (timestamps . 8)
+       ;;   (timestamp_warnings . 1)
+       ;;   (timestamp_repeaters . 1)
+       ;;   (links . 1)
+       ;;   (headline_tags . 1)
+       ;;   (headline_properties . 1)
+       ;;   (properties . 2)
+       ;;   (logbook_entries . 5)
+       ;;   (state_changes . 1)
+       ;;   (planning_changes . 4)
+       ;;   (clocks . 1)))
 
      (describe-reset-db "renamed file"
        (describe "insert file"
@@ -297,10 +337,9 @@
            (let ((org-sql-files (list test-path)))
              (expect-exit-success (org-sql-push-to-db))))
          (it "test for file in tables"
-           (expect-db-has-table-contents 'file_metadata
-             `(,test-path "106e9f12c9e4ff3333425115d148fbd4" org-sql-is-number
-                          org-sql-is-number org-sql-is-number org-sql-is-number
-                          "-rw-r--r--"))))
+           (expect-db-has-table-contents* 'file_metadata
+             `(,test-path "106e9f12c9e4ff3333425115d148fbd4" integerp integerp
+                          integerp integerp "-rw-r--r--"))))
        (describe "rename inserted file"
          ;; "rename" here means to point `org-sql-files' to an identical file
          ;; with a different name
@@ -310,10 +349,9 @@
            (let ((org-sql-files (list test-path)))
              (expect-exit-success (org-sql-push-to-db))))
          (it "test for file in tables"
-           (expect-db-has-table-contents 'file_metadata
-             `(,test-path "106e9f12c9e4ff3333425115d148fbd4" org-sql-is-number
-                          org-sql-is-number org-sql-is-number org-sql-is-number
-                          "-rw-r--r--")))))
+           (expect-db-has-table-contents* 'file_metadata
+             `(,test-path "106e9f12c9e4ff3333425115d148fbd4" integerp integerp
+                          integerp integerp "-rw-r--r--")))))
 
      (describe-reset-db "deleted file"
        (it "update database"
@@ -341,7 +379,7 @@
              (expect-exit-success (org-sql-push-to-db))))
          (it "test file hash"
            (expect-db-has-table-contents 'outlines
-             `("ece424e0090cff9b6f1ac50722c336c0" "6" "1"))))
+             `("ece424e0090cff9b6f1ac50722c336c0" 6 1))))
        (describe "alter the file"
          (before-all
            (setq test-path (f-join (temporary-file-directory)
@@ -355,7 +393,7 @@
              (expect-exit-success (org-sql-push-to-db))))
          (it "test for new file hash"
            (expect-db-has-table-contents 'outlines
-             `("399bc042f23ea976a04b9102c18e9cb5" "6" "1")))
+             `("399bc042f23ea976a04b9102c18e9cb5" 6 1)))
          (it "clean up"
            ;; yes killing the buffer is necessary
            (kill-buffer (find-file-noselect test-path t))
@@ -436,7 +474,7 @@
                 (sql "INSERT INTO fake_init_table VALUES (1);"))))
          (expect-exit-success (org-sql-init-db))))
      (it "fake init table should exist"
-       (expect-db-has-table-contents 'fake_init_table '("1")))
+       (expect-db-has-table-contents-raw ',config 'fake_init_table "1"))
      (it "update database"
        (let ((org-sql-post-push-hooks
               `((file+ ,(f-join test-scripts "update_hook.sql"))
@@ -444,7 +482,7 @@
              (org-sql-files (list (f-join test-files "foo1.org"))))
          (expect-exit-success (org-sql-push-to-db))))
      (it "fake update table should exist"
-       (expect-db-has-table-contents 'fake_update_table '("1")))
+       (expect-db-has-table-contents-raw ',config 'fake_update_table "1"))
      (it "clear database"
        (let ((org-sql-post-clear-hooks
               `((file ,(f-join test-scripts "clear_hook.sql"))
@@ -527,11 +565,11 @@
          (postgres
           (append
            (mk-postgres 13 60013)
-           (mk-postgres 13 60013 "Non-Default Schema" '(:schema "nonpublic"))
-           (mk-postgres 13 60013 "Unlogged tables" '(:unlogged t))
-           (mk-postgres 12 60012)
-           (mk-postgres 11 60011)
-           (mk-postgres 10 60010)
+           ;; (mk-postgres 13 60013 "Non-Default Schema" '(:schema "nonpublic"))
+           ;; (mk-postgres 13 60013 "Unlogged tables" '(:unlogged t))
+           ;; (mk-postgres 12 60012)
+           ;; (mk-postgres 11 60011)
+           ;; (mk-postgres 10 60010)
            (mk-postgres 9 60009)))
          (mariadb
           (append
@@ -551,8 +589,9 @@
    `(describe-io-specs
       ,@sqlite
       ,@postgres
-      ,@mariadb
-      ,@mysql
-      ,@sqlserver))))
+      ;; ,@mariadb
+      ;; ,@mysql
+      ;; ,@sqlserver))))
+      ))))
 
 ;;; org-sql-test-stateful ends here

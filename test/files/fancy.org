@@ -25,10 +25,8 @@ SCHEDULED: <2020-09-18 Fri> DEADLINE: <2020-09-22 Tue +2d -1m>
 :END:
 https://downloadmoreram.gov
 <2020-09-15 Tue>
-hopefully this hits all the relevent code paths :)
+hopefully this hits all the relevant code paths :)
 
 here's some
 newlines for
 good measures
-
-
