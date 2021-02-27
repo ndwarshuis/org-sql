@@ -1257,9 +1257,12 @@ values of one row from OUT."
           (rsep (org-sql--case-mode config
                   ((mysql sqlserver) "\n")
                   ((postgres sqlite) org-sql--row-sep))))
-      (->> (s-chop-suffix rsep out)
+      (->> (org-sql--case-mode config
+             ((mysql postgres) (s-chomp out))
+             (sqlite (s-chop-suffix rsep out))
+             (sqlserver (error "TODO")))
            (s-split rsep)
-           (--map (-map #'s-trim (s-split fsep it)))))))
+           (--map (s-split fsep it))))))
 
 (defun org-sql--parse-output-to-plist (config cols out)
   "Parse OUT to a plist.
@@ -2028,17 +2031,26 @@ same meaning as it has here."
   (let ((form (org-sql--case-type type
                 (boolean
                  (org-sql--case-mode config
-                   ((mysql postgres)
+                   (postgres
                     '(pcase it ("t" 1) ("f" 0)))
-                   ((sqlite sqlserver)
+                   ((mysql sqlite sqlserver)
                     '(pcase it ("1" 1) ("0" 0)))))
                 (enum
                  '(make-symbol it))
                 ((integer real)
                  '(string-to-number it))
                 ((char text varchar)
-                 '(identity it)))))
-    `(lambda (it) (unless (equal it "") ,form))))
+                 (org-sql--case-mode config
+                   (mysql '(->> (s-replace "\\n" "\n" it)
+                                (s-replace "\\t" "\t")
+                                (s-replace "\\\\" "\\")))
+                   ((postgres sqlite sqlserver)
+                    ;; '(progn (print it) (identity it)))))))
+                    '(identity it))))))
+        (null-string (org-sql--case-mode config
+                       (mysql "NULL")
+                       ((postgres sqlite sqlserver) ""))))
+    `(lambda (it) (unless (equal it ,null-string) ,form))))
 
 (defun org-sql--get-column-deserializers (config tbl-name)
   (->> org-sql--table-alist
