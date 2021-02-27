@@ -304,7 +304,8 @@
                                    ""
                                    "here's some"
                                    "newlines for"
-                                   "good measures"))))))
+                                   "good measures"
+                                   ""))))))
 
        ;; (expect-db-has-table-contents 'file_metadata
        ;;   `(,test-path "4a374dde85114a7838950003337bf869" org-sql-is-number

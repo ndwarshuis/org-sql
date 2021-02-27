@@ -1258,9 +1258,8 @@ values of one row from OUT."
                   ((mysql sqlserver) "\n")
                   ((postgres sqlite) org-sql--row-sep))))
       (->> (org-sql--case-mode config
-             ((mysql postgres) (s-chomp out))
-             (sqlite (s-chop-suffix rsep out))
-             (sqlserver (error "TODO")))
+             ((mysql postgres sqlserver) (s-chomp out))
+             (sqlite (s-chop-suffix rsep out)))
            (s-split rsep)
            (--map (s-split fsep it))))))
 
@@ -2044,12 +2043,14 @@ same meaning as it has here."
                    (mysql '(->> (s-replace "\\n" "\n" it)
                                 (s-replace "\\t" "\t")
                                 (s-replace "\\\\" "\\")))
-                   ((postgres sqlite sqlserver)
-                    ;; '(progn (print it) (identity it)))))))
-                    '(identity it))))))
+                   ((postgres sqlite)
+                    '(identity it))
+                   ;; this is to remove the escaped newlines that I add manually
+                   ;; in the SELECT query
+                   (sqlserver '(s-replace "\\n" "\n" it))))))
         (null-string (org-sql--case-mode config
-                       (mysql "NULL")
-                       ((postgres sqlite sqlserver) ""))))
+                       ((mysql sqlserver) "NULL")
+                       ((postgres sqlite) ""))))
     `(lambda (it) (unless (equal it ,null-string) ,form))))
 
 (defun org-sql--get-column-deserializers (config tbl-name)
@@ -2315,9 +2316,29 @@ TBL-NAME is the table name to select from and COLUMNS are the
 columns to return (nil will \"SELECT *\"). CONFIG is a list like
 `org-sql-db-config'."
   (-let* ((tbl-name* (org-sql--format-table-name config tbl-name))
-          (columns* (or (-some->> (-map #'org-sql--format-column-name columns)
-                          (s-join ","))
-                        "*"))
+          (columns* (org-sql--case-mode config
+                      ((mysql postgres sqlite)
+                       (or (-some->> (-map #'org-sql--format-column-name columns)
+                             (s-join ","))
+                           "*"))
+                      ;; SQL-Server is special...sqlcmd doesn't provide the
+                      ;; option to change the row delimiter from newline, and it
+                      ;; doesn't escape newlines like mysql does. So I need to
+                      ;; escape newlines manually by customizing the select
+                      ;; statement and replacing the newlines on-the-fly.
+                      (sqlserver
+                       (let ((c (->> org-sql--table-alist
+                                     (alist-get tbl-name)
+                                     (alist-get 'columns))))
+                         (->> (if columns (--filter (memq (car it) columns) c) c)
+                              (--map (-let* (((n . (&plist :type y)) it)
+                                             (n* (org-sql--format-column-name n)))
+                                       ;; TODO this probably is too many, could
+                                       ;; also just make a separate flag like
+                                       ;; :escape-newlines or something
+                                       (if (not (memq y '(varchar text char))) n*
+                                         (format "replace(%s, '\n', '\\n')" n*))))
+                              (s-join ","))))))
           ((&plist :keys) (->> (alist-get tbl-name org-sql--table-alist)
                                (alist-get 'constraints)
                                (alist-get 'primary)))
@@ -2733,11 +2754,11 @@ process."
     (let ((all-args (append
                      (-some->> server (list "-S"))
                      (-some->> username (list "-U"))
-                     ;; use pipe char as the separator
-                     ;; TODO use the standard field separator here
-                     '("-s" "|")
+                     `("-s" ,org-sql--field-sep)
                      ;; don't use headers
                      '("-h" "-1")
+                     ;; remove trailing spaces
+                     '("-W")
                      args
                      fargs))
           (process-environment (org-sql--append-process-environment env
@@ -2894,7 +2915,7 @@ schema (or the schema defined by the :schema keyword)."
             (mysql
              (list "SHOW TABLES;"
                    (lambda (s)
-                     (let ((s* (s-trim s)))
+                     (let ((s* (s-chomp s)))
                        (unless (equal s* "") (s-lines s*))))))
             (postgres
              (org-sql--with-config-keys (:schema) org-sql-db-config
@@ -2919,13 +2940,12 @@ schema (or the schema defined by the :schema keyword)."
                (let* ((schema* (or schema "dbo")))
                  (list "SELECT schema_name(schema_id), name FROM sys.tables;"
                        (lambda (s)
-                         (let ((s* (s-trim s)))
+                         (let ((s* (s-chomp s)))
                            (unless (equal "" s*)
                              (->> (s-lines s*)
-                                  (--map (-let (((s-name t-name) (s-split "|" it)))
-                                           (cons (s-trim s-name) (s-trim t-name))))
-                                  (--filter (equal schema* (car it)))
-                                  (--map (cdr it)))))))))))))
+                                  (--map (-let (((s-name t-name) (s-split org-sql--field-sep it)))
+                                           (when (equal s-name schema*) t-name)))
+                                  (-non-nil))))))))))))
     (org-sql--on-success* (org-sql-send-sql sql-cmd)
       (funcall parse-fun it-out))))
 
