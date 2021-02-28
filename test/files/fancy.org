@@ -15,6 +15,7 @@ CLOSED: [2020-09-15 Tue 17:59]
 CLOCK: [2020-09-15 Tue 17:57]--[2020-09-15 Tue 17:57] =>  0:00
 - this is a clock note
 :END:
+[[file:/dev/null][NULL]]
 ** TODO other child
 SCHEDULED: <2020-09-18 Fri> DEADLINE: <2020-09-22 Tue +2d -1m>
 :LOGBOOK:

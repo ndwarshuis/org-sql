@@ -620,6 +620,13 @@ to store them. This is in addition to any properties specifified by
 (defconst org-sql--tab-placeholder "\v"
   "Tab placeholder char where tabs are used as field separators.")
 
+;; Along the same lines, sometimes the user might want to represent the literal
+;; 'NULL' string in a textual column. Use a non-typable character to represent
+;; NULL so I can distinguish between NULL (nothing) and 'NULL' (the string)
+
+(defconst org-sql--null-placeholder "\C-\\"
+  "Character to use in place of NULL.")
+
 ;;;
 ;;; CUSTOMIZATION OPTIONS
 ;;;
@@ -2061,7 +2068,30 @@ same meaning as it has here."
        (--map (org-sql--compile-value-format-function config (plist-get (cdr it) :type)))))
 
 (defun org-sql--compile-deserializer (config type)
-  (let ((form (org-sql--case-type type
+  ;; TODO minor optimization: don't check for null when `TYPE' describes a
+  ;; column that is a primary key or a has a NOTNULL constraint
+  (let ((nullstring (org-sql--case-type type
+                      ;; ASSUME enums will never be set to the symbol NULL,
+                      ;; so this is safe
+                      ;;
+                      ;; ASSUME all char columns are either primary keys or have
+                      ;; a NOTNULL constraint, and thus this is irrelevant
+                      ;;
+                      ;; ASSUME varchar columns are only used for primary keys
+                      ;; and thus this is irrelevant
+                      ((boolean enum integer real char varchar)
+                       (org-sql--case-mode config
+                         ((postgres sqlite) org-sql--null-placeholder)
+                         ((mysql sqlserver) "NULL")))
+                      ;; In the case of textual data, using NULL as identifier
+                      ;; for null values is problematic because the user might
+                      ;; actually want to store literal 'NULL' as the text data.
+                      ;; In this case, always use `org-sql--null-placeholder'
+                      ;; (see `org-sql--format-select-statement' for how this is
+                      ;; substituted as data is pulled from the database).
+                      (text
+                       org-sql--null-placeholder)))
+        (form (org-sql--case-type type
                 (boolean
                  (org-sql--case-mode config
                    (postgres
@@ -2085,10 +2115,8 @@ same meaning as it has here."
                    ((postgres sqlite)
                     '(identity it))
                    (sqlserver
-                    '(s-replace org-sql--newline-placeholder "\n" it))))))
-        (null-string (org-sql--case-mode config
-                       ((mysql postgres sqlite sqlserver) "NULL"))))
-    `(lambda (it) (unless (equal it ,null-string) ,form))))
+                    '(s-replace org-sql--newline-placeholder "\n" it)))))))
+    `(lambda (it) (unless (equal it ,nullstring) ,form))))
 
 (defun org-sql--get-column-deserializers (config tbl-name)
   (->> org-sql--table-alist
@@ -2360,8 +2388,8 @@ columns to return (nil will \"SELECT *\"). CONFIG is a list like
           (->> (if columns (--filter (memq (car it) columns) c) c)
                (--map (-let* (((n . (&plist :type y)) it)
                               (n* (org-sql--format-column-name n)))
-                        (if (eq y 'text) (format fmt n*) n*)))
-               (s-join ",")))))
+                        (if (eq y 'text) (format fmt n*) n*)))))))
+               ;; (s-join ",")))))
     (-let ((tbl-name* (org-sql--format-table-name config tbl-name))
            (primary-keys* (--> (alist-get tbl-name org-sql--table-alist)
                             (alist-get 'constraints it)
@@ -2388,12 +2416,18 @@ columns to return (nil will \"SELECT *\"). CONFIG is a list like
               ;; in '\n' -> '\\' + 'n', which won't work if text has '\\n' (eg
               ;; literal backslash followed by literal n))
               (mysql
-               (--> (format "replace(%%s, '\n', '%s')" org-sql--newline-placeholder)
+               (--> (format "replace(%%1$s, '\n', '%s')" org-sql--newline-placeholder)
                  (format "replace(%s, '\t', '%s')" it org-sql--tab-placeholder)
-                 (replace-text-columns columns it)))
+                 (format "CASE WHEN %%1$s IS NULL THEN '%s' ELSE %s END"
+                         org-sql--null-placeholder it)
+                 (replace-text-columns columns it)
+                 (s-join "," it)))
               (sqlserver
-               (--> (format "replace(%%s, '\n', '%s')" org-sql--newline-placeholder)
-                 (replace-text-columns columns it))))))
+               (--> (format "replace(%%1$s, '\n', '%s')" org-sql--newline-placeholder)
+                 (format "CASE WHEN %%1$s IS NULL THEN '%s' ELSE %s END"
+                         org-sql--null-placeholder it)
+                 (replace-text-columns columns it)
+                 (s-join "," it))))))
       (format "SELECT %s FROM %s ORDER BY %s;" columns* tbl-name* primary-keys*))))
 
 ;; bulk deletes
@@ -2796,7 +2830,7 @@ process."
                      ;; make output tidy (tabular, quiet, and no alignment)
                      '("-qAt")
                      ;; use NULL to represent null fields
-                     '("-P" "null=NULL")
+                     `("-P" ,(format "null=%s" org-sql--null-placeholder))
                      args
                      fargs))
           (process-environment (org-sql--append-process-environment env
@@ -2845,7 +2879,7 @@ process."
   (org-sql--with-config-keys (:path) org-sql-db-config
     (if (not path) (error "No path specified")
       (let ((s (format ".separator %s %s" org-sql--field-sep org-sql--row-sep))
-            (n ".nullvalue NULL"))
+            (n (format ".nullvalue %s" org-sql--null-placeholder)))
         (org-sql--run-command org-sql--sqlite-exe `(,path ,s ,n ,@args) async)))))
 
 ;; TODO this is the only db that requires a command like this?

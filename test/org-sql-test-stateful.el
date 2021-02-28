@@ -280,7 +280,7 @@
      (describe-reset-db "fancy file"
        (before-all
          (setq test-path (f-join test-files "fancy.org")
-               outline-hash "b65a05dbd403adc73bff66aa865dd38d"))
+               outline-hash "3f722cfec7ef036f4f96885c225e9347"))
        (it "update database"
          (let ((org-sql-files (list test-path))
                (org-log-into-drawer "LOGBOOK")
@@ -291,13 +291,13 @@
            `(,test-path ,outline-hash integerp integerp integerp integerp "-rw-r--r--")))
        (it "check outlines table"
          (expect-db-has-table-contents 'outlines
-           `(,outline-hash 1209 35)))
+           `(,outline-hash 1234 36)))
        (it "check headlines table"
          (expect-db-has-table-contents 'headlines
            `(1 ,outline-hash "plain" 1 0 nil nil nil nil nil 0 0 nil)
            `(2 ,outline-hash "archived" 1 1 nil nil nil nil nil 1 0 nil)
            `(3 ,outline-hash "parent" 1 2 "TODO" nil nil nil nil 0 0 nil)
-           `(4 ,outline-hash "child" 2 0 "DONE" 60 "B" nil nil 0 1 nil)
+           `(4 ,outline-hash "child" 2 0 "DONE" 60 "B" nil nil 0 1 "[[file:/dev/null][NULL]]\n")
            `(5 ,outline-hash "other child" 2 1 "TODO" nil nil nil nil 0 0
                ,(s-join "\n" (list "https://downloadmoreram.gov"
                                    "<2020-09-15 Tue>"
@@ -391,7 +391,8 @@
            '(1 4 integerp integerp "this is a clock note")))
        (it "check links table"
          (expect-db-has-table-contents 'links
-           '(1 5 "//downloadmoreram.gov" nil "https"))))
+           '(1 4 "/dev/null" "NULL" "file")
+           '(2 5 "//downloadmoreram.gov" nil "https"))))
                                        
 
        ;; (expect-db-has-table-contents 'file_metadata
@@ -679,6 +680,7 @@
       ,@postgres
       ,@mariadb
       ,@mysql
-      ,@sqlserver))))
+      ,@sqlserver
+      ))))
 
 ;;; org-sql-test-stateful ends here
