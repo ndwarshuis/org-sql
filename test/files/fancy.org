@@ -27,6 +27,8 @@ https://downloadmoreram.gov
 <2020-09-15 Tue>
 hopefully this hits all the relevant code paths :)
 
+make this line super loooooooooooooooooooooooooooooooooooooooooooooooooog so that sqlcmd will be confused (since it's default settings don't allow columns more than 255 chars or something absurd like that)
+
 here's "some|"
 weird character\\s, {for}
 	good \n\t measure.

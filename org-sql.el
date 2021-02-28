@@ -2814,10 +2814,21 @@ process."
                      (-some->> server (list "-S"))
                      (-some->> username (list "-U"))
                      `("-s" ,org-sql--field-sep)
-                     ;; don't use headers
-                     '("-h" "-1")
-                     ;; remove trailing spaces
-                     '("-W")
+                     ;; Don't use fixed width for string columns; note that
+                     ;; while this is "mutually exclusive" with the "-W" and
+                     ;; "-h" options, it seems to remove all trailing whitespace
+                     ;; that would otherwise be added (makes sense) and also
+                     ;; removes headers (not sure why). Also, according to the
+                     ;; docs, this "may cause performance issues depending on
+                     ;; the size of data returned" ...I'm not sure if this is
+                     ;; just because I'm demanding the entire column (which
+                     ;; might be a super long string) or if the database
+                     ;; actually needs to think harder when I ask it for
+                     ;; untrimmed columns. I guess if there ever are performance
+                     ;; issues I can just set this to some absurdly high number
+                     ;; and trim off the extra space in the deserializers (and
+                     ;; headers if they pop up again)
+                     '("-y" "0")
                      args
                      fargs))
           (process-environment (org-sql--append-process-environment env

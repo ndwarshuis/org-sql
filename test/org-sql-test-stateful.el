@@ -280,7 +280,7 @@
      (describe-reset-db "fancy file"
        (before-all
          (setq test-path (f-join test-files "fancy.org")
-               outline-hash "4056033478468dfc0431b5687102fae4"))
+               outline-hash "b65a05dbd403adc73bff66aa865dd38d"))
        (it "update database"
          (let ((org-sql-files (list test-path))
                (org-log-into-drawer "LOGBOOK"))
@@ -290,7 +290,7 @@
            `(,test-path ,outline-hash integerp integerp integerp integerp "-rw-r--r--")))
        (it "check outlines table"
          (expect-db-has-table-contents 'outlines
-           `(,outline-hash 1002 33)))
+           `(,outline-hash 1209 35)))
        (it "check headlines table"
          (expect-db-has-table-contents 'headlines
            `(1 ,outline-hash "plain" 1 0 nil nil nil nil nil 0 0 nil)
@@ -301,6 +301,13 @@
                ,(s-join "\n" (list "https://downloadmoreram.gov"
                                    "<2020-09-15 Tue>"
                                    "hopefully this hits all the relevant code paths :)"
+                                   ""
+                                   (concat "make this line super "
+                                           "loooooooooooooooooooooooooooooooooooooooooooooooooog "
+                                           "so that sqlcmd will be confused "
+                                           "(since it's default settings don't "
+                                           "allow columns more than 255 chars or "
+                                           "something absurd like that)")
                                    ""
                                    "here's \"some|\""
                                    "weird character\\\\s, {for}"
