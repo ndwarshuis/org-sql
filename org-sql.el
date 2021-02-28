@@ -2388,8 +2388,8 @@ columns to return (nil will \"SELECT *\"). CONFIG is a list like
           (->> (if columns (--filter (memq (car it) columns) c) c)
                (--map (-let* (((n . (&plist :type y)) it)
                               (n* (org-sql--format-column-name n)))
-                        (if (eq y 'text) (format fmt n*) n*)))))))
-               ;; (s-join ",")))))
+                        (if (eq y 'text) (format fmt n*) n*)))
+               (s-join ",")))))
     (-let ((tbl-name* (org-sql--format-table-name config tbl-name))
            (primary-keys* (--> (alist-get tbl-name org-sql--table-alist)
                             (alist-get 'constraints it)
@@ -2415,19 +2415,24 @@ columns to return (nil will \"SELECT *\"). CONFIG is a list like
               ;; because escaping will effectively turn one char into two...as
               ;; in '\n' -> '\\' + 'n', which won't work if text has '\\n' (eg
               ;; literal backslash followed by literal n))
+              ;;
+              ;; Furthermore, neither of these databases allow the use to
+              ;; specify an alternative way to represent how NULL is displayed.
+              ;; In order to take advantage of `org-sql--null-placeholder'
+              ;; (which will allow users to store the string 'NULL' without
+              ;; making the parser blow up), use a case statement here to check
+              ;; for NULL and substitute the placeholder manually.
               (mysql
                (--> (format "replace(%%1$s, '\n', '%s')" org-sql--newline-placeholder)
                  (format "replace(%s, '\t', '%s')" it org-sql--tab-placeholder)
                  (format "CASE WHEN %%1$s IS NULL THEN '%s' ELSE %s END"
                          org-sql--null-placeholder it)
-                 (replace-text-columns columns it)
-                 (s-join "," it)))
+                 (replace-text-columns columns it)))
               (sqlserver
                (--> (format "replace(%%1$s, '\n', '%s')" org-sql--newline-placeholder)
                  (format "CASE WHEN %%1$s IS NULL THEN '%s' ELSE %s END"
                          org-sql--null-placeholder it)
-                 (replace-text-columns columns it)
-                 (s-join "," it))))))
+                 (replace-text-columns columns it))))))
       (format "SELECT %s FROM %s ORDER BY %s;" columns* tbl-name* primary-keys*))))
 
 ;; bulk deletes
