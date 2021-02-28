@@ -1349,7 +1349,7 @@ list then join the cdr of IN with newlines."
         (expect
          (org-sql--format-sql-transaction config statements)
          :to-equal
-         "BEGIN;INSERT INTO foo (bar) values (1);COMMIT;")))
+         "SET sql_mode = NO_BACKSLASH_ESCAPES;BEGIN;INSERT INTO foo (bar) values (1);COMMIT;")))
 
     (it "sqlserver"
       (let ((config '(sqlserver))
