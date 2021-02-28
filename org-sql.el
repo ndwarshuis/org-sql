@@ -2087,8 +2087,7 @@ same meaning as it has here."
                    (sqlserver
                     '(s-replace org-sql--newline-placeholder "\n" it))))))
         (null-string (org-sql--case-mode config
-                       ((mysql sqlserver) "NULL")
-                       ((postgres sqlite) ""))))
+                       ((mysql postgres sqlite sqlserver) "NULL"))))
     `(lambda (it) (unless (equal it ,null-string) ,form))))
 
 (defun org-sql--get-column-deserializers (config tbl-name)
@@ -2796,6 +2795,8 @@ process."
                      '("-w")
                      ;; make output tidy (tabular, quiet, and no alignment)
                      '("-qAt")
+                     ;; use NULL to represent null fields
+                     '("-P" "null=NULL")
                      args
                      fargs))
           (process-environment (org-sql--append-process-environment env
@@ -2843,8 +2844,9 @@ If ASYNC is t, the client will be run in an asynchronous
 process."
   (org-sql--with-config-keys (:path) org-sql-db-config
     (if (not path) (error "No path specified")
-      (let ((s (format ".separator %s %s" org-sql--field-sep org-sql--row-sep)))
-        (org-sql--run-command org-sql--sqlite-exe `(,path ,s ,@args) async)))))
+      (let ((s (format ".separator %s %s" org-sql--field-sep org-sql--row-sep))
+            (n ".nullvalue NULL"))
+        (org-sql--run-command org-sql--sqlite-exe `(,path ,s ,n ,@args) async)))))
 
 ;; TODO this is the only db that requires a command like this?
 (defun org-sql--exec-sqlserver-command (args async)
