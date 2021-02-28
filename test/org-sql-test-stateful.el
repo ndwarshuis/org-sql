@@ -280,7 +280,7 @@
      (describe-reset-db "fancy file"
        (before-all
          (setq test-path (f-join test-files "fancy.org")
-               outline-hash "89f1c2be7084b1bf64e86b752e8cf6a2"))
+               outline-hash "4056033478468dfc0431b5687102fae4"))
        (it "update database"
          (let ((org-sql-files (list test-path))
                (org-log-into-drawer "LOGBOOK"))
@@ -290,7 +290,7 @@
            `(,test-path ,outline-hash integerp integerp integerp integerp "-rw-r--r--")))
        (it "check outlines table"
          (expect-db-has-table-contents 'outlines
-           `(,outline-hash 980 33)))
+           `(,outline-hash 1002 33)))
        (it "check headlines table"
          (expect-db-has-table-contents 'headlines
            `(1 ,outline-hash "plain" 1 0 nil nil nil nil nil 0 0 nil)
@@ -302,9 +302,9 @@
                                    "<2020-09-15 Tue>"
                                    "hopefully this hits all the relevant code paths :)"
                                    ""
-                                   "here's some"
-                                   "newlines for"
-                                   "good measures"
+                                   "here's \"some|\""
+                                   "weird character\\\\s, {for}"
+                                   "	good \\n\\t measure."
                                    ""))))))
 
        ;; (expect-db-has-table-contents 'file_metadata
@@ -566,11 +566,11 @@
          (postgres
           (append
            (mk-postgres 13 60013)
-           ;; (mk-postgres 13 60013 "Non-Default Schema" '(:schema "nonpublic"))
-           ;; (mk-postgres 13 60013 "Unlogged tables" '(:unlogged t))
-           ;; (mk-postgres 12 60012)
-           ;; (mk-postgres 11 60011)
-           ;; (mk-postgres 10 60010)
+           (mk-postgres 13 60013 "Non-Default Schema" '(:schema "nonpublic"))
+           (mk-postgres 13 60013 "Unlogged tables" '(:unlogged t))
+           (mk-postgres 12 60012)
+           (mk-postgres 11 60011)
+           (mk-postgres 10 60010)
            (mk-postgres 9 60009)))
          (mariadb
           (append
@@ -590,9 +590,8 @@
    `(describe-io-specs
       ,@sqlite
       ,@postgres
-      ;; ,@mariadb
-      ;; ,@mysql
-      ;; ,@sqlserver))))
-      ))))
+      ,@mariadb
+      ,@mysql
+      ,@sqlserver))))
 
 ;;; org-sql-test-stateful ends here

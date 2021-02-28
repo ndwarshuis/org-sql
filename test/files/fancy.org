@@ -27,6 +27,6 @@ https://downloadmoreram.gov
 <2020-09-15 Tue>
 hopefully this hits all the relevant code paths :)
 
-here's some
-newlines for
-good measures
+here's "some|"
+weird character\\s, {for}
+	good \n\t measure.

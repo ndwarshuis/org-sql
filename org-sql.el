@@ -564,6 +564,8 @@ to store them. This is in addition to any properties specifified by
     (--map (symbol-name (car it)) org-sql--table-alist)
     "The names of all tables in the org-sql database."))
 
+;; client executables
+
 ;; TODO what about the windows users?
 (defconst org-sql--mysql-exe "mysql"
   "The mysql client command.")
@@ -577,14 +579,46 @@ to store them. This is in addition to any properties specifified by
 (defconst org-sql--sqlserver-exe "sqlcmd"
   "The sqlserver client command.")
 
-(defconst org-sql--field-sep "\C-]"
-  "Character used for delimiting fields (when possible).")
+;; separator characters
+;;
+;; By default, most DBMS clients will dump their output (eg from a SELECT query)
+;; as a newline-separated list of rows with field separated by some character
+;; (usually '|'). This isn't ideal because org-files might contain newlines and
+;; the field separator character, which makes the output ambiguous to parse.
+;; Fortunately, some DBMSs allow the row and field separators to be changed.
+;; Here I use the ASCII control characters group separator and record separator
+;; for the row and field separators, which were made precisely for this purpose
+;; because they cannot be typed on a keyboard (and thus shouldn't show up in an
+;; org-file). Along the same lines, I use the unit separator in the case when I
+;; need to aggregate strings and later separate them; the alternative is using
+;; arrays which normally escape or do some other confusing thing when the
+;; elements of the array contain newlines, backslashes, commas, etc.
 
-(defconst org-sql--row-sep "\C-^"
+(defconst org-sql--row-sep "\C-]"
   "Character used for delimiting rows (when possible).")
+
+(defconst org-sql--field-sep "\C-^"
+  "Character used for delimiting fields (when possible).")
 
 (defconst org-sql--unit-sep "\C-_"
   "Character used for delimiting array members (when possible).")
+
+;; placeholder control characters
+;;
+;; Unfortunately, not all DBMSs allow the row and field separators to be
+;; changed. Therefore, in order to prevent parsing ambiguity, the next best
+;; solution is to tweak any queries to replace separator characters with
+;; placeholders, and then swap these placeholders back when the query output is
+;; deserialized. The rationale for these choices is the same as the
+;; row/field/unit separators above; they shouldn't be typeable which means they
+;; should never appear in an org buffer. See `org-sql--format-select-statement'
+;; and `org-sql--compile-deserializers'.
+
+(defconst org-sql--newline-placeholder "\a"
+  "Newline placeholder char where newlines are used as row separators.")
+
+(defconst org-sql--tab-placeholder "\v"
+  "Tab placeholder char where tabs are used as field separators.")
 
 ;;;
 ;;; CUSTOMIZATION OPTIONS
@@ -2039,15 +2073,17 @@ same meaning as it has here."
                 ((integer real)
                  '(string-to-number it))
                 ((char text varchar)
+                 ;; Replace newline and tab placeholders with actual newlines
+                 ;; and tabs when needed. See `org-sql--format-select-statement'
+                 ;; for rationale behind this.
                  (org-sql--case-mode config
-                   (mysql '(->> (s-replace "\\n" "\n" it)
-                                (s-replace "\\t" "\t")
-                                (s-replace "\\\\" "\\")))
+                   (mysql
+                    '(->> (s-replace org-sql--newline-placeholder "\n" it)
+                          (s-replace org-sql--tab-placeholder "\t")))
                    ((postgres sqlite)
                     '(identity it))
-                   ;; this is to remove the escaped newlines that I add manually
-                   ;; in the SELECT query
-                   (sqlserver '(s-replace "\\n" "\n" it))))))
+                   (sqlserver
+                    '(s-replace org-sql--newline-placeholder "\n" it))))))
         (null-string (org-sql--case-mode config
                        ((mysql sqlserver) "NULL")
                        ((postgres sqlite) ""))))
@@ -2315,36 +2351,49 @@ has been populated with rows to insert. CONFIG is a list like
 TBL-NAME is the table name to select from and COLUMNS are the
 columns to return (nil will \"SELECT *\"). CONFIG is a list like
 `org-sql-db-config'."
-  (-let* ((tbl-name* (org-sql--format-table-name config tbl-name))
-          (columns* (org-sql--case-mode config
-                      ((mysql postgres sqlite)
-                       (or (-some->> (-map #'org-sql--format-column-name columns)
-                             (s-join ","))
-                           "*"))
-                      ;; SQL-Server is special...sqlcmd doesn't provide the
-                      ;; option to change the row delimiter from newline, and it
-                      ;; doesn't escape newlines like mysql does. So I need to
-                      ;; escape newlines manually by customizing the select
-                      ;; statement and replacing the newlines on-the-fly.
-                      (sqlserver
-                       (let ((c (->> org-sql--table-alist
-                                     (alist-get tbl-name)
-                                     (alist-get 'columns))))
-                         (->> (if columns (--filter (memq (car it) columns) c) c)
-                              (--map (-let* (((n . (&plist :type y)) it)
-                                             (n* (org-sql--format-column-name n)))
-                                       ;; TODO this probably is too many, could
-                                       ;; also just make a separate flag like
-                                       ;; :escape-newlines or something
-                                       (if (not (memq y '(varchar text char))) n*
-                                         (format "replace(%s, '\n', '\\n')" n*))))
-                              (s-join ","))))))
-          ((&plist :keys) (->> (alist-get tbl-name org-sql--table-alist)
-                               (alist-get 'constraints)
-                               (alist-get 'primary)))
-          (primary-keys* (->> (-map #'org-sql--format-column-name keys)
-                              (s-join ","))))
-    (format "SELECT %s FROM %s ORDER BY %s;" columns* tbl-name* primary-keys*)))
+  (cl-flet
+      ((replace-text-columns
+        (columns fmt)
+        (let ((c (->> (alist-get tbl-name org-sql--table-alist)
+                      (alist-get 'columns))))
+          (->> (if columns (--filter (memq (car it) columns) c) c)
+               (--map (-let* (((n . (&plist :type y)) it)
+                              (n* (org-sql--format-column-name n)))
+                        (if (eq y 'text) (format fmt n*) n*)))
+               (s-join ",")))))
+    (-let ((tbl-name* (org-sql--format-table-name config tbl-name))
+           (primary-keys* (--> (alist-get tbl-name org-sql--table-alist)
+                            (alist-get 'constraints it)
+                            (alist-get 'primary it)
+                            (plist-get it :keys)
+                            (-map #'org-sql--format-column-name it)
+                            (s-join "," it)))
+           (columns*
+            (org-sql--case-mode config
+              ((postgres sqlite)
+               (or (-some->> (-map #'org-sql--format-column-name columns)
+                     (s-join ","))
+                   "*"))
+              ;; MySQL and SQL-Server are special because these don't allow the
+              ;; user to change the row separator (or field separator in the
+              ;; former case). Therefore, in order to prevent the parser from
+              ;; splitting in the middle of a field when it contains a newline
+              ;; or tab, replace these characters with dummy placeholders that
+              ;; will be replaced upon deserialization. Note that in order for
+              ;; this to work in the case of MySQL, the --raw flag needs to be
+              ;; given when calling the client so that backslashes are not
+              ;; escaped (and I'm not relying on the escape functionality itself
+              ;; because escaping will effectively turn one char into two...as
+              ;; in '\n' -> '\\' + 'n', which won't work if text has '\\n' (eg
+              ;; literal backslash followed by literal n))
+              (mysql
+               (--> (format "replace(%%s, '\n', '%s')" org-sql--newline-placeholder)
+                 (format "replace(%s, '\t', '%s')" it org-sql--tab-placeholder)
+                 (replace-text-columns columns it)))
+              (sqlserver
+               (--> (format "replace(%%s, '\n', '%s')" org-sql--newline-placeholder)
+                 (replace-text-columns columns it))))))
+      (format "SELECT %s FROM %s ORDER BY %s;" columns* tbl-name* primary-keys*))))
 
 ;; bulk deletes
 
@@ -2433,8 +2482,14 @@ lists. MAX-IDS is plist of the max id's currently in the database."
 SQL-STATEMENTS is a list of SQL statements to be included in the
 transaction. CONFIG is a list like `org-sql-db-config'."
   (let ((fmt (org-sql--case-mode config
+               ;; MySQL is the only DBMS that escapes backslashes by default
+               ;; upon insertion. This is unnecessary because this package has
+               ;; its own way of dealing with control characters (see
+               ;; `org-sql--format-select-statement') and leaving this off would
+               ;; require specific string handling functions for MySQL.
+               (mysql "SET sql_mode = NO_BACKSLASH_ESCAPES;BEGIN;%sCOMMIT;")
                (sqlite "PRAGMA foreign_keys = ON;BEGIN;%sCOMMIT;")
-               ((mysql postgres) "BEGIN;%sCOMMIT;")
+               (postgres "BEGIN;%sCOMMIT;")
                (sqlserver "BEGIN TRANSACTION;%sCOMMIT;"))))
     (-some->> sql-statements
       (s-join "")
@@ -2709,8 +2764,12 @@ process."
                      (-some->> hostname (list "-h"))
                      (-some->> port (number-to-string) (list "-P"))
                      (-some->> username (list "-u"))
-                     ;; this makes the output tidy (no headers or extra output)
+                     ;; This makes the output tidy (no headers or extra output)
                      '("-Ns")
+                     ;; Don't escape the output. See
+                     ;; `org-sql--format-select-statement' for how newlines and
+                     ;; tabs are handled
+                     '("--raw")
                      args
                      fargs))
           (process-environment (org-sql--append-process-environment env
@@ -3101,10 +3160,6 @@ connection."
   (let ((cmd (org-sql--format-select-statement org-sql-db-config nil tbl-name))
         (deserializers (org-sql--get-column-deserializers org-sql-db-config tbl-name)))
     (org-sql--on-success* (org-sql-send-sql cmd)
-    ;; (org-sql--on-success* (org-sql--case-mode org-sql-db-config
-    ;;                         ((mysql sqlserver) (error "TODO"))
-    ;;                         (postgres (org-sql--exec-command-in-db (list cmd) nil))
-    ;;                         (sqlite (org-sql--exec-sqlite-command (list cmd) nil)))
       (if as-plist
           (let ((col-names (->> (alist-get tbl-name org-sql--table-alist)
                                 (alist-get 'columns)
