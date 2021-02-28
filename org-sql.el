@@ -2072,7 +2072,9 @@ same meaning as it has here."
                  '(make-symbol it))
                 ((integer real)
                  '(string-to-number it))
-                ((char text varchar)
+                ((char varchar)
+                 '(identity it))
+                (text
                  ;; Replace newline and tab placeholders with actual newlines
                  ;; and tabs when needed. See `org-sql--format-select-statement'
                  ;; for rationale behind this.
