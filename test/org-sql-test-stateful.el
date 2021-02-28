@@ -283,7 +283,8 @@
                outline-hash "b65a05dbd403adc73bff66aa865dd38d"))
        (it "update database"
          (let ((org-sql-files (list test-path))
-               (org-log-into-drawer "LOGBOOK"))
+               (org-log-into-drawer "LOGBOOK")
+               (org-log-note-clock-out t))
            (expect-exit-success (org-sql-push-to-db))))
        (it "check metadata table"
          (expect-db-has-table-contents* 'file_metadata
@@ -312,7 +313,86 @@
                                    "here's \"some|\""
                                    "weird character\\\\s, {for}"
                                    "	good \\n\\t measure."
-                                   ""))))))
+                                   "")))))
+       (it "check headline closures table"
+         (expect-db-has-table-contents 'headline_closures
+           '(1 1 0)
+           '(2 2 0)
+           '(3 3 0)
+           '(4 3 1)
+           '(4 4 0)
+           '(5 3 1)
+           '(5 5 0)))
+       (it "check timestamps table"
+         (expect-db-has-table-contents* 'timestamps
+           '(1 4 "[2020-09-15 Tue 17:59]" 0 integerp nil 1 nil)
+           '(2 5 "<2020-09-22 Tue +2d -1m>" 1 integerp nil 0 nil)
+           '(3 5 "<2020-09-18 Fri>" 1 integerp nil 0 nil)
+           '(4 5 "<2020-09-15 Tue>" 1 integerp nil 0 nil)
+           '(5 5 "[2020-09-17 Thu]" 0 integerp nil 0 nil)
+           '(6 5 "[2020-09-19 Sat]" 0 integerp nil 0 nil)
+           '(7 5 "[2020-09-22 Tue]" 0 integerp nil 0 nil)
+           '(8 5 "[2020-09-17 Thu]" 0 integerp nil 0 nil)))
+       (it "check timestamp warnings table"
+         (expect-db-has-table-contents* 'timestamp_warnings
+           '(2 1
+               (lambda (it) (equal "month" (symbol-name it)))
+               (lambda (it) (equal "all" (symbol-name it))))))
+       (it "check timestamp repeaters table"
+         (expect-db-has-table-contents* 'timestamp_repeaters
+           '(2 2
+               (lambda (it) (equal "day" (symbol-name it)))
+               (lambda (it) (equal "cumulate" (symbol-name it)))
+               nil nil)))
+       (it "check logbook entries table"
+         (expect-db-has-table-contents* 'logbook_entries
+           '(1 4 "state" integerp
+               "State \"DONE\"       from \"TODO\"       [2020-09-15 Tue 17:57]"
+               nil)
+           '(2 5 "reschedule" integerp
+               "Rescheduled from \"[2020-09-17 Thu]\" on [2020-09-15 Tue 17:58]")
+           '(3 5 "delschedule" integerp
+               "Not scheduled, was \"[2020-09-19 Sat]\" on [2020-09-15 Tue 17:58]")
+           '(4 5 "deldeadline" integerp
+               "Removed deadline, was \"[2020-09-22 Tue]\" on [2020-09-15 Tue 17:58]")
+           '(5 5 "redeadline" integerp
+               "New deadline from \"[2020-09-17 Thu]\" on [2020-09-15 Tue 17:58]")))
+       (it "check planning changes table"
+         (expect-db-has-table-contents 'planning_changes
+           '(2 5)
+           '(3 6)
+           '(4 7)
+           '(5 8)))
+       (it "check state changes table"
+         (expect-db-has-table-contents 'state_changes
+           '(1 "TODO" "DONE")))
+       (it "check planning entries"
+         (expect-db-has-table-contents* 'planning_entries
+           '(1 (lambda (it) (equal "closed" (symbol-name it))))
+           '(2 (lambda (it) (equal "deadline" (symbol-name it))))
+           '(3 (lambda (it) (equal "scheduled" (symbol-name it))))))
+       (it "check properties table"
+         (expect-db-has-table-contents 'properties
+           `(,outline-hash 1 "p1" "v1 v2 v3")
+           `(,outline-hash 2 "thing" "thingy")))
+       (it "check headline properties table"
+         (expect-db-has-table-contents 'headline_properties
+           '(4 2)))
+       (it "check headline tags table"
+         (expect-db-has-table-contents 'headline_tags
+           '(4 "sometag" 0)))
+       (it "check file tags table"
+         (expect-db-has-table-contents 'file_tags
+           `(,outline-hash, "one")
+           `(,outline-hash, "three")
+           `(,outline-hash, "two")))
+       (it "check clocks table"
+         (expect-db-has-table-contents* 'clocks
+           '(1 4 integerp integerp "this is a clock note")))
+       (it "check links table"
+         (expect-db-has-table-contents 'links
+           '(1 5 "//downloadmoreram.gov" nil "https"))))
+                                       
 
        ;; (expect-db-has-table-contents 'file_metadata
        ;;   `(,test-path "4a374dde85114a7838950003337bf869" org-sql-is-number
