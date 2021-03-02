@@ -1254,8 +1254,8 @@ list then join the cdr of IN with newlines."
         (expect
          (org-sql--format-bulk-inserts config test-insert-alist)
          :to-equal
-         (concat "INSERT INTO table-foo (bool,enum,int,text) VALUES (0,'bim',0,'xxx'),(1,'bam',1,'yyy');"
-                 "INSERT INTO table-bar (intone,inttwo) VALUES (0,1),(2,3);")))))
+         (concat "INSERT INTO table-foo (bool,enum,int,text) SELECT * FROM (VALUES (0,'bim',0,'xxx'),(1,'bam',1,'yyy')) d (bool,enum,int,text);"
+                 "INSERT INTO table-bar (intone,inttwo) SELECT * FROM (VALUES (0,1),(2,3)) d (intone,inttwo);")))))
 
   ;; TODO add bulk deletes...eventually
 

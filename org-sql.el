@@ -2359,11 +2359,19 @@ to insert. CONFIG is a list like `org-sql-db-config'."
                           (alist-get 'columns)
                           (--map (org-sql--format-column-name (car it)))
                           (s-join ",")))
+            (fmt (org-sql--case-mode config
+                   ((mysql postgres sqlite)
+                    (format "INSERT INTO %s (%s) VALUES %%s;" tbl-name* columns))
+                   (sqlserver
+                    (--> (list "INSERT INTO %1$s (%2$s)"
+                               "SELECT * FROM (VALUES %%s) d (%2$s);")
+                         (s-join " " it)
+                         (format it tbl-name* columns)))))
             ;; ASSUME these will be in the right order
             (formatters (org-sql--get-column-formatters config tbl-name)))
       (->> (--map (format-row formatters it) rows)
            (s-join ",")
-           (format "INSERT INTO %s (%s) VALUES %s;" tbl-name* columns)))))
+           (format fmt)))))
 
 (defun org-sql--format-bulk-inserts (config insert-alist)
   "Return multi-row INSERT statements.
