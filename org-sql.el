@@ -3261,9 +3261,8 @@ process to run asynchronously."
                   pvals scheduled deadline closed entries clock-starts
                   clock-ends clock-notes)
            row)
-          ;; TODO this won't format the effort number at all
           (effort-prop (-some->> effort
-                         (number-to-string)
+                         (org-duration-from-minutes)
                          (org-ml-build-node-property "Effort")))
           (props (--zip-with (org-ml-build-node-property it other) pkeys pvals))
           (all-props (if effort-prop (cons effort-prop props) props))
