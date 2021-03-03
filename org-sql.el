@@ -2137,11 +2137,11 @@ same meaning as it has here."
   (org-sql--case-mode config
     ;; these are straightforward since they don't use namespaces
     ((mysql sqlite)
-     (symbol-name tbl-name))
+     (format "%s" tbl-name))
     ;; these require a custom namespace (aka schema) prefix if available
     ((postgres sqlserver)
      (-let (((&plist :schema) (cdr config)))
-       (if (not schema) (symbol-name tbl-name)
+       (if (not schema) (format "%s" tbl-name)
          (format "%s.%s" schema tbl-name))))))
 
 (defun org-sql--format-enum-name (config enum-name)
@@ -3318,280 +3318,192 @@ process to run asynchronously."
                   (-> (org-sql--aggregate-headlines (1+ level) children)
                       (org-ml-headline-set-subheadlines parent)))))))
 
+;; (defun org-sql--format-join (config tbl-name tbl-alias type columns)
+;;   (cl-flet
+;;       ((fmt-colname
+;;         (cell)
+;;         (pcase cell
+;;           (`(,a ,n) (format "%s.%s" a n))
+;;           (n (format "%s" n)))))
+;;     (let (;;(tbl-name* (org-sql--format-table-name config tbl-name))
+;;           (columns* (->> columns
+;;                          (--map (-let (((a b) it))
+;;                                   (format "%s = %s" (fmt-colname a) (fmt-colname b))))
+;;                          (s-join ",")))
+;;           (prefix (pcase type
+;;                     (`left "LEFT ")
+;;                     ;; add more as/if needed
+;;                     (`nil "")
+;;                     (e (error "Unknown join type: %s" e)))))
+;;       (format "%sJOIN %s %s ON %s" prefix tbl-name tbl-alias columns*))))
+
+(defun org-sql--format-group-concat (config sql-expr)
+  (-> (org-sql--case-mode config
+        (mysql
+         (format "GROUP_CONCAT(%%s SEPARATOR '%s')" org-sql--unit-sep))
+        ((postgres sqlserver)
+         (format "STRING_AGG(%%s, '%s')" org-sql--unit-sep))
+        (sqlite
+         (format "GROUP_CONCAT(%%s, '%s')" org-sql--unit-sep)))
+      (format sql-expr)))
+
+(defun org-sql--format-concat (config sql-exprs)
+  (org-sql--case-mode config
+    ((mysql sqlserver) (format "CONCAT(%s)" (s-join "," sql-exprs)))
+    ((postgres sqlite) (s-join "||" sql-exprs))))
+
+(defun org-sql--format-cast-to-text (config sql-expr)
+  (let ((fmt (org-sql--case-mode config
+              (mysql "CAST(%s AS CHAR)")
+              (postgres "%s::text")
+              (sqlite "CAST(%s AS TEXT)")
+              (sqlserver "CAST(%s AS VARCHAR(MAX))"))))
+    (format fmt sql-expr)))
+
+(defun org-sql--build-paths-cte (config)
+  (let* ((dlm (format "'%s'" org-sql--unit-sep))
+         (hc (org-sql--format-table-name config "headline_closures"))
+         (h (org-sql--format-table-name config "headlines"))
+         (ipath (org-sql--format-cast-to-text config "h.headline_index"))
+         (concat-ipath (->> `("p.ipath" ,dlm "h.headline_index")
+                         (org-sql--format-concat config))))
+    (->> (list (format "SELECT hc.headline_id AS parent_id, %s AS ipath" ipath)
+               (format "FROM %s hc" hc)
+               (format "JOIN %s h ON h.headline_id = hc.parent_id" h)
+               "WHERE hc.depth = 0 AND h.level = 1"
+               "UNION ALL"
+               (format "SELECT hc.headline_id, %s" concat-ipath)
+               (format "FROM %s hc" hc)
+               (format "JOIN %s h ON h.headline_id = hc.headline_id" h)
+               "JOIN paths p ON p.parent_id = hc.parent_id"
+               "WHERE hc.depth = 1")
+         (s-join " "))))
+
+(defun org-sql--build-logbook-cte (config)
+  (let ((le (org-sql--format-table-name config "logbook_entries"))
+        (fmt "SELECT headline_id, %s AS entries FROM %s GROUP BY headline_id")
+        (grouped (->> '("header" "'\\\\\n'" "note")
+                      (org-sql--format-concat config)
+                      (format "CASE WHEN note IS NULL THEN header ELSE %s END")
+                      (org-sql--format-group-concat config))))
+    (format fmt grouped le)))
+
+(defun org-sql--build-clock-cte (config)
+  (let ((tbl-name (org-sql--format-table-name config "clocks"))
+        (fmt (->> (list "SELECT headline_id,"
+                        "%s AS clock_starts,"
+                        "%s AS clock_ends,"
+                        "%s AS clock_notes FROM %s"
+                        "GROUP BY headline_id")
+                  (s-join " ")))
+        (time-start (->> (org-sql--format-cast-to-text config "time_start")
+                         (org-sql--format-group-concat config)))
+        (time-end (->> (org-sql--format-cast-to-text config "time_end")
+                       (org-sql--format-group-concat config)))
+        (clock-note (org-sql--format-group-concat config "clock_note")))
+    (format fmt time-start time-end clock-note tbl-name)))
+
+(defun org-sql--build-tags-cts (config)
+  (let ((tbl-name (org-sql--format-table-name config "headline_tags"))
+        (fmt "SELECT headline_id, %s AS tags FROM %s GROUP BY headline_id")
+        (grouped (org-sql--format-group-concat config "tag")))
+    (format fmt grouped tbl-name)))
+
+(defun org-sql--build-properties-cte (config)
+  (let ((hp-tbl (org-sql--format-table-name config "headline_properties"))
+        (p-tbl (org-sql--format-table-name config "properties"))
+        (fmt (->> (list "SELECT h.headline_id, %s AS pkeys, %s AS pvals"
+                        "FROM %s h"
+                        "JOIN %s p ON p.property_id = h.property_id"
+                        "GROUP BY h.headline_id")
+                  (s-join " ")))
+        (keys (org-sql--format-group-concat config "p.key_text"))
+        (vals (org-sql--format-group-concat config "p.val_text")))
+    (format fmt keys vals hp-tbl p-tbl)))
+
+
+(defun org-sql--build-planning-cte (config planning-type)
+  (let ((fmt (->> '("SELECT t.headline_id, t.raw_value FROM %s t"
+                    "JOIN %s p ON p.timestamp_id = t.timestamp_id"
+                    "WHERE p.planning_type = '%s'")
+                  (s-join " ")))
+        (pl-tbl (org-sql--format-table-name config "planning_entries"))
+        (ts-tbl (org-sql--format-table-name config "timestamps")))
+    (format fmt ts-tbl pl-tbl planning-type)))
+
 (defun org-sql--build-pull-query (config)
-  (let* ((paths-select
-          (apply #'format
-                 (s-join
-                  " "
-                  (list
-                   "select hc.headline_id as parent_id,"
-                   ;; "h.headline_index as ipath"
-                   "%s as ipath"
-                   "from headline_closures hc"
-                   "join headlines h on h.headline_id = hc.parent_id"
-                   "where hc.depth = 0 and h.level = 1"
-                   "union"
-                   "select hc.headline_id,"
-                   "%s"
-                   "from headline_closures hc"
-                   "join headlines h using (headline_id)"
-                   "join paths p using (parent_id)"
-                   "where hc.depth = 1"))
-                 (org-sql--case-mode config
-                   (sqlserver (error "TODO"))
-                   (postgres
-                    (list "array[h.headline_index]"
-                          "array_append(p.ipath, h.headline_index)"))
-                   ((mysql sqlite)
-                    (list "h.headline_index"
-                          (format "p.ipath || '%s' || h.headline_index"
-                                  org-sql--unit-sep))))))
-         (logbooks-select
-          (format (s-join " "
-                          (list "select headline_id,"
-                                "%s as entries"
-                                "from logbook_entries"
-                                "group by headline_id"))
-                  (org-sql--case-mode config
-                    (mysql
-                     (format (s-join
-                              " "
-                              (list "group_concat("
-                                    "  case"
-                                    "    when note is NULL then header"
-                                    "    else CONCAT(header, ' \\\\\n  ', note)"
-                                    "    end"
-                                    "SEPARATOR '%s'"
-                                    ")"))
-                             org-sql--unit-sep))
-                    (postgres
-                     (format (s-join
-                              " "
-                              (list "string_agg("
-                                    "  case"
-                                    "    when note is NULL then header"
-                                    "    else header||' \\\\\n  '||note"
-                                    "    end,"
-                                    "  '%s'"
-                                    ")"))
-                             org-sql--unit-sep))
-                    (sqlite
-                     (format (s-join
-                              " "
-                              (list "group_concat("
-                                    "  case"
-                                    "    when note is NULL then header"
-                                    "    else header||' \\\\\n  '||note"
-                                    "    end,"
-                                    "  '%s'"
-                                    ")"))
-                             org-sql--unit-sep))
-                    (sqlserver (error "TODO")))))
-         (clocks-select
-          (apply #'format (s-join " "
-                                  (list "select headline_id,"
-                                        "%s as clock_starts,"
-                                        "%s as clock_ends,"
-                                        "%s as clock_notes from clocks"
-                                        "group by headline_id"))
-                 (org-sql--case-mode config
-                   (sqlserver (error "TODO"))
-                   (mysql
-                    (list (format "group_concat(time_start SEPARATOR '%s')" org-sql--unit-sep)
-                          (format "group_concat(time_end SEPARATOR '%s')" org-sql--unit-sep)
-                          (format "group_concat(clock_note SEPARATOR '%s')" org-sql--unit-sep)))
-                   (postgres
-                    (list "array_agg(time_start)"
-                          "array_agg(time_end)"
-                          (format "string_agg(clock_note, '%s')" org-sql--unit-sep)))
-                   (sqlite
-                    (list (format "group_concat(time_start, '%s')" org-sql--unit-sep)
-                          (format "group_concat(time_end, '%s')" org-sql--unit-sep)
-                          (format "group_concat(clock_note, '%s')" org-sql--unit-sep))))))
-         (tags-select
-          (format (s-join " " (list "select headline_id, %s as tags from headline_tags"
-                                    "group by headline_id"))
-                  (org-sql--case-mode config
-                    (sqlserver (error "TODO"))
-                    (mysql
-                     (format "group_concat(tag SEPARATOR '%s')" org-sql--unit-sep))
-                    (postgres
-                     (format "string_agg(tag, '%s')" org-sql--unit-sep))
-                    (sqlite
-                     (format "group_concat(tag, '%s')" org-sql--unit-sep)))))
-         (planning-fmt
-          (s-join
-           " "
-           (list "select t.headline_id, t.raw_value from timestamps t"
-                 "join planning_entries pe using (timestamp_id)"
-                 "left join timestamp_repeaters tr using (timestamp_id)"
-                 "where pe.planning_type = '%s'")))
-         (closed-select (format planning-fmt "closed"))
-         (scheduled-select (format planning-fmt "scheduled"))
-         (deadline-select (format planning-fmt "deadline"))
-         (properties-select
-          (apply #'format (s-join " "
-                                  (list "select h.headline_id, %s as pkeys, %s as pvals"
-                                        "from headline_properties h"
-                                        "join properties p using (property_id)"
-                                        "group by h.headline_id"))
-                 (org-sql--case-mode config
-                   (sqlserver (error "TODO"))
-                   (mysql
-                    (list
-                     (format "group_concat(p.key_text SEPARATOR '%s')" org-sql--unit-sep)
-                     (format "group_concat(p.val_text SEPARATOR '%s')" org-sql--unit-sep)))
-                   (postgres
-                    (list
-                     (format "string_agg(p.key_text, '%s')" org-sql--unit-sep)
-                     (format "string_agg(p.val_text, '%s')" org-sql--unit-sep)))
-                   (sqlite
-                    (list
-                     (format "group_concat(p.key_text, '%s')" org-sql--unit-sep)
-                     (format "group_concat(p.val_text, '%s')" org-sql--unit-sep))))))
-         (cte (apply #'format (s-join " " (list "with recursive paths as (%s),"
-                                                "_logbooks as (%s),"
-                                                "_clocks as (%s),"
-                                                "_headline_tags as (%s),"
-                                                "_scheduled as (%s),"
-                                                "_deadline as (%s),"
-                                                "_closed as (%s),"
-                                                "_headline_properties as (%s)"))
-                     (list paths-select
-                           logbooks-select
-                           clocks-select
-                           tags-select
-                           scheduled-select
-                           deadline-select
-                           closed-select
-                           properties-select))))
-    (concat cte
-            (apply #'format
-             (s-join
-              " "
-              (list "select"
-                    "  p.ipath,"
-                    "  f.file_path,"
-                    "  h.headline_id,"
-                    ;; "  h.headline_text,"
-                    "%s,"
-                    ;; "  h.keyword,"
-                    "%s,"
-                    "  h.level,"
-                    "  h.effort,"
-                    ;; "  h.priority,"
-                    "%s,"
-                    "  h.is_archived,"
-                    "  h.is_commented,"
-                    ;; "  h.content,"
-                    "%s,"
-                    ;; "  t.tags,"
-                    "%s,"
-                    ;; "  hp.pkeys,"
-                    "%s,"
-                    ;; "  hp.pvals,"
-                    "%s,"
-                    ;; "  sch.raw_value as scheduled_timestamp,"
-                    "%s,"
-                    ;; "  dead.raw_value as deadline_timestamp,"
-                    "%s,"
-                    ;; "  cls.raw_value as closed_timestamp,"
-                    "%s,"
-                    ;; "  lb.entries,"
-                    "%s,"
-                    "  c.clock_starts,"
-                    "  c.clock_ends,"
-                    ;; "  c.clock_notes"
-                    "%s"
-                    "  from paths p"
-                    "join headlines h on p.parent_id = h.headline_id"
-                    "join file_metadata f using (outline_hash)"
-                    "left join _headline_properties hp using (headline_id)"
-                    "left join _headline_tags t using (headline_id)"
-                    "left join _scheduled sch using (headline_id)"
-                    "left join _deadline dead using (headline_id)"
-                    "left join _closed cls using (headline_id)"
-                    "left join _logbooks lb using (headline_id)"
-                    "left join _clocks c using (headline_id)"
-                    ;; TODO not all DBMSs will need this
-                    "order by f.file_path, p.ipath"
-                    "limit 50 offset 0;"))
-             (org-sql--case-mode config
-               (mysql
-                (list
-                 (format org-sql--mysql-text-format "h.headline_text")
-                 (format org-sql--mysql-text-format "h.keyword")
-                 (format org-sql--mysql-text-format "h.priority")
-                 (format org-sql--mysql-text-format "h.content")
-                 (format org-sql--mysql-text-format "t.tags")
-                 (format org-sql--mysql-text-format "hp.pkeys")
-                 (format org-sql--mysql-text-format "hp.pvals")
-                 (format org-sql--mysql-text-format "sch.raw_value")
-                 (format org-sql--mysql-text-format "dead.raw_value")
-                 (format org-sql--mysql-text-format "cls.raw_value")
-                 (format org-sql--mysql-text-format "lb.entries")
-                 (format org-sql--mysql-text-format "c.clock_notes")))
-               ((sqlite sqlserver postgres)
-                (list
-                 "h.headline_text"
-                 "h.keyword"
-                 "h.priority"
-                 "h.content"
-                 "t.tags"
-                 "hp.pkeys"
-                 "hp.pvals"
-                 "sch.raw_value"
-                 "dead.raw_value"
-                 "cls.raw_value"
-                 "lb.entries"
-                 "c.clock_notes")))))))
+  (let* ((fmt-text
+          (lambda (config sql-expr)
+            (org-sql--case-mode config
+              (mysql (format org-sql--mysql-text-format sql-expr))
+              ((sqlite postgres) sql-expr)
+              (sqlserver (format org-sql--sqlserver-text-format sql-expr)))))
+         (hl-tbl (org-sql--format-table-name config "headlines"))
+         (recursive-paths (org-sql--case-mode config
+                            ((mysql postgres sqlite) "RECURSIVE paths")
+                            (sqlserver "paths")))
+         (cte
+          (->> `((,recursive-paths ,(org-sql--build-paths-cte config))
+                 ("_logbooks" ,(org-sql--build-logbook-cte config))
+                 ("_clocks" ,(org-sql--build-clock-cte config))
+                 ("_headline_tags" ,(org-sql--build-tags-cts config))
+                 ("_scheduled" ,(org-sql--build-planning-cte config "scheduled"))
+                 ("_deadline" ,(org-sql--build-planning-cte config "deadline"))
+                 ("_closed" ,(org-sql--build-planning-cte config "closed"))
+                 ("_headline_properties" ,(org-sql--build-properties-cte config)))
+               (--map (-let (((n s) it)) (format "%s AS (%s)" n s)))
+               (s-join ",")))
+         (columns
+          (->> `(("p" "ipath" nil)
+                 ("h" "outline_hash" nil)
+                 ("h" "headline_id" nil)
+                 ("h" "headline_text" ,fmt-text)
+                 ("h" "keyword" ,fmt-text)
+                 ("h" "level" ,fmt-text)
+                 ("h" "effort" nil)
+                 ("h" "priority" ,fmt-text)
+                 ("h" "is_archived" nil)
+                 ("h" "is_commented" nil)
+                 ("h" "content" ,fmt-text)
+                 ("t" "tags" ,fmt-text)
+                 ("hp" "pkeys" ,fmt-text)
+                 ("hp" "pvals" ,fmt-text)
+                 ("sch" "raw_value" ,fmt-text)
+                 ("dead" "raw_value" ,fmt-text)
+                 ("cls" "raw_value" ,fmt-text)
+                 ("lb" "entries" ,fmt-text)
+                 ("c" "clock_starts" nil)
+                 ("c" "clock_ends" nil)
+                 ("c" "clock_notes" ,fmt-text))
+               (--map (-let* (((alias name f) it)
+                              (name* (format "%s.%s" alias name)))
+                        (if f (funcall f config name*) name*)))
+               (s-join ",")))
+         (fmt
+          (->> '("WITH %s SELECT %s FROM paths p"
+                 "JOIN %s h ON p.parent_id = h.headline_id"
+                 "LEFT JOIN _headline_properties hp ON hp.headline_id = h.headline_id"
+                 "LEFT JOIN _headline_tags t ON t.headline_id = h.headline_id"
+                 "LEFT JOIN _scheduled sch ON sch.headline_id = h.headline_id"
+                 "LEFT JOIN _deadline dead ON dead.headline_id = h.headline_id"
+                 "LEFT JOIN _closed cls ON cls.headline_id = h.headline_id"
+                 "LEFT JOIN _logbooks lb ON lb.headline_id = h.headline_id"
+                 "LEFT JOIN _clocks c ON c.headline_id = h.headline_id"
+                 ;; TODO not all DBMSs will need this
+                 "ORDER BY h.outline_hash, p.ipath;")
+                 ;; "LIMIT 50;")
+               (s-join " "))))
+    (format fmt cte columns hl-tbl)))
 
 (defun org-sql--compile-deserializer* (config type)
-  (cl-flet
-      ((wrap-null-check
-        (nullstring form)
-        `(unless (equal it ,nullstring) ,form)))
-    ;; add deserialization for two composite types: integer arrays, and
-    ;; delimited string (string arrays)
-    (pcase type
-      ;; Integer arrays are simple because they only contain numbers, but with
-      ;; the caveat that sqlite doesn't actually support arrays so in that case
-      ;; these are just strings with delimiters
-      (`int-array
-       (org-sql--case-mode config
-         (sqlserver (error "TODO"))
-         ;; Parse strings like '{x,y,z}' where x, y, and z are integers; parse
-         ;; these integers just like normal integer fields
-         (postgres
-          (let ((f (org-sql--compile-deserializer config 'integer)))
-            `(lambda (it)
-               ,(wrap-null-check
-                 `(->> (substring it 1 -1)
-                       (s-split ",")
-                       (-map (funcall ,f it)))))))
-         ;; 'int-arrays' in sqlite are just numbers concatenated together in
-         ;; a string, so split using `org-sql--unit-sep' and treat the split
-         ;; strings just like regular integer fields
-         ((mysql sqlite)
-          (let ((f (org-sql--compile-deserializer config 'integer))
-                (nullstring (org-sql--get-nullstring config 'integer)))
-            `(lambda (it)
-               ,(wrap-null-check
-                 nullstring
-                 `(-map ,f (s-split org-sql--unit-sep it))))))))
-      ;; I don't use 'arrays' for strings because many databases will start
-      ;; escaping and adding other crap that could choke the parser, so the
-      ;; easier things is just concatenate all the strings together using
-      ;; `org-sql--unit-sep'. Split the field using that and treat the resulting
-      ;; strings just like regular text fields.
-      (`delimited-string
-       (let ((f (org-sql--compile-deserializer config 'text))
-             (nullstring (org-sql--get-nullstring config 'text)))
-         `(lambda (it)
-            ,(wrap-null-check
-              nullstring
-              `(-map ,f (s-split org-sql--unit-sep it))))))
-      (type (org-sql--compile-deserializer config type)))))
+  (cond
+   ((memq type '(int-array delimited-string))
+    (let* ((s (if (eq type 'int-array) 'integer 'text))
+           (f (org-sql--compile-deserializer config s))
+           (n (org-sql--get-nullstring config s)))
+      `(lambda (it)
+         (unless (equal it ,n) (-map ,f (s-split org-sql--unit-sep it))))))
+   (t (org-sql--compile-deserializer config type))))
 
 (defun org-sql--compile-deserializers (config)
   (->> (list 'int-array
@@ -3617,7 +3529,65 @@ process to run asynchronously."
              'delimited-string)
        (--map (org-sql--compile-deserializer* config it))))
 
-(defun org-sql--pull-from-db-sqlite ()
+;; (defun org-sql--pull-from-db-sqlite ()
+;;   (cl-labels
+;;       ((compare-arrays
+;;         (A B)
+;;         (-let (((a . as) A)
+;;                ((b . bs) B))
+;;           (cond
+;;            ((and (not a) (not b))
+;;             (error "If this happens, the list has duplicates"))
+;;            ((null a) t)
+;;            ((null b) nil)
+;;            ((= a b) (compare-arrays as bs))
+;;            (t (< a b))))))
+;;     (let ((query (org-sql--build-pull-query org-sql-db-config))
+;;           (headline-deserializers (org-sql--compile-deserializers org-sql-db-config)))
+;;       (org-sql--on-success* (org-sql-send-sql query)
+;;         (->> (org-sql--parse-output-to-list org-sql-db-config it-out)
+;;              (--map (--zip-with (funcall it other) headline-deserializers it))
+;;              (--group-by (nth 1 it))
+;;              (--map (->> (cdr it)
+;;                          (--sort (compare-arrays (nth 0 it) (nth 0 other)))
+;;                          (-map #'org-sql--row-to-headline)
+;;                          (org-sql--aggregate-headlines 1)
+;;                          (cons (car it)))))))))
+
+;; (defun org-sql--pull-from-db-postgres ()
+;;   (let ((query (org-sql--build-pull-query org-sql-db-config))
+;;         (headline-deserializers (org-sql--compile-deserializers org-sql-db-config)))
+;;     (org-sql--on-success* (org-sql-send-sql query)
+;;       (->> (org-sql--parse-output-to-list org-sql-db-config it-out)
+;;            (--map (--zip-with (funcall it other) headline-deserializers it))
+;;            (--group-by (nth 1 it))
+;;            (--map (->> (cdr it)
+;;                        (-map #'org-sql--row-to-headline)
+;;                        (org-sql--aggregate-headlines 1)
+;;                        (cons (car it))))))))
+
+;; (defun org-sql--pull-from-db-mysql ()
+;;   (let ((query (->> (org-sql--build-pull-query org-sql-db-config)
+;;                     (format "SET sql_mode = NO_BACKSLASH_ESCAPES;%s")))
+;;         (headline-deserializers (org-sql--compile-deserializers org-sql-db-config)))
+;;     (org-sql--on-success* (org-sql-send-sql query)
+;;       (->> (org-sql--parse-output-to-list org-sql-db-config it-out)
+;;            (--map (--zip-with (funcall it other) headline-deserializers it))
+;;            (--group-by (nth 1 it))
+;;            (--map (->> (cdr it)
+;;                        (-map #'org-sql--row-to-headline)
+;;                        (org-sql--aggregate-headlines 1)
+;;                        (cons (car it))))))))
+
+;; (defun org-sql-pull-from-db ()
+;;   "Pull the current state of the database or org-trees."
+;;   (org-sql--case-mode org-sql-db-config
+;;     (sqlserver (error "TODO"))
+;;     (mysql (org-sql--pull-from-db-mysql))
+;;     (postgres (org-sql--pull-from-db-postgres))
+;;     (sqlite (org-sql--pull-from-db-sqlite))))
+
+(defun org-sql-pull-from-db ()
   (cl-labels
       ((compare-arrays
         (A B)
@@ -3630,50 +3600,22 @@ process to run asynchronously."
            ((null b) nil)
            ((= a b) (compare-arrays as bs))
            (t (< a b))))))
-    (let ((query (org-sql--build-pull-query org-sql-db-config))
-          (headline-deserializers (org-sql--compile-deserializers org-sql-db-config)))
+    (let* ((fmt (org-sql--case-mode org-sql-db-config
+                  (mysql "SET sql_mode = NO_BACKSLASH_ESCAPES;%s")
+                  ((postgres sqlite sqlserver) "%s")))
+           (query (->> (org-sql--build-pull-query org-sql-db-config)
+                       (format fmt)))
+           (deserializers (org-sql--compile-deserializers org-sql-db-config)))
       (org-sql--on-success* (org-sql-send-sql query)
+        (print it-out)
         (->> (org-sql--parse-output-to-list org-sql-db-config it-out)
-             (--map (--zip-with (funcall it other) headline-deserializers it))
+             (--map (--zip-with (funcall it other) deserializers it))
              (--group-by (nth 1 it))
              (--map (->> (cdr it)
                          (--sort (compare-arrays (nth 0 it) (nth 0 other)))
                          (-map #'org-sql--row-to-headline)
                          (org-sql--aggregate-headlines 1)
                          (cons (car it)))))))))
-
-(defun org-sql--pull-from-db-postgres ()
-  (let ((query (org-sql--build-pull-query org-sql-db-config))
-        (headline-deserializers (org-sql--compile-deserializers org-sql-db-config)))
-    (org-sql--on-success* (org-sql-send-sql query)
-      (->> (org-sql--parse-output-to-list org-sql-db-config it-out)
-           (--map (--zip-with (funcall it other) headline-deserializers it))
-           (--group-by (nth 1 it))
-           (--map (->> (cdr it)
-                       (-map #'org-sql--row-to-headline)
-                       (org-sql--aggregate-headlines 1)
-                       (cons (car it))))))))
-
-(defun org-sql--pull-from-db-mysql ()
-  (let ((query (->> (org-sql--build-pull-query org-sql-db-config)
-                    (format "SET sql_mode = NO_BACKSLASH_ESCAPES;%s")))
-        (headline-deserializers (org-sql--compile-deserializers org-sql-db-config)))
-    (org-sql--on-success* (org-sql-send-sql query)
-      (->> (org-sql--parse-output-to-list org-sql-db-config it-out)
-           (--map (--zip-with (funcall it other) headline-deserializers it))
-           (--group-by (nth 1 it))
-           (--map (->> (cdr it)
-                       (-map #'org-sql--row-to-headline)
-                       (org-sql--aggregate-headlines 1)
-                       (cons (car it))))))))
-
-(defun org-sql-pull-from-db ()
-  "Pull the current state of the database or org-trees."
-  (org-sql--case-mode org-sql-db-config
-    (sqlserver (error "TODO"))
-    (mysql (org-sql--pull-from-db-mysql))
-    (postgres (org-sql--pull-from-db-postgres))
-    (sqlite (org-sql--pull-from-db-sqlite))))
 
 (defun org-sql-clear-db ()
   "Clear the org-sql database.
