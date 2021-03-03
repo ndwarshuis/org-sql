@@ -3318,25 +3318,6 @@ process to run asynchronously."
                   (-> (org-sql--aggregate-headlines (1+ level) children)
                       (org-ml-headline-set-subheadlines parent)))))))
 
-;; (defun org-sql--format-join (config tbl-name tbl-alias type columns)
-;;   (cl-flet
-;;       ((fmt-colname
-;;         (cell)
-;;         (pcase cell
-;;           (`(,a ,n) (format "%s.%s" a n))
-;;           (n (format "%s" n)))))
-;;     (let (;;(tbl-name* (org-sql--format-table-name config tbl-name))
-;;           (columns* (->> columns
-;;                          (--map (-let (((a b) it))
-;;                                   (format "%s = %s" (fmt-colname a) (fmt-colname b))))
-;;                          (s-join ",")))
-;;           (prefix (pcase type
-;;                     (`left "LEFT ")
-;;                     ;; add more as/if needed
-;;                     (`nil "")
-;;                     (e (error "Unknown join type: %s" e)))))
-;;       (format "%sJOIN %s %s ON %s" prefix tbl-name tbl-alias columns*))))
-
 (defun org-sql--format-group-concat (config sql-expr)
   (-> (org-sql--case-mode config
         (mysql
@@ -3360,7 +3341,7 @@ process to run asynchronously."
               (sqlserver "CAST(%s AS VARCHAR(MAX))"))))
     (format fmt sql-expr)))
 
-(defun org-sql--build-paths-cte (config)
+(defun org-sql--format-recursive-paths-cte (config)
   (let* ((dlm (format "'%s'" org-sql--unit-sep))
          (hc (org-sql--format-table-name config "headline_closures"))
          (h (org-sql--format-table-name config "headlines"))
@@ -3379,7 +3360,7 @@ process to run asynchronously."
                "WHERE hc.depth = 1")
          (s-join " "))))
 
-(defun org-sql--build-logbook-cte (config)
+(defun org-sql--format-logbook-cte (config)
   (let ((le (org-sql--format-table-name config "logbook_entries"))
         (fmt "SELECT headline_id, %s AS entries FROM %s GROUP BY headline_id")
         (grouped (->> '("header" "'\\\\\n'" "note")
@@ -3388,7 +3369,7 @@ process to run asynchronously."
                       (org-sql--format-group-concat config))))
     (format fmt grouped le)))
 
-(defun org-sql--build-clock-cte (config)
+(defun org-sql--format-clock-cte (config)
   (let ((tbl-name (org-sql--format-table-name config "clocks"))
         (fmt (->> (list "SELECT headline_id,"
                         "%s AS clock_starts,"
@@ -3403,13 +3384,13 @@ process to run asynchronously."
         (clock-note (org-sql--format-group-concat config "clock_note")))
     (format fmt time-start time-end clock-note tbl-name)))
 
-(defun org-sql--build-tags-cts (config)
+(defun org-sql--format-tags-cte (config)
   (let ((tbl-name (org-sql--format-table-name config "headline_tags"))
         (fmt "SELECT headline_id, %s AS tags FROM %s GROUP BY headline_id")
         (grouped (org-sql--format-group-concat config "tag")))
     (format fmt grouped tbl-name)))
 
-(defun org-sql--build-properties-cte (config)
+(defun org-sql--format-properties-cte (config)
   (let ((hp-tbl (org-sql--format-table-name config "headline_properties"))
         (p-tbl (org-sql--format-table-name config "properties"))
         (fmt (->> (list "SELECT h.headline_id, %s AS pkeys, %s AS pvals"
@@ -3421,8 +3402,7 @@ process to run asynchronously."
         (vals (org-sql--format-group-concat config "p.val_text")))
     (format fmt keys vals hp-tbl p-tbl)))
 
-
-(defun org-sql--build-planning-cte (config planning-type)
+(defun org-sql--format-planning-cte (config planning-type)
   (let ((fmt (->> '("SELECT t.headline_id, t.raw_value FROM %s t"
                     "JOIN %s p ON p.timestamp_id = t.timestamp_id"
                     "WHERE p.planning_type = '%s'")
@@ -3431,7 +3411,7 @@ process to run asynchronously."
         (ts-tbl (org-sql--format-table-name config "timestamps")))
     (format fmt ts-tbl pl-tbl planning-type)))
 
-(defun org-sql--build-pull-query (config)
+(defun org-sql--format-pull-query (config)
   (let* ((fmt-text
           (lambda (config sql-expr)
             (org-sql--case-mode config
@@ -3443,19 +3423,20 @@ process to run asynchronously."
                             ((mysql postgres sqlite) "RECURSIVE paths")
                             (sqlserver "paths")))
          (cte
-          (->> `((,recursive-paths ,(org-sql--build-paths-cte config))
-                 ("_logbooks" ,(org-sql--build-logbook-cte config))
-                 ("_clocks" ,(org-sql--build-clock-cte config))
-                 ("_headline_tags" ,(org-sql--build-tags-cts config))
-                 ("_scheduled" ,(org-sql--build-planning-cte config "scheduled"))
-                 ("_deadline" ,(org-sql--build-planning-cte config "deadline"))
-                 ("_closed" ,(org-sql--build-planning-cte config "closed"))
-                 ("_headline_properties" ,(org-sql--build-properties-cte config)))
+          (->> `((,recursive-paths ,(org-sql--format-recursive-paths-cte config))
+                 ("_logbooks" ,(org-sql--format-logbook-cte config))
+                 ("_clocks" ,(org-sql--format-clock-cte config))
+                 ("_headline_tags" ,(org-sql--format-tags-cte config))
+                 ("_scheduled" ,(org-sql--format-planning-cte config "scheduled"))
+                 ("_deadline" ,(org-sql--format-planning-cte config "deadline"))
+                 ("_closed" ,(org-sql--format-planning-cte config "closed"))
+                 ("_headline_properties" ,(org-sql--format-properties-cte config)))
                (--map (-let (((n s) it)) (format "%s AS (%s)" n s)))
                (s-join ",")))
          (columns
           (->> `(("p" "ipath" nil)
                  ("h" "outline_hash" nil)
+                 ;; headlines
                  ("h" "headline_id" nil)
                  ("h" "headline_text" ,fmt-text)
                  ("h" "keyword" ,fmt-text)
@@ -3465,13 +3446,18 @@ process to run asynchronously."
                  ("h" "is_archived" nil)
                  ("h" "is_commented" nil)
                  ("h" "content" ,fmt-text)
+                 ;; tags
                  ("t" "tags" ,fmt-text)
+                 ;; properties
                  ("hp" "pkeys" ,fmt-text)
                  ("hp" "pvals" ,fmt-text)
+                 ;; planning
                  ("sch" "raw_value" ,fmt-text)
                  ("dead" "raw_value" ,fmt-text)
                  ("cls" "raw_value" ,fmt-text)
+                 ;; logbook
                  ("lb" "entries" ,fmt-text)
+                 ;; clocks
                  ("c" "clock_starts" nil)
                  ("c" "clock_ends" nil)
                  ("c" "clock_notes" ,fmt-text))
@@ -3508,6 +3494,7 @@ process to run asynchronously."
 (defun org-sql--compile-deserializers (config)
   (->> (list 'int-array
              'varchar
+             ;; headlines
              'integer
              'text
              'text
@@ -3517,79 +3504,30 @@ process to run asynchronously."
              'boolean
              'boolean
              'text
+             ;; tags
+             'delimited-string
+             ;; properties
              'delimited-string
              'delimited-string
-             'delimited-string
+             ;; planning
              'text
              'text
              'text
+             ;; logbook
              'delimited-string
+             ;; clocks
              'int-array
              'int-array
              'delimited-string)
        (--map (org-sql--compile-deserializer* config it))))
 
-;; (defun org-sql--pull-from-db-sqlite ()
-;;   (cl-labels
-;;       ((compare-arrays
-;;         (A B)
-;;         (-let (((a . as) A)
-;;                ((b . bs) B))
-;;           (cond
-;;            ((and (not a) (not b))
-;;             (error "If this happens, the list has duplicates"))
-;;            ((null a) t)
-;;            ((null b) nil)
-;;            ((= a b) (compare-arrays as bs))
-;;            (t (< a b))))))
-;;     (let ((query (org-sql--build-pull-query org-sql-db-config))
-;;           (headline-deserializers (org-sql--compile-deserializers org-sql-db-config)))
-;;       (org-sql--on-success* (org-sql-send-sql query)
-;;         (->> (org-sql--parse-output-to-list org-sql-db-config it-out)
-;;              (--map (--zip-with (funcall it other) headline-deserializers it))
-;;              (--group-by (nth 1 it))
-;;              (--map (->> (cdr it)
-;;                          (--sort (compare-arrays (nth 0 it) (nth 0 other)))
-;;                          (-map #'org-sql--row-to-headline)
-;;                          (org-sql--aggregate-headlines 1)
-;;                          (cons (car it)))))))))
-
-;; (defun org-sql--pull-from-db-postgres ()
-;;   (let ((query (org-sql--build-pull-query org-sql-db-config))
-;;         (headline-deserializers (org-sql--compile-deserializers org-sql-db-config)))
-;;     (org-sql--on-success* (org-sql-send-sql query)
-;;       (->> (org-sql--parse-output-to-list org-sql-db-config it-out)
-;;            (--map (--zip-with (funcall it other) headline-deserializers it))
-;;            (--group-by (nth 1 it))
-;;            (--map (->> (cdr it)
-;;                        (-map #'org-sql--row-to-headline)
-;;                        (org-sql--aggregate-headlines 1)
-;;                        (cons (car it))))))))
-
-;; (defun org-sql--pull-from-db-mysql ()
-;;   (let ((query (->> (org-sql--build-pull-query org-sql-db-config)
-;;                     (format "SET sql_mode = NO_BACKSLASH_ESCAPES;%s")))
-;;         (headline-deserializers (org-sql--compile-deserializers org-sql-db-config)))
-;;     (org-sql--on-success* (org-sql-send-sql query)
-;;       (->> (org-sql--parse-output-to-list org-sql-db-config it-out)
-;;            (--map (--zip-with (funcall it other) headline-deserializers it))
-;;            (--group-by (nth 1 it))
-;;            (--map (->> (cdr it)
-;;                        (-map #'org-sql--row-to-headline)
-;;                        (org-sql--aggregate-headlines 1)
-;;                        (cons (car it))))))))
-
-;; (defun org-sql-pull-from-db ()
-;;   "Pull the current state of the database or org-trees."
-;;   (org-sql--case-mode org-sql-db-config
-;;     (sqlserver (error "TODO"))
-;;     (mysql (org-sql--pull-from-db-mysql))
-;;     (postgres (org-sql--pull-from-db-postgres))
-;;     (sqlite (org-sql--pull-from-db-sqlite))))
+(defun org-sql--format-pull-filepath-query (config)
+  (let ((tbl-name (org-sql--format-table-name config "file_metadata")))
+    (format "SELECT file_path, outline_hash from %s" tbl-name)))
 
 (defun org-sql-pull-from-db ()
   (cl-labels
-      ((compare-arrays
+      ((compare-lists
         (A B)
         (-let (((a . as) A)
                ((b . bs) B))
@@ -3598,24 +3536,36 @@ process to run asynchronously."
             (error "If this happens, the list has duplicates"))
            ((null a) t)
            ((null b) nil)
-           ((= a b) (compare-arrays as bs))
+           ((= a b) (compare-lists as bs))
            (t (< a b))))))
     (let* ((fmt (org-sql--case-mode org-sql-db-config
+                  ;; TODO this no_backslash thing should probably be lower
+                  ;; in the stack so I don't need to keep retyping it when it
+                  ;; rears it's ugly head
                   (mysql "SET sql_mode = NO_BACKSLASH_ESCAPES;%s")
                   ((postgres sqlite sqlserver) "%s")))
-           (query (->> (org-sql--build-pull-query org-sql-db-config)
+           (hl-query (->> (org-sql--format-pull-query org-sql-db-config)
                        (format fmt)))
+           (fp-query (org-sql--format-pull-filepath-query org-sql-db-config))
            (deserializers (org-sql--compile-deserializers org-sql-db-config)))
-      (org-sql--on-success* (org-sql-send-sql query)
-        (print it-out)
-        (->> (org-sql--parse-output-to-list org-sql-db-config it-out)
-             (--map (--zip-with (funcall it other) deserializers it))
-             (--group-by (nth 1 it))
-             (--map (->> (cdr it)
-                         (--sort (compare-arrays (nth 0 it) (nth 0 other)))
-                         (-map #'org-sql--row-to-headline)
-                         (org-sql--aggregate-headlines 1)
-                         (cons (car it)))))))))
+      (org-sql--do ((hl-out (org-sql-send-sql hl-query))
+                    (fp-out (org-sql-send-sql fp-query)))
+        (let ((trees
+               (->> (org-sql--parse-output-to-list org-sql-db-config hl-out)
+                    (--map (--zip-with (funcall it other) deserializers it))
+                    (--group-by (nth 1 it))
+                    (--map (->> (cdr it)
+                                (--sort (compare-lists (nth 0 it) (nth 0 other)))
+                                (-map #'org-sql--row-to-headline)
+                                (org-sql--aggregate-headlines 1)
+                                (cons (car it)))))))
+          ;; I could pass the filepaths through a deserializer but these should
+          ;; be good as-is
+          (->> (org-sql--parse-output-to-list org-sql-db-config fp-out)
+               (--map (-let (((fp hash) it))
+                        (->> (--find (equal (car it) hash) trees)
+                             (cdr)
+                             (cons fp))))))))))
 
 (defun org-sql-clear-db ()
   "Clear the org-sql database.
