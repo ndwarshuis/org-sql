@@ -280,7 +280,8 @@
      (describe-reset-db "fancy file"
        (before-all
          (setq test-path (f-join test-files "fancy.org")
-               outline-hash "3f722cfec7ef036f4f96885c225e9347"))
+               outline-hash "3f722cfec7ef036f4f96885c225e9347"
+               preamble "#+filetags: one two three\n#+property: p1 v1 v2 v3\n"))
        (it "update database"
          (let ((org-sql-files (list test-path))
                (org-log-into-drawer "LOGBOOK")
@@ -291,7 +292,7 @@
            `(,test-path ,outline-hash integerp integerp integerp integerp "-rw-r--r--")))
        (it "check outlines table"
          (expect-db-has-table-contents 'outlines
-           `(,outline-hash 1234 36)))
+           `(,outline-hash 1234 36 ,preamble)))
        (it "check headlines table"
          (expect-db-has-table-contents 'headlines
            `(1 ,outline-hash "plain" 1 0 nil nil nil nil nil 0 0 nil)
@@ -468,7 +469,7 @@
              (expect-exit-success (org-sql-push-to-db))))
          (it "test file hash"
            (expect-db-has-table-contents 'outlines
-             `("ece424e0090cff9b6f1ac50722c336c0" 6 1))))
+             `("ece424e0090cff9b6f1ac50722c336c0" 6 1 nil))))
        (describe "alter the file"
          (before-all
            (setq test-path (f-join (temporary-file-directory)
@@ -482,7 +483,7 @@
              (expect-exit-success (org-sql-push-to-db))))
          (it "test for new file hash"
            (expect-db-has-table-contents 'outlines
-             `("399bc042f23ea976a04b9102c18e9cb5" 6 1)))
+             `("399bc042f23ea976a04b9102c18e9cb5" 6 1 nil)))
          (it "clean up"
            ;; yes killing the buffer is necessary
            (kill-buffer (find-file-noselect test-path t))
