@@ -139,7 +139,7 @@ to store them. This is in addition to any properties specifified by
       ;; NOTE double backticks to get the blocky rendering in Github
       (defconst org-sql--table-alist
         `((outlines
-           (desc "Each row stores the hash and size for the contents of one org"
+           (desc "Each row stores the hash, size, and toplevel section for an org"
                  "file (here called an `outline`). Note that if there are"
                  "identical org files, only one `outline` will be stored in the"
                  "database (as determined by the unique hash) and the paths"
@@ -152,7 +152,9 @@ to store them. This is in addition to any properties specifified by
                            :constraints (notnull))
             (:outline_lines :desc "number of lines in the org file"
                             :type integer
-                            :constraints (notnull)))
+                            :constraints (notnull))
+            (:outline_preamble :desc "the content before the first headline"
+                               :type text))
            (constraints
             (primary :keys (:outline_hash))))
 
@@ -1909,11 +1911,14 @@ OUTLINE-CONFIG is a list given by `org-sql--to-outline-config'."
 (defun org-sql--insert-alist-add-outline-hash (acc outline-config)
   "Add row for OUTLINE-CONFIG to ACC.
 OUTLINE-CONFIG is a list given by `org-sql--to-outline-config'."
-  (-let (((&plist :outline-hash :size :lines) outline-config))
+  (-let (((&plist :top-section :outline-hash :size :lines) outline-config))
     (org-sql--insert-alist-add acc outlines
       :outline_hash outline-hash
       :outline_size size
-      :outline_lines lines)))
+      :outline_lines lines
+      :outline_preamble (-some->> top-section
+                          (-map #'org-ml-to-string)
+                          (s-join "")))))
 
 (defun org-sql--insert-alist-add-file-metadata* (acc path hash attrs)
   "Add row for a file and its metadata to ACC.
