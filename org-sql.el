@@ -3416,14 +3416,15 @@ process to run asynchronously."
         (ts-tbl (org-sql--format-table-name config "timestamps")))
     (format fmt ts-tbl pl-tbl planning-type)))
 
+(defun org-sql--format-protected-text (config sql-expr)
+  (org-sql--case-mode config
+    (mysql (format org-sql--mysql-text-format sql-expr))
+    ((sqlite postgres) sql-expr)
+    (sqlserver (format org-sql--sqlserver-text-format sql-expr))))
+
 (defun org-sql--format-pull-query (config)
-  (let* ((fmt-text
-          (lambda (config sql-expr)
-            (org-sql--case-mode config
-              (mysql (format org-sql--mysql-text-format sql-expr))
-              ((sqlite postgres) sql-expr)
-              (sqlserver (format org-sql--sqlserver-text-format sql-expr)))))
-         (hl-tbl (org-sql--format-table-name config "headlines"))
+  (let* ((hl-tbl (org-sql--format-table-name config "headlines"))
+         (ol-tbl (org-sql--format-table-name config "outlines"))
          (recursive-paths (org-sql--case-mode config
                             ((mysql postgres sqlite) "RECURSIVE paths")
                             (sqlserver "paths")))
@@ -3439,33 +3440,33 @@ process to run asynchronously."
                (--map (-let (((n s) it)) (format "%s AS (%s)" n s)))
                (s-join ",")))
          (columns
-          (->> `(("p" "ipath" nil)
-                 ("h" "outline_hash" nil)
+          (->> '(("p" "ipath" nil)
                  ;; headlines
+                 ("h" "outline_hash" nil)
                  ("h" "headline_id" nil)
-                 ("h" "headline_text" ,fmt-text)
-                 ("h" "keyword" ,fmt-text)
-                 ("h" "level" ,fmt-text)
+                 ("h" "headline_text" org-sql--format-protected-text)
+                 ("h" "keyword" org-sql--format-protected-text)
+                 ("h" "level" org-sql--format-protected-text)
                  ("h" "effort" nil)
-                 ("h" "priority" ,fmt-text)
+                 ("h" "priority" org-sql--format-protected-text)
                  ("h" "is_archived" nil)
                  ("h" "is_commented" nil)
-                 ("h" "content" ,fmt-text)
+                 ("h" "content" org-sql--format-protected-text)
                  ;; tags
-                 ("t" "tags" ,fmt-text)
+                 ("t" "tags" org-sql--format-protected-text)
                  ;; properties
-                 ("hp" "pkeys" ,fmt-text)
-                 ("hp" "pvals" ,fmt-text)
+                 ("hp" "pkeys" org-sql--format-protected-text)
+                 ("hp" "pvals" org-sql--format-protected-text)
                  ;; planning
-                 ("sch" "raw_value" ,fmt-text)
-                 ("dead" "raw_value" ,fmt-text)
-                 ("cls" "raw_value" ,fmt-text)
+                 ("sch" "raw_value" org-sql--format-protected-text)
+                 ("dead" "raw_value" org-sql--format-protected-text)
+                 ("cls" "raw_value" org-sql--format-protected-text)
                  ;; logbook
-                 ("lb" "entries" ,fmt-text)
+                 ("lb" "entries" org-sql--format-protected-text)
                  ;; clocks
                  ("c" "clock_starts" nil)
                  ("c" "clock_ends" nil)
-                 ("c" "clock_notes" ,fmt-text))
+                 ("c" "clock_notes" org-sql--format-protected-text))
                (--map (-let* (((alias name f) it)
                               (name* (format "%s.%s" alias name)))
                         (if f (funcall f config name*) name*)))
@@ -3484,7 +3485,7 @@ process to run asynchronously."
                  "ORDER BY h.outline_hash, p.ipath;")
                  ;; "LIMIT 50;")
                (s-join " "))))
-    (format fmt cte columns hl-tbl)))
+    (format fmt cte columns hl-tbl ol-tbl)))
 
 (defun org-sql--compile-deserializer* (config type)
   (cond
@@ -3530,6 +3531,16 @@ process to run asynchronously."
   (let ((tbl-name (org-sql--format-table-name config "file_metadata")))
     (format "SELECT file_path, outline_hash from %s" tbl-name)))
 
+(defun org-sql--format-pull-preamble-query (config)
+  (let ((tbl-name (org-sql--format-table-name config "outlines"))
+        (preamble (org-sql--format-protected-text config "outline_preamble")))
+    (format "SELECT outline_hash, %s from %s" preamble tbl-name)))
+
+;; TODO add this to org-ml
+(defun org-sql--build-org-data (preamble headlines)
+  (let ((children (if preamble (cons preamble headlines) headlines)))
+    `(org-data nil ,@children)))
+
 (defun org-sql-pull-from-db ()
   (cl-labels
       ((compare-lists
@@ -3552,24 +3563,37 @@ process to run asynchronously."
            (hl-query (->> (org-sql--format-pull-query org-sql-db-config)
                        (format fmt)))
            (fp-query (org-sql--format-pull-filepath-query org-sql-db-config))
-           (deserializers (org-sql--compile-deserializers org-sql-db-config)))
+           (ol-query (org-sql--format-pull-preamble-query org-sql-db-config))
+           (hl-deserializers (org-sql--compile-deserializers org-sql-db-config))
+           (ol-deserializers (->> (list 'varchar 'text)
+                                  (--map (org-sql--compile-deserializer org-sql-db-config it)))))
       (org-sql--do ((hl-out (org-sql-send-sql hl-query))
-                    (fp-out (org-sql-send-sql fp-query)))
+                    (fp-out (org-sql-send-sql fp-query))
+                    (ol-out (org-sql-send-sql ol-query)))
         (let ((trees
                (->> (org-sql--parse-output-to-list org-sql-db-config hl-out)
-                    (--map (--zip-with (funcall it other) deserializers it))
+                    (--map (--zip-with (funcall it other) hl-deserializers it))
                     (--group-by (nth 1 it))
                     (--map (->> (cdr it)
                                 (--sort (compare-lists (nth 0 it) (nth 0 other)))
                                 (-map #'org-sql--row-to-headline)
                                 (org-sql--aggregate-headlines 1)
-                                (cons (car it)))))))
+                                (cons (car it))))))
+              (preambles
+               (->> (org-sql--parse-output-to-list org-sql-db-config ol-out)
+                    (--map (--zip-with (funcall it other) ol-deserializers it))
+                    (--map (cons (car it) (org-ml-from-string 'section (cadr it)))))))
           ;; I could pass the filepaths through a deserializer but these should
           ;; be good as-is
           (->> (org-sql--parse-output-to-list org-sql-db-config fp-out)
-               (--map (-let (((fp hash) it))
-                        (->> (--find (equal (car it) hash) trees)
-                             (cdr)
+               (--map (-let* (((fp hash) it)
+                              (headlines (->> trees
+                                              (--find (equal (car it) hash))
+                                              (cdr)))
+                              (preamble (->> preambles
+                                             (--find (equal (car it) hash))
+                                             (cdr))))
+                        (->> (org-sql--build-org-data preamble headlines)
                              (cons fp))))))))))
 
 (defun org-sql-clear-db ()
