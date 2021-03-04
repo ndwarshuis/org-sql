@@ -70,8 +70,8 @@ list then join the cdr of IN with newlines."
                          (round))
                    ,(file-attribute-modes testing-attributes))))
 
-(defconst testing-outlines
-  `(outlines (,testing-hash ,testing-size ,testing-lines)))
+(defconst testing-outlines*
+  `(,testing-hash ,testing-size ,testing-lines))
 
 (defconst init-ids
   (list :headline-id 1
@@ -469,7 +469,7 @@ list then join the cdr of IN with newlines."
   (describe "headlines"
     (it "single"
       (expect-sql "* headline"
-                  `(,testing-outlines
+                  `((outlines (,@testing-outlines* nil))
                     ,testing-file_metadata
                     (headlines (1 ,testing-hash "headline" 1 0 nil nil nil nil nil 0 0 nil))
                     (headline_closures (1 1 0)))))
@@ -477,7 +477,7 @@ list then join the cdr of IN with newlines."
     (it "two"
       (expect-sql (list "* headline"
                         "* another headline")
-                  `(,testing-outlines
+                  `((outlines (,@testing-outlines* nil))
                     ,testing-file_metadata
                     (headlines (2 ,testing-hash "another headline" 1 1 nil nil nil nil nil 0 0 nil)
                                (1 ,testing-hash "headline" 1 0 nil nil nil nil nil 0 0 nil))
@@ -485,12 +485,13 @@ list then join the cdr of IN with newlines."
                                        (1 1 0)))))
 
     (it "fancy"
-      (expect-sql (list "* TODO [#A] COMMENT another headline [1/2]"
+      (expect-sql (list "stuff at the top"
+                        "* TODO [#A] COMMENT another headline [1/2]"
                         ":PROPERTIES:"
                         ":Effort: 0:30"
                         ":END:"
                         "this /should/ appear")
-                  `(,testing-outlines
+                  `((outlines (,@testing-outlines* "stuff at the top\n"))
                     ,testing-file_metadata
                     (headlines
                      (1 ,testing-hash "another headline [1/2]" 1 0 "TODO" 30 "A" fraction 0.5
@@ -505,21 +506,21 @@ list then join the cdr of IN with newlines."
                            ((org-sql-exclude-headline-predicate
                              (lambda (h)
                                (= 1 (org-ml-get-property :level h)))))
-                           `(,testing-outlines
+                           `((outlines (,@testing-outlines* nil))
                              ,testing-file_metadata)
 
                            "nested (predicate applied to child)"
                            ((org-sql-exclude-headline-predicate
                              (lambda (h)
                                (= 2 (org-ml-get-property :level h)))))
-                           `(,testing-outlines
+                           `((outlines (,@testing-outlines* nil))
                              ,testing-file_metadata
                              (headlines (1 ,testing-hash "headline" 1 0 nil nil nil nil nil 0 0 nil))
                              (headline_closures (1 1 0)))
                            
                            "nested (no predicate)"
                            nil
-                           `(,testing-outlines
+                           `((outlines (,@testing-outlines* nil))
                              ,testing-file_metadata
                              (headlines (2 ,testing-hash "nested headline" 2 0 nil nil nil nil nil 0 0 nil)
                                         (1 ,testing-hash "headline" 1 0 nil nil nil nil nil 0 0 nil))
@@ -534,7 +535,7 @@ list then join the cdr of IN with newlines."
                         "** d"
                         "* e"
                         "** f")
-                  `(,testing-outlines
+                  `((outlines (,@testing-outlines* nil))
                     ,testing-file_metadata
                     (headlines (6 ,testing-hash "f" 2 0 nil nil nil nil nil 0 0 nil)
                                (5 ,testing-hash "e" 1 2 nil nil nil nil nil 0 0 nil)
@@ -554,7 +555,7 @@ list then join the cdr of IN with newlines."
 
     (it "archived"
       (expect-sql "* headline :ARCHIVE:"
-                  `(,testing-outlines
+                  `((outlines (,@testing-outlines* nil))
                     ,testing-file_metadata
                     (headlines (1 ,testing-hash "headline" 1 0 nil nil nil nil nil 1 0 nil))
                     (headline_closures (1 1 0))))))
