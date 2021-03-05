@@ -2043,7 +2043,7 @@ PATH2a PATH2a ...))."
   "Return SQL value formatting function for TYPE.
 The function will be compiled according to CONFIG, a list like
 `org-sql-db-config'."
-  (let ((formatter-form
+  (let ((serializer-form
          (org-sql--case-type type
            (boolean
             (org-sql--case-mode config
@@ -2057,12 +2057,12 @@ The function will be compiled according to CONFIG, a list like
             '(number-to-string it))
            ((char text varchar)
             '(format "'%s'" (s-replace "'" "''" it))))))
-    `(lambda (it) (if it ,formatter-form "NULL"))))
+    `(lambda (it) (if it ,serializer-form "NULL"))))
 
 
 (defun org-sql--get-column-serializer (config tbl-name column-name)
-  "Return the formatter for COLUMN-NAME in TBL-NAME.
-The formatter will be compiled according to
+  "Return the serializer for COLUMN-NAME in TBL-NAME.
+The serializer will be compiled according to
 `org-sql--compile-serializer' where CONFIG has the
 same meaning as it has here."
   (let ((column (->> org-sql--table-alist
