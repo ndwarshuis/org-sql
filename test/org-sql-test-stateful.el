@@ -280,26 +280,34 @@
      (describe-reset-db "fancy file"
        (before-all
          (setq test-path (f-join test-files "fancy.org")
-               outline-hash "3f722cfec7ef036f4f96885c225e9347"
-               preamble "#+filetags: one two three\n#+property: p1 v1 v2 v3\n"))
+               outline-hash "e1a1b70663f70d3aff08be43f46b5ab3"
+               preamble "#+filetags: one two three\n#+property: p1 v1 v2 v3\n\n"))
        (it "update database"
          (let ((org-sql-files (list test-path))
                (org-log-into-drawer "LOGBOOK")
                (org-log-note-clock-out t))
            (expect-exit-success (org-sql-push-to-db))))
+       (it "pull database"
+         (let ((org-log-into-drawer t)
+               (org-clock-into-drawer t)
+               (org-log-note-clock-out t))
+           (-let (((file . tree) (car (org-sql-pull-from-db)))
+                  (orig-string (f-read-text test-path 'utf-8)))
+             (expect file :to-equal test-path)
+             (expect (org-ml-to-string tree) :to-equal orig-string))))
        (it "check metadata table"
          (expect-db-has-table-contents* 'file_metadata
            `(,test-path ,outline-hash integerp integerp integerp integerp "-rw-r--r--")))
        (it "check outlines table"
          (expect-db-has-table-contents 'outlines
-           `(,outline-hash 1234 36 ,preamble)))
+           `(,outline-hash 1235 36 ,preamble)))
        (it "check headlines table"
          (expect-db-has-table-contents 'headlines
            `(1 ,outline-hash "plain" 1 0 nil nil nil nil nil 0 0 nil)
            `(2 ,outline-hash "archived" 1 1 nil nil nil nil nil 1 0 nil)
            `(3 ,outline-hash "parent" 1 2 "TODO" nil nil nil nil 0 0 nil)
-           `(4 ,outline-hash "child" 2 0 "DONE" 60 "B" nil nil 0 1 "[[file:/dev/null][NULL]]\n")
-           `(5 ,outline-hash "other child" 2 1 "TODO" nil nil nil nil 0 0
+           `(4 ,outline-hash "child" 2 0 "DONE" 60 nil nil nil 0 1 "[[file:/dev/null][NULL]]\n")
+           `(5 ,outline-hash "other child" 2 1 "TODO" nil "B" nil nil 0 0
                ,(s-join "\n" (list "https://downloadmoreram.gov"
                                    "<2020-09-15 Tue>"
                                    "hopefully this hits all the relevant code paths :)"
@@ -348,16 +356,16 @@
        (it "check logbook entries table"
          (expect-db-has-table-contents* 'logbook_entries
            '(1 4 "state" integerp
-               "State \"DONE\"       from \"TODO\"       [2020-09-15 Tue 17:57]"
+               "State \"DONE\"       from \"TODO\"       [2020-09-15 Tue 18:05]"
                nil)
            '(2 5 "reschedule" integerp
-               "Rescheduled from \"[2020-09-17 Thu]\" on [2020-09-15 Tue 17:58]")
+               "Rescheduled from \"[2020-09-17 Thu]\" on [2020-09-15 Tue 18:00]")
            '(3 5 "delschedule" integerp
-               "Not scheduled, was \"[2020-09-19 Sat]\" on [2020-09-15 Tue 17:58]")
+               "Not scheduled, was \"[2020-09-19 Sat]\" on [2020-09-15 Tue 17:55]")
            '(4 5 "deldeadline" integerp
-               "Removed deadline, was \"[2020-09-22 Tue]\" on [2020-09-15 Tue 17:58]")
+               "Removed deadline, was \"[2020-09-22 Tue]\" on [2020-09-15 Tue 17:50]")
            '(5 5 "redeadline" integerp
-               "New deadline from \"[2020-09-17 Thu]\" on [2020-09-15 Tue 17:58]")))
+               "New deadline from \"[2020-09-17 Thu]\" on [2020-09-15 Tue 17:45]")))
        (it "check planning changes table"
          (expect-db-has-table-contents 'planning_changes
            '(2 5)
@@ -670,7 +678,8 @@
          (mysql
           (append
            (mk-mysql "MySQL" 8.0 60280)
-           (mk-mysql "MySQL" 5.7 60257)))
+           ;; (mk-mysql "MySQL" 5.7 60257)
+           ))
          (sqlserver
           (append
            (mk-sqlserver 2019 60319 nil '(:schema "nondbo"))

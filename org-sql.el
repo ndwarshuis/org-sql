@@ -1166,7 +1166,7 @@ keyword; if it's value is POSITIVE t will be returned, and if it
 is NEGATIVE nil will be returned. If no startup keywords are
 found, return INIT. If multiple keywords are present, use the
 last one."
-  (->> top-section
+  (->> (org-ml-get-children top-section)
        (--filter (and (org-ml-is-type 'keyword it)
                       (equal "STARTUP" (org-ml-get-property :key it))))
        (--reduce-from (let ((v (org-ml-get-property :value it)))
@@ -1210,7 +1210,7 @@ The plist will include:
   file as returned by `org-sql--build-log-note-heading-matchers'
   (which depends on TODO-KEYWORDS and LOG-NOTE-HEADINGS)"
   (let* ((children (org-ml-get-children tree))
-         (top-section (-some-> (assq 'section children) (org-ml-get-children))))
+         (top-section (assq 'section children)))
     (list :outline-hash outline-hash
           :paths-with-attributes paths-with-attributes
           :size size
@@ -1883,7 +1883,8 @@ OUTLINE-CONFIG is a list given by `org-sql--to-outline-config'."
           (org-sql--insert-alist-add acc file_tags
             :outline_hash outline-hash
             :tag tag)))
-      (->> (--filter (org-ml-is-type 'keyword it) top-section)
+      (->> (org-ml-get-children top-section)
+           (--filter (org-ml-is-type 'keyword it))
            (--filter (equal (org-ml-get-property :key it) "FILETAGS"))
            (--mapcat (s-split " " (org-ml-get-property :value it)))
            (-uniq)
@@ -1904,7 +1905,8 @@ OUTLINE-CONFIG is a list given by `org-sql--to-outline-config'."
                    :key_text key
                    :val_text value)
                  (org-sql--acc-incr :property-id it)))))
-      (->> (--filter (org-ml-is-type 'keyword it) top-section)
+      (->> (org-ml-get-children top-section)
+           (--filter (org-ml-is-type 'keyword it))
            (--filter (equal (org-ml-get-property :key it) "PROPERTY"))
            (-reduce-from #'add-property acc)))))
 
@@ -1916,9 +1918,7 @@ OUTLINE-CONFIG is a list given by `org-sql--to-outline-config'."
       :outline_hash outline-hash
       :outline_size size
       :outline_lines lines
-      :outline_preamble (-some->> top-section
-                          (-map #'org-ml-to-string)
-                          (s-join "")))))
+      :outline_preamble (-some-> top-section (org-ml-to-string)))))
 
 (defun org-sql--insert-alist-add-file-metadata* (acc path hash attrs)
   "Add row for a file and its metadata to ACC.
@@ -3293,6 +3293,10 @@ process to run asynchronously."
                                 (org-ml-build-clock! s :end e))
                               clock-starts
                               clock-ends))
+          (clocks-and-notes (->> clock-notes
+                                 (--map (org-ml-build-item! :paragraph it))
+                                 (-zip-with #'list clocks)
+                                 (-flatten-n 1)))
           (content-nodes (-some->> content
                            (org-ml-from-string 'section)
                            (org-ml-get-children)))
@@ -3300,8 +3304,9 @@ process to run asynchronously."
                                 (<= 1 (length priority)))
                        (aref priority 0)))
           ;; TODO somehow need to feed this the logbook config
-          (lb-config (list :log-into-drawer t
-                           :clock-into-drawer t)))
+          (lb-config (list :log-into-drawer org-log-into-drawer
+                           :clock-into-drawer org-clock-into-drawer
+                           :clock-out-notes org-log-note-clock-out)))
     (->> (org-ml-build-headline! :title-text headline-text
                                  :todo-keyword keyword
                                  :level level
@@ -3312,7 +3317,7 @@ process to run asynchronously."
          (org-ml-headline-set-node-properties all-props)
          (org-ml-headline-set-planning planning)
          (org-ml-headline-set-logbook-items lb-config logbook-items)
-         (org-ml-headline-set-logbook-clocks lb-config clocks)
+         (org-ml-headline-set-logbook-clocks lb-config clocks-and-notes)
          (org-ml-headline-set-contents lb-config content-nodes))))
 
 (defun org-sql--aggregate-headlines (level headlines)
