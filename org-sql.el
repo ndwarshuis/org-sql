@@ -1370,6 +1370,11 @@ plists (where the keys are the column names for the rows)."
         (-let (((p0 . p1) (org-sql--split-paragraph first)))
           (if (not p0) `(,p1 . ,rest) `(,p0 . (,p1 . ,rest))))))))
 
+;; TODO add this to org-ml
+(defun org-sql--build-org-data (preamble headlines)
+  (let ((children (if preamble (cons preamble headlines) headlines)))
+    `(org-data nil ,@children)))
+
 ;; org-element tree -> logbook entry (see `org-sql--to-entry')
 
 (defun org-sql--build-log-note-regexp-alist (todo-keywords)
@@ -2553,6 +2558,289 @@ transaction. CONFIG is a list like `org-sql-db-config'."
       (s-join "")
       (format fmt))))
 
+;; bulk pull
+
+(defun org-sql--row-to-headline (row)
+  (-let* (((ipath file-path headline-id headline-text keyword level effort
+                  priority is-archived is-commented content tags pkeys
+                  pvals scheduled deadline closed entries clock-starts
+                  clock-ends clock-notes)
+           row)
+          (effort-prop (-some->> effort
+                         (org-duration-from-minutes)
+                         (org-ml-build-node-property "Effort")))
+          (props (--zip-with (org-ml-build-node-property it other) pkeys pvals))
+          (all-props (if effort-prop (cons effort-prop props) props))
+          (closed* (-some->> closed
+                     (org-ml-from-string 'timestamp)
+                     (org-ml-timestamp-set-range 0)
+                     (org-ml-timestamp-set-active nil)))
+          (deadline* (-some->> deadline
+                       (org-ml-from-string 'timestamp)
+                       (org-ml-timestamp-set-range 0)))
+          (scheduled* (-some->> scheduled
+                        (org-ml-from-string 'timestamp)
+                        (org-ml-timestamp-set-range 0)))
+          (planning (when (or closed* scheduled* deadline*)
+                      (org-ml-build-planning
+                       :closed closed*
+                       :deadline deadline*
+                       :scheduled scheduled*)))
+          (logbook-items (-some->> entries
+                           (--map (org-ml-build-item! :paragraph it))))
+          (clocks (--zip-with (let ((s (-some->> it (org-ml-unixtime-to-time-long)))
+                                    (e (-some->> other (org-ml-unixtime-to-time-long))))
+                                (org-ml-build-clock! s :end e))
+                              clock-starts
+                              clock-ends))
+          (clocks-and-notes (->> clock-notes
+                                 (--map (org-ml-build-item! :paragraph it))
+                                 (-zip-with #'list clocks)
+                                 (-flatten-n 1)))
+          (content-nodes (-some->> content
+                           (org-ml-from-string 'section)
+                           (org-ml-get-children)))
+          (priority* (when (and (stringp priority)
+                                (<= 1 (length priority)))
+                       (aref priority 0)))
+          ;; TODO somehow need to feed this the logbook config
+          (lb-config (list :log-into-drawer org-log-into-drawer
+                           :clock-into-drawer org-clock-into-drawer
+                           :clock-out-notes org-log-note-clock-out)))
+    (->> (org-ml-build-headline! :title-text headline-text
+                                 :todo-keyword keyword
+                                 :level level
+                                 :tags tags
+                                 :priority priority*
+                                 :commentedp (= is-commented 1)
+                                 :archivedp (= is-archived 1))
+         (org-ml-headline-set-node-properties all-props)
+         (org-ml-headline-set-planning planning)
+         (org-ml-headline-set-logbook-items lb-config logbook-items)
+         (org-ml-headline-set-logbook-clocks lb-config clocks-and-notes)
+         (org-ml-headline-set-contents lb-config content-nodes))))
+
+(defun org-sql--aggregate-headlines (level headlines)
+  (->> headlines
+       (-partition-before-pred (lambda (it) (org-ml--property-is-eq :level level it)))
+       (--map (-let (((parent . children) it))
+                (if (not children) parent
+                  (-> (org-sql--aggregate-headlines (1+ level) children)
+                      (org-ml-headline-set-subheadlines parent)))))))
+
+(defun org-sql--format-group-concat (config sql-expr)
+  (-> (org-sql--case-mode config
+        (mysql
+         (format "GROUP_CONCAT(%%s SEPARATOR '%s')" org-sql--unit-sep))
+        ((postgres sqlserver)
+         (format "STRING_AGG(%%s, '%s')" org-sql--unit-sep))
+        (sqlite
+         (format "GROUP_CONCAT(%%s, '%s')" org-sql--unit-sep)))
+      (format sql-expr)))
+
+(defun org-sql--format-concat (config sql-exprs)
+  (org-sql--case-mode config
+    ((mysql sqlserver) (format "CONCAT(%s)" (s-join "," sql-exprs)))
+    ((postgres sqlite) (s-join "||" sql-exprs))))
+
+(defun org-sql--format-cast-to-text (config sql-expr)
+  (let ((fmt (org-sql--case-mode config
+              (mysql "CAST(%s AS CHAR)")
+              (postgres "%s::text")
+              (sqlite "CAST(%s AS TEXT)")
+              (sqlserver "CAST(%s AS VARCHAR(MAX))"))))
+    (format fmt sql-expr)))
+
+(defun org-sql--format-recursive-paths-cte (config)
+  (let* ((dlm (format "'%s'" org-sql--unit-sep))
+         (hc (org-sql--format-table-name config "headline_closures"))
+         (h (org-sql--format-table-name config "headlines"))
+         (ipath (org-sql--format-cast-to-text config "h.headline_index"))
+         (concat-ipath (->> `("p.ipath" ,dlm "h.headline_index")
+                         (org-sql--format-concat config))))
+    (->> (list (format "SELECT hc.headline_id AS parent_id, %s AS ipath" ipath)
+               (format "FROM %s hc" hc)
+               (format "JOIN %s h ON h.headline_id = hc.parent_id" h)
+               "WHERE hc.depth = 0 AND h.level = 1"
+               "UNION ALL"
+               (format "SELECT hc.headline_id, %s" concat-ipath)
+               (format "FROM %s hc" hc)
+               (format "JOIN %s h ON h.headline_id = hc.headline_id" h)
+               "JOIN paths p ON p.parent_id = hc.parent_id"
+               "WHERE hc.depth = 1")
+         (s-join " "))))
+
+(defun org-sql--format-logbook-cte (config)
+  (let ((le (org-sql--format-table-name config "logbook_entries"))
+        (fmt "SELECT headline_id, %s AS entries FROM %s GROUP BY headline_id")
+        (grouped (->> '("header" "'\\\\\n'" "note")
+                      (org-sql--format-concat config)
+                      (format "CASE WHEN note IS NULL THEN header ELSE %s END")
+                      (org-sql--format-group-concat config))))
+    (format fmt grouped le)))
+
+(defun org-sql--format-clock-cte (config)
+  (let ((tbl-name (org-sql--format-table-name config "clocks"))
+        (fmt (->> (list "SELECT headline_id,"
+                        "%s AS clock_starts,"
+                        "%s AS clock_ends,"
+                        "%s AS clock_notes FROM %s"
+                        "GROUP BY headline_id")
+                  (s-join " ")))
+        (time-start (->> (org-sql--format-cast-to-text config "time_start")
+                         (org-sql--format-group-concat config)))
+        (time-end (->> (org-sql--format-cast-to-text config "time_end")
+                       (org-sql--format-group-concat config)))
+        (clock-note (org-sql--format-group-concat config "clock_note")))
+    (format fmt time-start time-end clock-note tbl-name)))
+
+(defun org-sql--format-tags-cte (config)
+  (let ((tbl-name (org-sql--format-table-name config "headline_tags"))
+        (fmt "SELECT headline_id, %s AS tags FROM %s GROUP BY headline_id")
+        (grouped (org-sql--format-group-concat config "tag")))
+    (format fmt grouped tbl-name)))
+
+(defun org-sql--format-properties-cte (config)
+  (let ((hp-tbl (org-sql--format-table-name config "headline_properties"))
+        (p-tbl (org-sql--format-table-name config "properties"))
+        (fmt (->> (list "SELECT h.headline_id, %s AS pkeys, %s AS pvals"
+                        "FROM %s h"
+                        "JOIN %s p ON p.property_id = h.property_id"
+                        "GROUP BY h.headline_id")
+                  (s-join " ")))
+        (keys (org-sql--format-group-concat config "p.key_text"))
+        (vals (org-sql--format-group-concat config "p.val_text")))
+    (format fmt keys vals hp-tbl p-tbl)))
+
+(defun org-sql--format-planning-cte (config planning-type)
+  (let ((fmt (->> '("SELECT t.headline_id, t.raw_value FROM %s t"
+                    "JOIN %s p ON p.timestamp_id = t.timestamp_id"
+                    "WHERE p.planning_type = '%s'")
+                  (s-join " ")))
+        (pl-tbl (org-sql--format-table-name config "planning_entries"))
+        (ts-tbl (org-sql--format-table-name config "timestamps")))
+    (format fmt ts-tbl pl-tbl planning-type)))
+
+(defun org-sql--format-protected-text (config sql-expr)
+  (org-sql--case-mode config
+    (mysql (format org-sql--mysql-text-format sql-expr))
+    ((sqlite postgres) sql-expr)
+    (sqlserver (format org-sql--sqlserver-text-format sql-expr))))
+
+(defun org-sql--format-pull-query (config)
+  (let* ((hl-tbl (org-sql--format-table-name config "headlines"))
+         (ol-tbl (org-sql--format-table-name config "outlines"))
+         (recursive-paths (org-sql--case-mode config
+                            ((mysql postgres sqlite) "RECURSIVE paths")
+                            (sqlserver "paths")))
+         (cte
+          (->> `((,recursive-paths ,(org-sql--format-recursive-paths-cte config))
+                 ("_logbooks" ,(org-sql--format-logbook-cte config))
+                 ("_clocks" ,(org-sql--format-clock-cte config))
+                 ("_headline_tags" ,(org-sql--format-tags-cte config))
+                 ("_scheduled" ,(org-sql--format-planning-cte config "scheduled"))
+                 ("_deadline" ,(org-sql--format-planning-cte config "deadline"))
+                 ("_closed" ,(org-sql--format-planning-cte config "closed"))
+                 ("_headline_properties" ,(org-sql--format-properties-cte config)))
+               (--map (-let (((n s) it)) (format "%s AS (%s)" n s)))
+               (s-join ",")))
+         (columns
+          (->> '(("p" "ipath" nil)
+                 ;; headlines
+                 ("h" "outline_hash" nil)
+                 ("h" "headline_id" nil)
+                 ("h" "headline_text" org-sql--format-protected-text)
+                 ("h" "keyword" org-sql--format-protected-text)
+                 ("h" "level" org-sql--format-protected-text)
+                 ("h" "effort" nil)
+                 ("h" "priority" org-sql--format-protected-text)
+                 ("h" "is_archived" nil)
+                 ("h" "is_commented" nil)
+                 ("h" "content" org-sql--format-protected-text)
+                 ;; tags
+                 ("t" "tags" org-sql--format-protected-text)
+                 ;; properties
+                 ("hp" "pkeys" org-sql--format-protected-text)
+                 ("hp" "pvals" org-sql--format-protected-text)
+                 ;; planning
+                 ("sch" "raw_value" org-sql--format-protected-text)
+                 ("dead" "raw_value" org-sql--format-protected-text)
+                 ("cls" "raw_value" org-sql--format-protected-text)
+                 ;; logbook
+                 ("lb" "entries" org-sql--format-protected-text)
+                 ;; clocks
+                 ("c" "clock_starts" nil)
+                 ("c" "clock_ends" nil)
+                 ("c" "clock_notes" org-sql--format-protected-text))
+               (--map (-let* (((alias name f) it)
+                              (name* (format "%s.%s" alias name)))
+                        (if f (funcall f config name*) name*)))
+               (s-join ",")))
+         (fmt
+          (->> '("WITH %s SELECT %s FROM paths p"
+                 "JOIN %s h ON p.parent_id = h.headline_id"
+                 "LEFT JOIN _headline_properties hp ON hp.headline_id = h.headline_id"
+                 "LEFT JOIN _headline_tags t ON t.headline_id = h.headline_id"
+                 "LEFT JOIN _scheduled sch ON sch.headline_id = h.headline_id"
+                 "LEFT JOIN _deadline dead ON dead.headline_id = h.headline_id"
+                 "LEFT JOIN _closed cls ON cls.headline_id = h.headline_id"
+                 "LEFT JOIN _logbooks lb ON lb.headline_id = h.headline_id"
+                 "LEFT JOIN _clocks c ON c.headline_id = h.headline_id"
+                 ;; TODO not all DBMSs will need this
+                 "ORDER BY h.outline_hash, p.ipath;")
+                 ;; "LIMIT 50;")
+               (s-join " "))))
+    (format fmt cte columns hl-tbl ol-tbl)))
+
+(defun org-sql--compile-deserializer* (config type)
+  (cond
+   ((memq type '(int-array delimited-string))
+    (let* ((s (if (eq type 'int-array) 'integer 'text))
+           (f (org-sql--compile-deserializer config s))
+           (n (org-sql--get-nullstring config s)))
+      `(lambda (it)
+         (unless (equal it ,n) (-map ,f (s-split org-sql--unit-sep it))))))
+   (t (org-sql--compile-deserializer config type))))
+
+(defun org-sql--compile-deserializers (config)
+  (->> (list 'int-array
+             'varchar
+             ;; headlines
+             'integer
+             'text
+             'text
+             'integer
+             'integer
+             'text
+             'boolean
+             'boolean
+             'text
+             ;; tags
+             'delimited-string
+             ;; properties
+             'delimited-string
+             'delimited-string
+             ;; planning
+             'text
+             'text
+             'text
+             ;; logbook
+             'delimited-string
+             ;; clocks
+             'int-array
+             'int-array
+             'delimited-string)
+       (--map (org-sql--compile-deserializer* config it))))
+
+(defun org-sql--format-pull-filepath-query (config)
+  (let ((tbl-name (org-sql--format-table-name config "file_metadata")))
+    (format "SELECT file_path, outline_hash from %s" tbl-name)))
+
+(defun org-sql--format-pull-preamble-query (config)
+  (let ((tbl-name (org-sql--format-table-name config "outlines"))
+        (preamble (org-sql--format-protected-text config "outline_preamble")))
+    (format "SELECT outline_hash, %s from %s" preamble tbl-name)))
+
 ;; IO helper functions
 
 (defmacro org-sql--on-success (first-form success-form error-form)
@@ -3259,292 +3547,6 @@ process to run asynchronously."
     (org-save-all-org-buffers))
   (->> (org-sql--get-transactions)
        (org-sql--send-transaction-with-hook nil org-sql-post-push-hooks)))
-
-(defun org-sql--row-to-headline (row)
-  (-let* (((ipath file-path headline-id headline-text keyword level effort
-                  priority is-archived is-commented content tags pkeys
-                  pvals scheduled deadline closed entries clock-starts
-                  clock-ends clock-notes)
-           row)
-          (effort-prop (-some->> effort
-                         (org-duration-from-minutes)
-                         (org-ml-build-node-property "Effort")))
-          (props (--zip-with (org-ml-build-node-property it other) pkeys pvals))
-          (all-props (if effort-prop (cons effort-prop props) props))
-          (closed* (-some->> closed
-                     (org-ml-from-string 'timestamp)
-                     (org-ml-timestamp-set-range 0)
-                     (org-ml-timestamp-set-active nil)))
-          (deadline* (-some->> deadline
-                       (org-ml-from-string 'timestamp)
-                       (org-ml-timestamp-set-range 0)))
-          (scheduled* (-some->> scheduled
-                        (org-ml-from-string 'timestamp)
-                        (org-ml-timestamp-set-range 0)))
-          (planning (when (or closed* scheduled* deadline*)
-                      (org-ml-build-planning
-                       :closed closed*
-                       :deadline deadline*
-                       :scheduled scheduled*)))
-          (logbook-items (-some->> entries
-                           (--map (org-ml-build-item! :paragraph it))))
-          (clocks (--zip-with (let ((s (-some->> it (org-ml-unixtime-to-time-long)))
-                                    (e (-some->> other (org-ml-unixtime-to-time-long))))
-                                (org-ml-build-clock! s :end e))
-                              clock-starts
-                              clock-ends))
-          (clocks-and-notes (->> clock-notes
-                                 (--map (org-ml-build-item! :paragraph it))
-                                 (-zip-with #'list clocks)
-                                 (-flatten-n 1)))
-          (content-nodes (-some->> content
-                           (org-ml-from-string 'section)
-                           (org-ml-get-children)))
-          (priority* (when (and (stringp priority)
-                                (<= 1 (length priority)))
-                       (aref priority 0)))
-          ;; TODO somehow need to feed this the logbook config
-          (lb-config (list :log-into-drawer org-log-into-drawer
-                           :clock-into-drawer org-clock-into-drawer
-                           :clock-out-notes org-log-note-clock-out)))
-    (->> (org-ml-build-headline! :title-text headline-text
-                                 :todo-keyword keyword
-                                 :level level
-                                 :tags tags
-                                 :priority priority*
-                                 :commentedp (= is-commented 1)
-                                 :archivedp (= is-archived 1))
-         (org-ml-headline-set-node-properties all-props)
-         (org-ml-headline-set-planning planning)
-         (org-ml-headline-set-logbook-items lb-config logbook-items)
-         (org-ml-headline-set-logbook-clocks lb-config clocks-and-notes)
-         (org-ml-headline-set-contents lb-config content-nodes))))
-
-(defun org-sql--aggregate-headlines (level headlines)
-  (->> headlines
-       (-partition-before-pred (lambda (it) (org-ml--property-is-eq :level level it)))
-       (--map (-let (((parent . children) it))
-                (if (not children) parent
-                  (-> (org-sql--aggregate-headlines (1+ level) children)
-                      (org-ml-headline-set-subheadlines parent)))))))
-
-(defun org-sql--format-group-concat (config sql-expr)
-  (-> (org-sql--case-mode config
-        (mysql
-         (format "GROUP_CONCAT(%%s SEPARATOR '%s')" org-sql--unit-sep))
-        ((postgres sqlserver)
-         (format "STRING_AGG(%%s, '%s')" org-sql--unit-sep))
-        (sqlite
-         (format "GROUP_CONCAT(%%s, '%s')" org-sql--unit-sep)))
-      (format sql-expr)))
-
-(defun org-sql--format-concat (config sql-exprs)
-  (org-sql--case-mode config
-    ((mysql sqlserver) (format "CONCAT(%s)" (s-join "," sql-exprs)))
-    ((postgres sqlite) (s-join "||" sql-exprs))))
-
-(defun org-sql--format-cast-to-text (config sql-expr)
-  (let ((fmt (org-sql--case-mode config
-              (mysql "CAST(%s AS CHAR)")
-              (postgres "%s::text")
-              (sqlite "CAST(%s AS TEXT)")
-              (sqlserver "CAST(%s AS VARCHAR(MAX))"))))
-    (format fmt sql-expr)))
-
-(defun org-sql--format-recursive-paths-cte (config)
-  (let* ((dlm (format "'%s'" org-sql--unit-sep))
-         (hc (org-sql--format-table-name config "headline_closures"))
-         (h (org-sql--format-table-name config "headlines"))
-         (ipath (org-sql--format-cast-to-text config "h.headline_index"))
-         (concat-ipath (->> `("p.ipath" ,dlm "h.headline_index")
-                         (org-sql--format-concat config))))
-    (->> (list (format "SELECT hc.headline_id AS parent_id, %s AS ipath" ipath)
-               (format "FROM %s hc" hc)
-               (format "JOIN %s h ON h.headline_id = hc.parent_id" h)
-               "WHERE hc.depth = 0 AND h.level = 1"
-               "UNION ALL"
-               (format "SELECT hc.headline_id, %s" concat-ipath)
-               (format "FROM %s hc" hc)
-               (format "JOIN %s h ON h.headline_id = hc.headline_id" h)
-               "JOIN paths p ON p.parent_id = hc.parent_id"
-               "WHERE hc.depth = 1")
-         (s-join " "))))
-
-(defun org-sql--format-logbook-cte (config)
-  (let ((le (org-sql--format-table-name config "logbook_entries"))
-        (fmt "SELECT headline_id, %s AS entries FROM %s GROUP BY headline_id")
-        (grouped (->> '("header" "'\\\\\n'" "note")
-                      (org-sql--format-concat config)
-                      (format "CASE WHEN note IS NULL THEN header ELSE %s END")
-                      (org-sql--format-group-concat config))))
-    (format fmt grouped le)))
-
-(defun org-sql--format-clock-cte (config)
-  (let ((tbl-name (org-sql--format-table-name config "clocks"))
-        (fmt (->> (list "SELECT headline_id,"
-                        "%s AS clock_starts,"
-                        "%s AS clock_ends,"
-                        "%s AS clock_notes FROM %s"
-                        "GROUP BY headline_id")
-                  (s-join " ")))
-        (time-start (->> (org-sql--format-cast-to-text config "time_start")
-                         (org-sql--format-group-concat config)))
-        (time-end (->> (org-sql--format-cast-to-text config "time_end")
-                       (org-sql--format-group-concat config)))
-        (clock-note (org-sql--format-group-concat config "clock_note")))
-    (format fmt time-start time-end clock-note tbl-name)))
-
-(defun org-sql--format-tags-cte (config)
-  (let ((tbl-name (org-sql--format-table-name config "headline_tags"))
-        (fmt "SELECT headline_id, %s AS tags FROM %s GROUP BY headline_id")
-        (grouped (org-sql--format-group-concat config "tag")))
-    (format fmt grouped tbl-name)))
-
-(defun org-sql--format-properties-cte (config)
-  (let ((hp-tbl (org-sql--format-table-name config "headline_properties"))
-        (p-tbl (org-sql--format-table-name config "properties"))
-        (fmt (->> (list "SELECT h.headline_id, %s AS pkeys, %s AS pvals"
-                        "FROM %s h"
-                        "JOIN %s p ON p.property_id = h.property_id"
-                        "GROUP BY h.headline_id")
-                  (s-join " ")))
-        (keys (org-sql--format-group-concat config "p.key_text"))
-        (vals (org-sql--format-group-concat config "p.val_text")))
-    (format fmt keys vals hp-tbl p-tbl)))
-
-(defun org-sql--format-planning-cte (config planning-type)
-  (let ((fmt (->> '("SELECT t.headline_id, t.raw_value FROM %s t"
-                    "JOIN %s p ON p.timestamp_id = t.timestamp_id"
-                    "WHERE p.planning_type = '%s'")
-                  (s-join " ")))
-        (pl-tbl (org-sql--format-table-name config "planning_entries"))
-        (ts-tbl (org-sql--format-table-name config "timestamps")))
-    (format fmt ts-tbl pl-tbl planning-type)))
-
-(defun org-sql--format-protected-text (config sql-expr)
-  (org-sql--case-mode config
-    (mysql (format org-sql--mysql-text-format sql-expr))
-    ((sqlite postgres) sql-expr)
-    (sqlserver (format org-sql--sqlserver-text-format sql-expr))))
-
-(defun org-sql--format-pull-query (config)
-  (let* ((hl-tbl (org-sql--format-table-name config "headlines"))
-         (ol-tbl (org-sql--format-table-name config "outlines"))
-         (recursive-paths (org-sql--case-mode config
-                            ((mysql postgres sqlite) "RECURSIVE paths")
-                            (sqlserver "paths")))
-         (cte
-          (->> `((,recursive-paths ,(org-sql--format-recursive-paths-cte config))
-                 ("_logbooks" ,(org-sql--format-logbook-cte config))
-                 ("_clocks" ,(org-sql--format-clock-cte config))
-                 ("_headline_tags" ,(org-sql--format-tags-cte config))
-                 ("_scheduled" ,(org-sql--format-planning-cte config "scheduled"))
-                 ("_deadline" ,(org-sql--format-planning-cte config "deadline"))
-                 ("_closed" ,(org-sql--format-planning-cte config "closed"))
-                 ("_headline_properties" ,(org-sql--format-properties-cte config)))
-               (--map (-let (((n s) it)) (format "%s AS (%s)" n s)))
-               (s-join ",")))
-         (columns
-          (->> '(("p" "ipath" nil)
-                 ;; headlines
-                 ("h" "outline_hash" nil)
-                 ("h" "headline_id" nil)
-                 ("h" "headline_text" org-sql--format-protected-text)
-                 ("h" "keyword" org-sql--format-protected-text)
-                 ("h" "level" org-sql--format-protected-text)
-                 ("h" "effort" nil)
-                 ("h" "priority" org-sql--format-protected-text)
-                 ("h" "is_archived" nil)
-                 ("h" "is_commented" nil)
-                 ("h" "content" org-sql--format-protected-text)
-                 ;; tags
-                 ("t" "tags" org-sql--format-protected-text)
-                 ;; properties
-                 ("hp" "pkeys" org-sql--format-protected-text)
-                 ("hp" "pvals" org-sql--format-protected-text)
-                 ;; planning
-                 ("sch" "raw_value" org-sql--format-protected-text)
-                 ("dead" "raw_value" org-sql--format-protected-text)
-                 ("cls" "raw_value" org-sql--format-protected-text)
-                 ;; logbook
-                 ("lb" "entries" org-sql--format-protected-text)
-                 ;; clocks
-                 ("c" "clock_starts" nil)
-                 ("c" "clock_ends" nil)
-                 ("c" "clock_notes" org-sql--format-protected-text))
-               (--map (-let* (((alias name f) it)
-                              (name* (format "%s.%s" alias name)))
-                        (if f (funcall f config name*) name*)))
-               (s-join ",")))
-         (fmt
-          (->> '("WITH %s SELECT %s FROM paths p"
-                 "JOIN %s h ON p.parent_id = h.headline_id"
-                 "LEFT JOIN _headline_properties hp ON hp.headline_id = h.headline_id"
-                 "LEFT JOIN _headline_tags t ON t.headline_id = h.headline_id"
-                 "LEFT JOIN _scheduled sch ON sch.headline_id = h.headline_id"
-                 "LEFT JOIN _deadline dead ON dead.headline_id = h.headline_id"
-                 "LEFT JOIN _closed cls ON cls.headline_id = h.headline_id"
-                 "LEFT JOIN _logbooks lb ON lb.headline_id = h.headline_id"
-                 "LEFT JOIN _clocks c ON c.headline_id = h.headline_id"
-                 ;; TODO not all DBMSs will need this
-                 "ORDER BY h.outline_hash, p.ipath;")
-                 ;; "LIMIT 50;")
-               (s-join " "))))
-    (format fmt cte columns hl-tbl ol-tbl)))
-
-(defun org-sql--compile-deserializer* (config type)
-  (cond
-   ((memq type '(int-array delimited-string))
-    (let* ((s (if (eq type 'int-array) 'integer 'text))
-           (f (org-sql--compile-deserializer config s))
-           (n (org-sql--get-nullstring config s)))
-      `(lambda (it)
-         (unless (equal it ,n) (-map ,f (s-split org-sql--unit-sep it))))))
-   (t (org-sql--compile-deserializer config type))))
-
-(defun org-sql--compile-deserializers (config)
-  (->> (list 'int-array
-             'varchar
-             ;; headlines
-             'integer
-             'text
-             'text
-             'integer
-             'integer
-             'text
-             'boolean
-             'boolean
-             'text
-             ;; tags
-             'delimited-string
-             ;; properties
-             'delimited-string
-             'delimited-string
-             ;; planning
-             'text
-             'text
-             'text
-             ;; logbook
-             'delimited-string
-             ;; clocks
-             'int-array
-             'int-array
-             'delimited-string)
-       (--map (org-sql--compile-deserializer* config it))))
-
-(defun org-sql--format-pull-filepath-query (config)
-  (let ((tbl-name (org-sql--format-table-name config "file_metadata")))
-    (format "SELECT file_path, outline_hash from %s" tbl-name)))
-
-(defun org-sql--format-pull-preamble-query (config)
-  (let ((tbl-name (org-sql--format-table-name config "outlines"))
-        (preamble (org-sql--format-protected-text config "outline_preamble")))
-    (format "SELECT outline_hash, %s from %s" preamble tbl-name)))
-
-;; TODO add this to org-ml
-(defun org-sql--build-org-data (preamble headlines)
-  (let ((children (if preamble (cons preamble headlines) headlines)))
-    `(org-data nil ,@children)))
 
 (defun org-sql-pull-from-db ()
   (cl-labels
