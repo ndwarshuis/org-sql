@@ -1,5 +1,18 @@
 # Changelog
 
+## 3.0.0
+
+- new features
+  - add preamble (the text before headlines) to `outlines` table
+  - add `org-sql-pull-from-db`
+- breaking changes
+  - drop MySQL 5.7 support due to need for recursive queries
+  - `org-sql-dump-table` now returns deserialized output (eg output is
+    converted to real numbers, symbols, and strings)
+- bug fixes
+  - properly handle strings with newlines, tabs, and other control characters
+  - property handle strings that literally say "NULL"
+
 ## 2.1.0
 
 - add habits to the `timestamp_repeater` table

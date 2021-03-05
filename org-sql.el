@@ -1372,6 +1372,10 @@ plists (where the keys are the column names for the rows)."
 
 ;; TODO add this to org-ml
 (defun org-sql--build-org-data (preamble headlines)
+  "Return a new 'org-data' node type.
+PREAMBLE is a section node representing the \"preamble\" (the
+text above the first headline, if any) or nil, and HEADLINES is a
+list of headline nodes."
   (let ((children (if preamble (cons preamble headlines) headlines)))
     `(org-data nil ,@children)))
 
@@ -2033,9 +2037,9 @@ PATH2a PATH2a ...))."
 
 ;;; SQL formatting functions
 
-;; value formatters
+;; value serializers
 
-(defun org-sql--compile-value-format-function (config type)
+(defun org-sql--compile-serializer (config type)
   "Return SQL value formatting function for TYPE.
 The function will be compiled according to CONFIG, a list like
 `org-sql-db-config'."
@@ -2056,28 +2060,27 @@ The function will be compiled according to CONFIG, a list like
     `(lambda (it) (if it ,formatter-form "NULL"))))
 
 
-(defun org-sql--get-column-formatter (config tbl-name column-name)
+(defun org-sql--get-column-serializer (config tbl-name column-name)
   "Return the formatter for COLUMN-NAME in TBL-NAME.
 The formatter will be compiled according to
-`org-sql--compile-value-format-function' where CONFIG has the
+`org-sql--compile-serializer' where CONFIG has the
 same meaning as it has here."
   (let ((column (->> org-sql--table-alist
                      (alist-get tbl-name)
                      (alist-get 'columns)
                      (alist-get column-name))))
-    (org-sql--compile-value-format-function config (plist-get column :type))))
+    (org-sql--compile-serializer config (plist-get column :type))))
 
-(defun org-sql--get-column-formatters (config tbl-name)
-  "Return the formatters for all columns (in order) in TBL-NAME.
-The formatters will be compiled according to
-`org-sql--compile-value-format-function' where CONFIG has the
-same meaning as it has here."
-  (->> org-sql--table-alist
-       (alist-get tbl-name)
-       (alist-get 'columns)
-       (--map (org-sql--compile-value-format-function config (plist-get (cdr it) :type)))))
+;; (defun org-sql--get-column-serializers (config tbl-name)
+;;   "Return the serializers for all columns (in order) in TBL-NAME.
+;; The serializers will be compiled according to
+;; `org-sql--compile-serializer' where CONFIG has the
+;; same meaning as it has here."
+;;   )
 
 (defun org-sql--get-nullstring (config type)
+  "Return the string representing SQL NULL for TYPE.
+CONFIG is a list like `org-sql-db-config'."
   (org-sql--case-type type
     ;; ASSUME enums will never be set to the symbol NULL, so this is safe
     ;;
@@ -2099,6 +2102,12 @@ same meaning as it has here."
      org-sql--null-placeholder)))
 
 (defun org-sql--compile-deserializer (config type)
+  "Return the function the deserialized TYPE.
+Because database clients return a string as their output, this
+function will convert the string into a Lisp type given a TYPE.
+It is expected that these functions will be applied to a split
+list of output as given by `org-sql--parse-output-to-list'.
+CONFIG is a list like `org-sql-db-config'."
   ;; TODO minor optimization: don't check for null when `TYPE' describes a
   ;; column that is a primary key or a has a NOTNULL constraint
   (let ((nullstring (org-sql--get-nullstring config type))
@@ -2129,13 +2138,7 @@ same meaning as it has here."
                     '(s-replace org-sql--newline-placeholder "\n" it)))))))
     `(lambda (it) (unless (equal it ,nullstring) ,form))))
 
-(defun org-sql--get-column-deserializers (config tbl-name)
-  (->> org-sql--table-alist
-       (alist-get tbl-name)
-       (alist-get 'columns)
-       (--map (org-sql--compile-deserializer config (plist-get (cdr it) :type)))))
-
-;; identifier formatters
+;; identifier serializers
 
 (defun org-sql--format-column-name (column-name)
   "Return SQL string representation of COLUMN-NAME."
@@ -2359,8 +2362,8 @@ TABLE-BULK-INSERT is a list like one cell of
 to insert. CONFIG is a list like `org-sql-db-config'."
   (cl-flet
       ((format-row
-        (formatters row)
-        (->> (--zip-with (funcall other it) row formatters)
+        (serializers row)
+        (->> (--zip-with (funcall other it) row serializers)
              (s-join ",")
              (format "(%s)"))))
     (-let* (((tbl-name . rows) table-bulk-insert)
@@ -2378,8 +2381,12 @@ to insert. CONFIG is a list like `org-sql-db-config'."
                          (s-join " " it)
                          (format it tbl-name* columns)))))
             ;; ASSUME these will be in the right order
-            (formatters (org-sql--get-column-formatters config tbl-name)))
-      (->> (--map (format-row formatters it) rows)
+            (serializers (->> org-sql--table-alist
+                             (alist-get tbl-name)
+                             (alist-get 'columns)
+                             (--map (org-sql--compile-serializer
+                                     config (plist-get (cdr it) :type))))))
+      (->> (--map (format-row serializers it) rows)
            (s-join ",")
            (format fmt)))))
 
@@ -2468,17 +2475,17 @@ FILE-PATH) which are to be deleted. CONFIG is a list like
   (when hashpathpairs
     (cl-flet
         ((format-where-clause
-          (path-fmtr hash-fmtr grouped)
+          (path-srlr hash-srlr grouped)
           (-let* (((hash . paths) grouped)
-                  (hash* (funcall hash-fmtr hash)))
-            (->> (--map (format "file_path = %s" (funcall path-fmtr it)) paths)
+                  (hash* (funcall hash-srlr hash)))
+            (->> (--map (format "file_path = %s" (funcall path-srlr it)) paths)
                  (s-join " OR ")
                  (format "(outline_hash = %s AND (%s))" hash*)))))
       (let ((tbl-name* (org-sql--format-table-name config 'file_metadata))
-            (hash-fmtr (org-sql--get-column-formatter config 'file_metadata :outline_hash))
-            (path-fmtr (org-sql--get-column-formatter config 'file_metadata :file_path)))
+            (hash-srlr (org-sql--get-column-serializer config 'file_metadata :outline_hash))
+            (path-srlr (org-sql--get-column-serializer config 'file_metadata :file_path)))
         (->> (org-sql--group-hashpathpairs-by-hash hashpathpairs)
-             (--map (format-where-clause path-fmtr hash-fmtr it))
+             (--map (format-where-clause path-srlr hash-srlr it))
              (s-join " OR ")
              (format "DELETE FROM %s WHERE %s;" tbl-name*))))))
 
@@ -2489,7 +2496,7 @@ FILE-PATH) which are to be deleted. CONFIG is a list like
 `org-sql-db-config'."
   (when hashpathpairs
     (let ((tbl-name* (org-sql--format-table-name config 'outlines))
-          (fmtr (org-sql--get-column-formatter config 'outlines :outline_hash)))
+          (fmtr (org-sql--get-column-serializer config 'outlines :outline_hash)))
         (->> (org-sql--hashpathpairs-to-hashes hashpathpairs)
              (--map (funcall fmtr it))
              (s-join ",")
@@ -2561,6 +2568,9 @@ transaction. CONFIG is a list like `org-sql-db-config'."
 ;; bulk pull
 
 (defun org-sql--row-to-headline (row)
+  "Convert ROW to a headline node.
+ROW is a deserialized list as produced from executing the SQL
+query given by `org-sql--format-pull-query'."
   (-let* (((ipath file-path headline-id headline-text keyword level effort
                   priority is-archived is-commented content tags pkeys
                   pvals scheduled deadline closed entries clock-starts
@@ -2621,6 +2631,9 @@ transaction. CONFIG is a list like `org-sql-db-config'."
          (org-ml-headline-set-contents lb-config content-nodes))))
 
 (defun org-sql--aggregate-headlines (level headlines)
+  "Aggregate a list of HEADLINES based on their level.
+This is a recursive function; LEVEL should be 1 (the initial
+starting level)."
   (->> headlines
        (-partition-before-pred (lambda (it) (org-ml--property-is-eq :level level it)))
        (--map (-let (((parent . children) it))
@@ -2629,6 +2642,8 @@ transaction. CONFIG is a list like `org-sql-db-config'."
                       (org-ml-headline-set-subheadlines parent)))))))
 
 (defun org-sql--format-group-concat (config sql-expr)
+  "Return SQL-EXPR formatted as a group concatenation.
+CONFIG is a list like `org-sql-db-config'."
   (-> (org-sql--case-mode config
         (mysql
          (format "GROUP_CONCAT(%%s SEPARATOR '%s')" org-sql--unit-sep))
@@ -2639,11 +2654,15 @@ transaction. CONFIG is a list like `org-sql-db-config'."
       (format sql-expr)))
 
 (defun org-sql--format-concat (config sql-exprs)
+  "Return SQL-EXPRS formatted as a concatenation.
+CONFIG is a list like `org-sql-db-config'."
   (org-sql--case-mode config
     ((mysql sqlserver) (format "CONCAT(%s)" (s-join "," sql-exprs)))
     ((postgres sqlite) (s-join "||" sql-exprs))))
 
 (defun org-sql--format-cast-to-text (config sql-expr)
+  "Return SQL-EXPR formatted as a cast to a textual type.
+CONFIG is a list like `org-sql-db-config'."
   (let ((fmt (org-sql--case-mode config
               (mysql "CAST(%s AS CHAR)")
               (postgres "%s::text")
@@ -2652,6 +2671,8 @@ transaction. CONFIG is a list like `org-sql-db-config'."
     (format fmt sql-expr)))
 
 (defun org-sql--format-recursive-paths-cte (config)
+  "Return a SQL CTE which yields tree paths.
+CONFIG is a list like `org-sql-db-config'."
   (let* ((dlm (format "'%s'" org-sql--unit-sep))
          (hc (org-sql--format-table-name config "headline_closures"))
          (h (org-sql--format-table-name config "headlines"))
@@ -2671,6 +2692,8 @@ transaction. CONFIG is a list like `org-sql-db-config'."
          (s-join " "))))
 
 (defun org-sql--format-logbook-cte (config)
+  "Return a SQL CTE which yields aggregated logbooks/headline.
+CONFIG is a list like `org-sql-db-config'."
   (let ((le (org-sql--format-table-name config "logbook_entries"))
         (fmt "SELECT headline_id, %s AS entries FROM %s GROUP BY headline_id")
         (grouped (->> '("header" "'\\\\\n'" "note")
@@ -2680,6 +2703,8 @@ transaction. CONFIG is a list like `org-sql-db-config'."
     (format fmt grouped le)))
 
 (defun org-sql--format-clock-cte (config)
+  "Return a SQL CTE which yields aggregated clocks/headline.
+CONFIG is a list like `org-sql-db-config'."
   (let ((tbl-name (org-sql--format-table-name config "clocks"))
         (fmt (->> (list "SELECT headline_id,"
                         "%s AS clock_starts,"
@@ -2695,12 +2720,16 @@ transaction. CONFIG is a list like `org-sql-db-config'."
     (format fmt time-start time-end clock-note tbl-name)))
 
 (defun org-sql--format-tags-cte (config)
+  "Return a SQL CTE which yields aggregated tags/headline.
+CONFIG is a list like `org-sql-db-config'."
   (let ((tbl-name (org-sql--format-table-name config "headline_tags"))
         (fmt "SELECT headline_id, %s AS tags FROM %s GROUP BY headline_id")
         (grouped (org-sql--format-group-concat config "tag")))
     (format fmt grouped tbl-name)))
 
 (defun org-sql--format-properties-cte (config)
+  "Return a SQL CTE which yields aggregated properties/headline.
+CONFIG is a list like `org-sql-db-config'."
   (let ((hp-tbl (org-sql--format-table-name config "headline_properties"))
         (p-tbl (org-sql--format-table-name config "properties"))
         (fmt (->> (list "SELECT h.headline_id, %s AS pkeys, %s AS pvals"
@@ -2713,6 +2742,9 @@ transaction. CONFIG is a list like `org-sql-db-config'."
     (format fmt keys vals hp-tbl p-tbl)))
 
 (defun org-sql--format-planning-cte (config planning-type)
+  "Return a SQL CTE which yields aggregated planning/headline.
+PLANNING-TYPE is one of \"closed\", \"deadline\", or
+\"scheduled\". CONFIG is a list like `org-sql-db-config'."
   (let ((fmt (->> '("SELECT t.headline_id, t.raw_value FROM %s t"
                     "JOIN %s p ON p.timestamp_id = t.timestamp_id"
                     "WHERE p.planning_type = '%s'")
@@ -2722,12 +2754,21 @@ transaction. CONFIG is a list like `org-sql-db-config'."
     (format fmt ts-tbl pl-tbl planning-type)))
 
 (defun org-sql--format-protected-text (config sql-expr)
+  "Return formatted SQL-EXPR with proper text substitutions.
+Specifically, SQL-Server configs will be formatted such that
+newlines will be replaced by `org-sql--newline-placeholder', and
+MySQL configs will additionally substitute tabs with
+`org-sql--tab-placeholder'. Both of these will replace NULL with
+`org-sql--null-placeholder'. CONFIG is a list like
+`org-sql-db-config'."
   (org-sql--case-mode config
     (mysql (format org-sql--mysql-text-format sql-expr))
     ((sqlite postgres) sql-expr)
     (sqlserver (format org-sql--sqlserver-text-format sql-expr))))
 
 (defun org-sql--format-pull-query (config)
+  "Return a SQL query that yields all headlines in the database.
+CONFIG is a list like `org-sql-db-config'."
   (let* ((hl-tbl (org-sql--format-table-name config "headlines"))
          (ol-tbl (org-sql--format-table-name config "outlines"))
          (recursive-paths (org-sql--case-mode config
@@ -2793,6 +2834,12 @@ transaction. CONFIG is a list like `org-sql-db-config'."
     (format fmt cte columns hl-tbl ol-tbl)))
 
 (defun org-sql--compile-deserializer* (config type)
+  "Return a function that deserializes TYPE.
+This is a wrapper around `org-sql--compile-deserializer' which
+understands two additional types: int-array and
+delimited-string (both of which are aggregate types that are
+important for `org-sql-pull-from-db'.) CONFIG is a list like
+`org-sql-db-config'."
   (cond
    ((memq type '(int-array delimited-string))
     (let* ((s (if (eq type 'int-array) 'integer 'text))
@@ -2803,6 +2850,8 @@ transaction. CONFIG is a list like `org-sql-db-config'."
    (t (org-sql--compile-deserializer config type))))
 
 (defun org-sql--compile-deserializers (config)
+  "Return a list of deserializers for `org-sql--format-pull-query'.
+CONFIG is a list like `org-sql-db-config'."
   (->> (list 'int-array
              'varchar
              ;; headlines
@@ -2833,10 +2882,14 @@ transaction. CONFIG is a list like `org-sql-db-config'."
        (--map (org-sql--compile-deserializer* config it))))
 
 (defun org-sql--format-pull-filepath-query (config)
+  "Return a SQL query the yields all filepaths in the database.
+CONFIG is a list like `org-sql-db-config'."
   (let ((tbl-name (org-sql--format-table-name config "file_metadata")))
     (format "SELECT file_path, outline_hash from %s" tbl-name)))
 
 (defun org-sql--format-pull-preamble-query (config)
+  "Return a SQL query the yields all preambles in the database.
+CONFIG is a list like `org-sql-db-config'."
   (let ((tbl-name (org-sql--format-table-name config "outlines"))
         (preamble (org-sql--format-protected-text config "outline_preamble")))
     (format "SELECT outline_hash, %s from %s" preamble tbl-name)))
@@ -3518,7 +3571,11 @@ Permissions required: SELECT
 See `org-sql-db-config' for how to configure the database
 connection."
   (let ((cmd (org-sql--format-select-statement org-sql-db-config nil tbl-name))
-        (deserializers (org-sql--get-column-deserializers org-sql-db-config tbl-name)))
+        (deserializers (->> (alist-get tbl-name org-sql--table-alist)
+                            (alist-get 'columns)
+                            (--map (org-sql--compile-deserializer
+                                    org-sql-db-config
+                                    (plist-get (cdr it) :type))))))
     (org-sql--on-success* (org-sql-send-sql cmd)
       (if as-plist
           (let ((col-names (->> (alist-get tbl-name org-sql--table-alist)
@@ -3548,7 +3605,22 @@ process to run asynchronously."
   (->> (org-sql--get-transactions)
        (org-sql--send-transaction-with-hook nil org-sql-post-push-hooks)))
 
+;; TODO what if I only want one file? Or only files that have changed? Or
+;; just a few headlines that match certain criteria?
 (defun org-sql-pull-from-db ()
+  "Pull the current state from the org-sql database.
+
+See `org-sql-db-config' for how to set up the database
+connection.
+
+This will return a list of lists like (PATH . TREE) where PATH is
+the path to a tracked file and TREE is the org-tree for that file
+represented as an org-element node tree (specifically an
+'org-data' node). Passing TREE to `org-ml-to-string' or
+`org-element-interpret-data' will produce the string
+representation of the file contents.
+
+Permissions required: SELECT."
   (cl-labels
       ((compare-lists
         (A B)
@@ -3650,6 +3722,13 @@ Calls `org-sql-init-db'."
   (org-sql--on-user-success (org-sql-init-db) "org-sql-init-db"))
 
 (defun org-sql-user-push ()
+  "Pull current org-file state from the database.
+Calls `org-sql-pull-from-db'."
+  (interactive)
+  (message "Pulling data from Org SQL database")
+  (org-sql-pull-from-db))
+
+(defun org-sql-user-pull ()
   "Push current org-file state to the database.
 Calls `org-sql-push-to-db'."
   (interactive)

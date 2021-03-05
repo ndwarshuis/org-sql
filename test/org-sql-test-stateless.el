@@ -1102,7 +1102,7 @@ list then join the cdr of IN with newlines."
                                         ,(org-ts-to-unixtime ts1) "clock out note")))))))))
 
 (defun format-with (config type value)
-  (funcall (org-sql--compile-value-format-function config type) value))
+  (funcall (org-sql--compile-serializer config type) value))
 
 (defun format-with-sqlite (type value)
   (format-with '(sqlite) type value))
