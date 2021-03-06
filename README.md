@@ -377,7 +377,7 @@ headline-level values is planned for a future release.
 ## General design features
 
 - All foreign keys are set with `DELETE CASCADE`
-- All time values are stores as unixtime (integers in seconds)
+- All time values are store as unixtime (integers in seconds)
 - No triggers or indexes (outside of the primary keys) are created by `org-sql`
 
 ## Entity Relationship Diagrams
