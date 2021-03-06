@@ -2,13 +2,14 @@
 
 ## outlines
 
-Each row stores the hash and size for the contents of one org file (here called an `outline`). Note that if there are identical org files, only one `outline` will be stored in the database (as determined by the unique hash) and the paths shared the outline will be reflected in the `file_metadata` table.
+Each row stores the hash, size, and toplevel section for an org file (here called an `outline`). Note that if there are identical org files, only one `outline` will be stored in the database (as determined by the unique hash) and the paths shared the outline will be reflected in the `file_metadata` table.
 
 | Column | Description |
 |  -  |  -  |
 | outline_hash | hash (MD5) of this org outline |
 | outline_size | number of characters of the org outline |
 | outline_lines | number of lines in the org file |
+| outline_preamble | the content before the first headline |
 
 ## file_metadata
 
@@ -197,4 +198,4 @@ Each row stores one link.
 | link_text | text of this link that isn't part of the path |
 | link_type | type of this link (eg http, mu4e, file, etc) |
 
-Version: 2.0.0
+Version: 3.0.0

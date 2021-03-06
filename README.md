@@ -63,11 +63,15 @@ The following databases servers/versions are supported and tested:
 
 - PostgreSQL (13, 12, 11, 10, 9)
 - MariaDB (10.5, 10.4, 10.3, 10.2)
-- MySQL (8.0, 5.6)
+- MySQL (8.0)
 - SQL-Server (2019, 2017)
 
 Many versions besides these will likely work; these are simply those that are in
 the testing suite.
+
+MySQL 5.7 should also work for all functions except `org-sql-pull-from-db`,
+which will throw mysterious syntax errors because this function relies on
+recursive queries (which don't exist in 5.7).
 
 # Configuration
 
@@ -239,7 +243,7 @@ use case of creating a database and syncing org files to it.
 Run `org-sql-user-init`. In the case of SQLite, this will create a new database
 file. In all cases this will create the tables associated with `org-sql`.
 
-### Updating
+### Inserting data
 
 Run `org-sql-user-push`. This will synchronize the database with all files as
 indicated in `org-sql-files` by first checking if the file is in the database
@@ -270,6 +274,16 @@ Run `org-sql-user-clear-all`. This will clear all data but leave the schema.
 Run `org-sql-user-reset`. This will drop all tables associated with `org-sql`.
 In the case of SQLite, this will also delete the database file.
 
+### Pulling data out
+
+If you make changes in the database, run `org-sql-user-pull` to obtain the
+current database state. This will return a list where each member has the file
+path and its corresponding org-tree. Each org-tree can then be converted to a
+string using `org-ml-to-string` from the `org-ml` library.
+
+For now this will pull all the contents of the database. Fine-grained query
+control is planned for a future release.
+
 ### Debugging
 
 The interactive functions above will print a "success" message if the client
@@ -283,7 +297,6 @@ wrong.
 
 Additionally, the command `org-sql-dump-push-transaction` will print the
 transaction used by the `org-sql-push-to-db` and `org-sql-user-push` commands.
-
 
 ## Public API
 
@@ -301,9 +314,10 @@ database beyond the use cases covered by the above interactive functions:
 - Init/Teardown Operations
   - `org-sql-init-db`
   - `org-sql-reset-db`
-- Data-level operations
+- Data-level Operations
   - `org-sql-dump-table`
   - `org-sql-push-to-db`
+  - `org-sql-pull-from-db`
   - `org-sql-clear-db`
 - Other SQL Commands
   - `org-sql-send-sql`
@@ -318,21 +332,45 @@ future releases.
 
 ## Logbook variables
 
-This library uses the function `org-ml-headline-get-supercontents` from `org-ml`
-in order to determine which components of a headline belong to "the logbook."
-Knowing how this function works is not necessary to use `org-sql`, but the
-relevent point is that it takes a plist variable representing the logbook
-config, and this plist only has keys that correspond to `org-log-into-drawer`,
-`org-clock-into-drawer`, and `org-log-note-clock-out`. `org-sql` transparently
-understands these variables and their file-level and property-level equivalents
-where applicable, so logbooks will be parsed correctly assuming that their
-configuration matches the correspondingly scoped variables.
+The structure of the logbook (eg the the thing that holds clocks, notes, state
+changes, etc under a given headline) is determined by several variables.
+`org-sql` understands these three:
+- `org-log-into-drawer`
+- `org-clock-into-drawer`
+- `org-log-note-clock-out`
 
-While this should cover the vast array of use cases, `org-sql` does not support
-any other variables that may change the way the logbook is defined, including
-`org-log-state-notes-insert-after-drawers` and `org-log-note-headings`. Setting
-these to anything other than their defaults may break `org-sql`'s ability to
-properly parse logbooks (particulary the latter).
+These variables (may not be exhaustive) are **not** understood:
+- `org-log-state-notes-insert-after-drawers`
+- `org-log-note-headings`.
+
+The reason for this scope of support is due to `org-ml`, the library on which
+`org-sql` depends to parse org-mode syntax.
+
+### Inserting data
+
+When inserting data (`org-sql-push-to-db`), the three supported variables above
+will be used to determine what a valid logbook *should* look like. File-level
+(eg defined with the `#+PROPERTY` keyword) and headline-level (eg defined in a
+`PROPERTIES` drawer) values of these variables are also understood.
+
+This has two consequences:
+1) modifications to any unsupported variable that change the logbook may result
+   in an unrecognizeable logbook that will not be inserted into the proper
+   tables (most likely it will end up in the `headlines` table under the 
+   `contents` column)
+2) manual edits to the logbook that are out of sync with how it would normally
+   be produced using the given variables will result in a similar situation as
+   (1)
+   
+### Pulling data
+
+When pulling data (`org-sql-pull-from-db`), the three supported variables are
+used to reassemble the logbook data from the database into org syntax. Any
+unsupported variables will simply be ignored.
+
+Unlike `org-sql-push-to-db`, the pull mechanism corrently only considers the
+global value of the three supported variables. Support for file- and
+headline-level values is planned for a future release.
 
 # Database Layout
 
