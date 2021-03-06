@@ -70,8 +70,8 @@ list then join the cdr of IN with newlines."
                          (round))
                    ,(file-attribute-modes testing-attributes))))
 
-(defconst testing-outlines
-  `(outlines (,testing-hash ,testing-size ,testing-lines)))
+(defconst testing-outlines*
+  `(,testing-hash ,testing-size ,testing-lines))
 
 (defconst init-ids
   (list :headline-id 1
@@ -469,7 +469,7 @@ list then join the cdr of IN with newlines."
   (describe "headlines"
     (it "single"
       (expect-sql "* headline"
-                  `(,testing-outlines
+                  `((outlines (,@testing-outlines* nil))
                     ,testing-file_metadata
                     (headlines (1 ,testing-hash "headline" 1 0 nil nil nil nil nil 0 0 nil))
                     (headline_closures (1 1 0)))))
@@ -477,7 +477,7 @@ list then join the cdr of IN with newlines."
     (it "two"
       (expect-sql (list "* headline"
                         "* another headline")
-                  `(,testing-outlines
+                  `((outlines (,@testing-outlines* nil))
                     ,testing-file_metadata
                     (headlines (2 ,testing-hash "another headline" 1 1 nil nil nil nil nil 0 0 nil)
                                (1 ,testing-hash "headline" 1 0 nil nil nil nil nil 0 0 nil))
@@ -485,12 +485,13 @@ list then join the cdr of IN with newlines."
                                        (1 1 0)))))
 
     (it "fancy"
-      (expect-sql (list "* TODO [#A] COMMENT another headline [1/2]"
+      (expect-sql (list "stuff at the top"
+                        "* TODO [#A] COMMENT another headline [1/2]"
                         ":PROPERTIES:"
                         ":Effort: 0:30"
                         ":END:"
                         "this /should/ appear")
-                  `(,testing-outlines
+                  `((outlines (,@testing-outlines* "stuff at the top\n"))
                     ,testing-file_metadata
                     (headlines
                      (1 ,testing-hash "another headline [1/2]" 1 0 "TODO" 30 "A" fraction 0.5
@@ -505,21 +506,21 @@ list then join the cdr of IN with newlines."
                            ((org-sql-exclude-headline-predicate
                              (lambda (h)
                                (= 1 (org-ml-get-property :level h)))))
-                           `(,testing-outlines
+                           `((outlines (,@testing-outlines* nil))
                              ,testing-file_metadata)
 
                            "nested (predicate applied to child)"
                            ((org-sql-exclude-headline-predicate
                              (lambda (h)
                                (= 2 (org-ml-get-property :level h)))))
-                           `(,testing-outlines
+                           `((outlines (,@testing-outlines* nil))
                              ,testing-file_metadata
                              (headlines (1 ,testing-hash "headline" 1 0 nil nil nil nil nil 0 0 nil))
                              (headline_closures (1 1 0)))
                            
                            "nested (no predicate)"
                            nil
-                           `(,testing-outlines
+                           `((outlines (,@testing-outlines* nil))
                              ,testing-file_metadata
                              (headlines (2 ,testing-hash "nested headline" 2 0 nil nil nil nil nil 0 0 nil)
                                         (1 ,testing-hash "headline" 1 0 nil nil nil nil nil 0 0 nil))
@@ -534,7 +535,7 @@ list then join the cdr of IN with newlines."
                         "** d"
                         "* e"
                         "** f")
-                  `(,testing-outlines
+                  `((outlines (,@testing-outlines* nil))
                     ,testing-file_metadata
                     (headlines (6 ,testing-hash "f" 2 0 nil nil nil nil nil 0 0 nil)
                                (5 ,testing-hash "e" 1 2 nil nil nil nil nil 0 0 nil)
@@ -554,7 +555,7 @@ list then join the cdr of IN with newlines."
 
     (it "archived"
       (expect-sql "* headline :ARCHIVE:"
-                  `(,testing-outlines
+                  `((outlines (,@testing-outlines* nil))
                     ,testing-file_metadata
                     (headlines (1 ,testing-hash "headline" 1 0 nil nil nil nil nil 1 0 nil))
                     (headline_closures (1 1 0))))))
@@ -717,12 +718,12 @@ list then join the cdr of IN with newlines."
                                          "file:///the/glass/prison")
                            "multiple (included)"
                            nil
-                           `((links (2 1 "/the/glass/prison" "" "file")
-                                    (1 1 "//example.org" "" "https")))
+                           `((links (2 1 "/the/glass/prison" nil "file")
+                                    (1 1 "//example.org" nil "https")))
 
                            "multiple (exclude some)"
                            ((org-sql-excluded-link-types '("file")))
-                           `((links (1 1 "//example.org" "" "https")))
+                           `((links (1 1 "//example.org" nil "https")))
 
                            "multiple (exclude all)"
                            ((org-sql-excluded-link-types 'all))
@@ -732,7 +733,7 @@ list then join the cdr of IN with newlines."
       (expect-sql-tbls (links) (list "* parent"
                                      "** child"
                                      "https://example.com")
-                       `((links (1 2 "//example.com" "" "https")))))
+                       `((links (1 2 "//example.com" nil "https")))))
     
     (it "with description"
       (expect-sql-tbls (links) (list "* parent"
@@ -1101,7 +1102,7 @@ list then join the cdr of IN with newlines."
                                         ,(org-ts-to-unixtime ts1) "clock out note")))))))))
 
 (defun format-with (config type value)
-  (funcall (org-sql--compile-value-format-function config type) value))
+  (funcall (org-sql--compile-serializer config type) value))
 
 (defun format-with-sqlite (type value)
   (format-with '(sqlite) type value))
@@ -1186,14 +1187,14 @@ list then join the cdr of IN with newlines."
     
     (it "newlines"
       (expect-formatter 'text "foo\nbar"
-        :mysql "'foo\\\\nbar'"
-        :postgres "'foo'||chr(10)||'bar'"
-        :sqlite "'foo'||char(10)||'bar'"
-        :sqlserver "'foo+Char(10)+bar'"))
+        :mysql "'foo\nbar'"
+        :postgres "'foo\nbar'"
+        :sqlite "'foo\nbar'"
+        :sqlserver "'foo\nbar'"))
 
     (it "quotes"
       (expect-formatter 'text "'foo'"
-        :mysql "'\\\\'foo\\\\''"
+        :mysql "'''foo'''"
         :postgres "'''foo'''"
         :sqlite "'''foo'''"
         :sqlserver "'''foo'''"))))
@@ -1254,8 +1255,8 @@ list then join the cdr of IN with newlines."
         (expect
          (org-sql--format-bulk-inserts config test-insert-alist)
          :to-equal
-         (concat "INSERT INTO table-foo (bool,enum,int,text) VALUES (0,'bim',0,'xxx'),(1,'bam',1,'yyy');"
-                 "INSERT INTO table-bar (intone,inttwo) VALUES (0,1),(2,3);")))))
+         (concat "INSERT INTO table-foo (bool,enum,int,text) SELECT * FROM (VALUES (0,'bim',0,'xxx'),(1,'bam',1,'yyy')) d (bool,enum,int,text);"
+                 "INSERT INTO table-bar (intone,inttwo) SELECT * FROM (VALUES (0,1),(2,3)) d (intone,inttwo);")))))
 
   ;; TODO add bulk deletes...eventually
 
@@ -1349,7 +1350,7 @@ list then join the cdr of IN with newlines."
         (expect
          (org-sql--format-sql-transaction config statements)
          :to-equal
-         "BEGIN;INSERT INTO foo (bar) values (1);COMMIT;")))
+         "SET sql_mode = NO_BACKSLASH_ESCAPES;BEGIN;INSERT INTO foo (bar) values (1);COMMIT;")))
 
     (it "sqlserver"
       (let ((config '(sqlserver))

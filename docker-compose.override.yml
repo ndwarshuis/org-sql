@@ -103,16 +103,16 @@ services:
     ports:
       - 60280:3306
 
-  mysql57:
-    extends:
-      service: mariadb-latest
-    build:
-      context: ./test/docker/mariadb
-      args:
-        IMAGE: mysql:5.7.33
-    container_name: org-sql-mysql-57
-    ports:
-      - 60257:3306
+  # mysql57:
+  #   extends:
+  #     service: mariadb-latest
+  #   build:
+  #     context: ./test/docker/mariadb
+  #     args:
+  #       IMAGE: mysql:5.7.33
+  #   container_name: org-sql-mysql-57
+  #   ports:
+  #     - 60257:3306
 
   ## sql server
 

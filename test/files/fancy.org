@@ -1,29 +1,35 @@
-#+FILETAGS: one two three
-#+PROPERTY: p1 v1 v2 v3
+#+filetags: one two three
+#+property: p1 v1 v2 v3
 
 * plain
 * archived                                                          :ARCHIVE:
 * TODO parent
-** DONE [#B] COMMENT child                                                 :sometag:
+** DONE COMMENT child                                               :sometag:
 CLOSED: [2020-09-15 Tue 17:59]
 :PROPERTIES:
 :Effort:   1:00
-:thing: thingy
+:thing:    thingy
 :END:
 :LOGBOOK:
-- State "DONE"       from "TODO"       [2020-09-15 Tue 17:57]
-CLOCK: [2020-09-15 Tue 17:57]--[2020-09-15 Tue 17:57] =>  0:00
+- State "DONE"       from "TODO"       [2020-09-15 Tue 18:05]
+CLOCK: [2020-09-15 Tue 17:57]--[2020-09-15 Tue 18:00] =>  0:03
 - this is a clock note
 :END:
-** TODO other child
-SCHEDULED: <2020-09-18 Fri> DEADLINE: <2020-09-22 Tue +2d -1m>
+[[file:/dev/null][NULL]]
+** TODO [#B] other child
+DEADLINE: <2020-09-22 Tue +2d -1m> SCHEDULED: <2020-09-18 Fri>
 :LOGBOOK:
-- Rescheduled from "[2020-09-17 Thu]" on [2020-09-15 Tue 17:58]
-- Not scheduled, was "[2020-09-19 Sat]" on [2020-09-15 Tue 17:58]
-- Removed deadline, was "[2020-09-22 Tue]" on [2020-09-15 Tue 17:58]
-- New deadline from "[2020-09-17 Thu]" on [2020-09-15 Tue 17:58]
+- Rescheduled from "[2020-09-17 Thu]" on [2020-09-15 Tue 18:00]
+- Not scheduled, was "[2020-09-19 Sat]" on [2020-09-15 Tue 17:55]
+- Removed deadline, was "[2020-09-22 Tue]" on [2020-09-15 Tue 17:50]
+- New deadline from "[2020-09-17 Thu]" on [2020-09-15 Tue 17:45]
 :END:
 https://downloadmoreram.gov
 <2020-09-15 Tue>
-hopefully this hits all the relevent code paths :)
+hopefully this hits all the relevant code paths :)
 
+make this line super loooooooooooooooooooooooooooooooooooooooooooooooooog so that sqlcmd will be confused (since it's default settings don't allow columns more than 255 chars or something absurd like that)
+
+here's "some|"
+weird character\\s, {for}
+	good \n\t measure.
