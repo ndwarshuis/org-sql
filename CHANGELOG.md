@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.0.1
+
+- fix bug timestamp bug when using org-mode 9.4
+
 ## 3.0.0
 
 - new features

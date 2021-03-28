@@ -198,4 +198,4 @@ Each row stores one link.
 | link_text | text of this link that isn't part of the path |
 | link_type | type of this link (eg http, mu4e, file, etc) |
 
-Version: 3.0.0
+Version: 3.0.1
