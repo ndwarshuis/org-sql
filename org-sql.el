@@ -1,6 +1,6 @@
 ;;; org-sql.el --- Org-Mode SQL converter -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2020  Nathan Dwarshuis
+;; Copyright (C) 2021  Nathan Dwarshuis
 
 ;; Author: Nathan Dwarshuis <natedwarshuis@gmail.com>
 ;; Keywords: org-mode, data
