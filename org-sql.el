@@ -6,7 +6,7 @@
 ;; Keywords: org-mode, data
 ;; Homepage: https://github.com/ndwarshuis/org-sql
 ;; Package-Requires: ((emacs "27.1") (s "1.12") (f "0.20.0") (dash "2.17") (org-ml "5.6.1"))
-;; Version: 3.0.0
+;; Version: 3.0.1
 
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -1381,6 +1381,21 @@ list of headline nodes."
 
 ;; org-element tree -> logbook entry (see `org-sql--to-entry')
 
+;; Define these myself because the RE's in org-mode itself have lots of capture
+;; groups and its easier here without them (and error prone if I try to remove
+;; them). Also, the syntax for timestamps shouldn't be changing anytime soon...
+(defconst org-sql--ts-inner-re
+  "[[:digit:]]\\{4\\}-[[:digit:]]\\{2\\}-[[:digit:]]\\{2\\}\\(?: .*?\\)?"
+  "Regular expression to match inner timestamp structure.")
+
+(defconst org-sql--ts-re
+  (format "<%s>" org-sql--ts-inner-re)
+  "Regular expression to match active timestamps.")
+
+(defconst org-sql--ia-ts-re
+  (format "\\[%s\\]" org-sql--ts-inner-re)
+  "Regular expression to match inactive timestamps.")
+
 (defun org-sql--build-log-note-regexp-alist (todo-keywords)
   "Return a list of regexps that match placeholders in `org-log-note-headings'.
 Each member of list will be like (PLACEHOLDER . REGEXP).
@@ -1389,15 +1404,14 @@ be used when evaluating the regexp for the \"%S\" and \"%s\" matchers."
   (cl-flet
       ((format-capture
         (regexp)
-        (->> (s-replace-all '(("\\(" . "") ("\\)" . "")) regexp)
-             (format "\\(%s\\)"))))
+        (format "\\(%s\\)" regexp)))
     (let* ((ts-or-todo-regexp (->> (-map #'regexp-quote todo-keywords)
-                                   (cons org-ts-regexp-inactive)
+                                   (cons org-sql--ia-ts-re)
                                    (s-join "\\|")
                                    (format-capture)
                                    (format "\"%s\"")))
-           (ts-regexp (format-capture org-ts-regexp))
-           (ts-ia-regexp (format-capture org-ts-regexp-inactive))
+           (ts-regexp (format-capture org-sql--ts-re))
+           (ts-ia-regexp (format-capture org-sql--ia-ts-re))
            (keys (-map #'cdr org-sql--log-note-keys)))
       ;; TODO the user/user-full variables have nothing stopping them from
       ;; constraining spaces, in which case this will fail
