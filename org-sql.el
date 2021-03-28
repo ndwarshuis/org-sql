@@ -1381,6 +1381,18 @@ list of headline nodes."
 
 ;; org-element tree -> logbook entry (see `org-sql--to-entry')
 
+(defconst org-sql--ts-inner-re
+  "[[:digit:]]\\{4\\}-[[:digit:]]\\{2\\}-[[:digit:]]\\{2\\}\\(?: .*?\\)?"
+  "Regular expression to match inner timestamp structure.")
+
+(defconst org-sql--ts-re
+  (format "<%s>" org-sql--ts-inner-re)
+  "Regular expression to match active timestamps.")
+
+(defconst org-sql--ia-ts-re
+  (format "\\[%s\\]" org-sql--ts-inner-re)
+  "Regular expression to match inactive timestamps.")
+
 (defun org-sql--build-log-note-regexp-alist (todo-keywords)
   "Return a list of regexps that match placeholders in `org-log-note-headings'.
 Each member of list will be like (PLACEHOLDER . REGEXP).
@@ -1389,15 +1401,14 @@ be used when evaluating the regexp for the \"%S\" and \"%s\" matchers."
   (cl-flet
       ((format-capture
         (regexp)
-        (->> (s-replace-all '(("\\(" . "") ("\\)" . "")) regexp)
-             (format "\\(%s\\)"))))
+        (format "\\(%s\\)" regexp)))
     (let* ((ts-or-todo-regexp (->> (-map #'regexp-quote todo-keywords)
-                                   (cons org-ts-regexp-inactive)
+                                   (cons org-sql--ia-ts-re)
                                    (s-join "\\|")
                                    (format-capture)
                                    (format "\"%s\"")))
-           (ts-regexp (format-capture org-ts-regexp))
-           (ts-ia-regexp (format-capture org-ts-regexp-inactive))
+           (ts-regexp (format-capture org-sql--ts-re))
+           (ts-ia-regexp (format-capture org-sql--ia-ts-re))
            (keys (-map #'cdr org-sql--log-note-keys)))
       ;; TODO the user/user-full variables have nothing stopping them from
       ;; constraining spaces, in which case this will fail
