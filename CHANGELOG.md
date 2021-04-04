@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.0.2
+
+- fix typos in `org-sql-user-push`/`org-sql-user-pull`
+
 ## 3.0.1
 
 - fix bug timestamp bug when using org-mode 9.4
