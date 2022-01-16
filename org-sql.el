@@ -6,7 +6,7 @@
 ;; Keywords: org-mode, data
 ;; Homepage: https://github.com/ndwarshuis/org-sql
 ;; Package-Requires: ((emacs "27.1") (s "1.12") (f "0.20.0") (dash "2.17") (org-ml "5.6.1"))
-;; Version: 3.0.2
+;; Version: 3.0.3
 
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -3675,6 +3675,7 @@ Permissions required: SELECT."
               (preambles
                (->> (org-sql--parse-output-to-list org-sql-db-config ol-out)
                     (--map (--zip-with (funcall it other) ol-deserializers it))
+                    (-filter #'cadr)
                     (--map (cons (car it) (org-ml-from-string 'section (cadr it)))))))
           ;; I could pass the filepaths through a deserializer but these should
           ;; be good as-is
