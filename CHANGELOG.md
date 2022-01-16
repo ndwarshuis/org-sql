@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.0.3
+
+- fix error when using pull for files with no preamble
+
 ## 3.0.2
 
 - fix typos in `org-sql-user-push`/`org-sql-user-pull`
