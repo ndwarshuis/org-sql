@@ -65,27 +65,28 @@
 ;;; CONSTANTS
 ;;;
 
-(defconst org-sql--log-note-keys
-  '((:user .  "%u")
-    (:user-full . "%U")
-    (:ts . "%t")
-    (:ts-active . "%T")
-    (:short-ts . "%d")
-    (:short-ts-active . "%D")
-    (:old-state . "%S")
-    (:new-state . "%s"))
-  "Keywords for placeholders used in `org-log-note-headings'.")
+(eval-and-compile
+  (defconst org-sql--log-note-keys
+    '((:user .  "%u")
+      (:user-full . "%U")
+      (:ts . "%t")
+      (:ts-active . "%T")
+      (:short-ts . "%d")
+      (:short-ts-active . "%D")
+      (:old-state . "%S")
+      (:new-state . "%s"))
+    "Keywords for placeholders used in `org-log-note-headings'.")
 
-(defconst org-sql--log-note-replacements
-  (->> (-map #'cdr org-sql--log-note-keys) (--map (cons it it)))
-  "A list to simplify placeholders in `org-log-note-headings'.
+  (defconst org-sql--log-note-replacements
+    (->> (-map #'cdr org-sql--log-note-keys) (--map (cons it it)))
+    "A list to simplify placeholders in `org-log-note-headings'.
 This is only used in combination with `org-replace-escapes'")
 
-(defconst org-sql--entry-keys
-  (append
-   (-map #'car org-sql--log-note-keys)
-   '(:outline-hash :note-text :header-text :old-ts :new-ts))
-  "Valid keys that may be used in logbook entry lists.")
+  (defconst org-sql--entry-keys
+    (append
+     (-map #'car org-sql--log-note-keys)
+     '(:outline-hash :note-text :header-text :old-ts :new-ts))
+    "Valid keys that may be used in logbook entry lists."))
 
 (defconst org-sql--ignored-properties-default
   '("ARCHIVE_ITAGS" "Effort")
@@ -1076,7 +1077,7 @@ database to be used) is invalid."
 
 ;; ensure table-alist functions are given the right input
 
-(eval-when-compile
+(eval-and-compile
   (defun org-sql--table-get-column-names (tbl-name)
     "Return a list of columns for TBL-NAME.
 The columns are retrieved from `org-sql--table-alist'."
