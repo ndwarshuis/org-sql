@@ -9,7 +9,7 @@ jobs:
         emacs_version:
           - '27.1'
           - '27.2'
-          - 'snapshot'
+          - '28.1'
         include:
           - emacs_version: 'snapshot'
             allow_failure: true
