@@ -453,11 +453,6 @@ is set to the latest version of the container to pull. Note that MariaDB and
 MySQL are assumed to share the exact same container configuration, and thus they
 share the same Dockerfile.
 
-The `docker-compose` configuration is split between `docker-compose.yml` and
-`docker-compose.override.yml`, with the latter defining the ports (every
-container is bound to a separate port loosely matching its version) and `IMAGE`
-and the former defining everything else.
-
 ## Running tests
 
 Tests are divided into stateless (pure functions, don't rely on external
