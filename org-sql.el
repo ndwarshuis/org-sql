@@ -6,7 +6,7 @@
 ;; Keywords: org-mode, data
 ;; Homepage: https://github.com/ndwarshuis/org-sql
 ;; Package-Requires: ((emacs "27.1") (s "1.12") (f "0.20.0") (dash "2.17") (org-ml "5.6.1"))
-;; Version: 3.0.3
+;; Version: 3.0.4
 
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -65,27 +65,28 @@
 ;;; CONSTANTS
 ;;;
 
-(defconst org-sql--log-note-keys
-  '((:user .  "%u")
-    (:user-full . "%U")
-    (:ts . "%t")
-    (:ts-active . "%T")
-    (:short-ts . "%d")
-    (:short-ts-active . "%D")
-    (:old-state . "%S")
-    (:new-state . "%s"))
-  "Keywords for placeholders used in `org-log-note-headings'.")
+(eval-and-compile
+  (defconst org-sql--log-note-keys
+    '((:user .  "%u")
+      (:user-full . "%U")
+      (:ts . "%t")
+      (:ts-active . "%T")
+      (:short-ts . "%d")
+      (:short-ts-active . "%D")
+      (:old-state . "%S")
+      (:new-state . "%s"))
+    "Keywords for placeholders used in `org-log-note-headings'.")
 
-(defconst org-sql--log-note-replacements
-  (->> (-map #'cdr org-sql--log-note-keys) (--map (cons it it)))
-  "A list to simplify placeholders in `org-log-note-headings'.
+  (defconst org-sql--log-note-replacements
+    (->> (-map #'cdr org-sql--log-note-keys) (--map (cons it it)))
+    "A list to simplify placeholders in `org-log-note-headings'.
 This is only used in combination with `org-replace-escapes'")
 
-(defconst org-sql--entry-keys
-  (append
-   (-map #'car org-sql--log-note-keys)
-   '(:outline-hash :note-text :header-text :old-ts :new-ts))
-  "Valid keys that may be used in logbook entry lists.")
+  (defconst org-sql--entry-keys
+    (append
+     (-map #'car org-sql--log-note-keys)
+     '(:outline-hash :note-text :header-text :old-ts :new-ts))
+    "Valid keys that may be used in logbook entry lists."))
 
 (defconst org-sql--ignored-properties-default
   '("ARCHIVE_ITAGS" "Effort")
@@ -1076,7 +1077,7 @@ database to be used) is invalid."
 
 ;; ensure table-alist functions are given the right input
 
-(eval-when-compile
+(eval-and-compile
   (defun org-sql--table-get-column-names (tbl-name)
     "Return a list of columns for TBL-NAME.
 The columns are retrieved from `org-sql--table-alist'."
@@ -1449,7 +1450,7 @@ capture in REGEXP."
         (org-replace-escapes heading org-sql--log-note-replacements))
        (replace-escapes
         (heading replace-alist)
-        (-> (s-replace-regexp "\s+" " " heading)
+        (-> (replace-regexp-in-string "\s+" " " heading)
             (org-replace-escapes replace-alist)))
        (match-keys
         (heading)
@@ -2585,10 +2586,9 @@ transaction. CONFIG is a list like `org-sql-db-config'."
   "Convert ROW to a headline node.
 ROW is a deserialized list as produced from executing the SQL
 query given by `org-sql--format-pull-query'."
-  (-let* (((ipath file-path headline-id headline-text keyword level effort
-                  priority is-archived is-commented content tags pkeys
-                  pvals scheduled deadline closed entries clock-starts
-                  clock-ends clock-notes)
+  (-let* (((_ _ _ headline-text keyword level effort priority is-archived
+              is-commented content tags pkeys pvals scheduled deadline closed
+              entries clock-starts clock-ends clock-notes)
            row)
           (effort-prop (-some->> effort
                          (org-duration-from-minutes)

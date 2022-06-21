@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.0.4
+
+- fix compiler errors and warnings
+- fix typo in cask file preventing build from properly testing
+
 ## 3.0.3
 
 - fix error when using pull for files with no preamble

@@ -653,6 +653,7 @@
       (version port &optional alt-title key-vals)
       (->> (list :database "org_sql"
                  :server (format "tcp:localhost,%s" port)
+                 :args '("-C") ;; trust server cert
                  :username "org_sql"
                  :password "org_sql333###")
            (append key-vals)
