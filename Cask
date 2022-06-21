@@ -2,7 +2,7 @@
 (source melpa)
 
 (package-file "org-sql.el")
-(files ".el")
+(files "*.el")
 
 (development
  (depends-on "org-ml")
