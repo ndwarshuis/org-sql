@@ -1450,7 +1450,7 @@ capture in REGEXP."
         (org-replace-escapes heading org-sql--log-note-replacements))
        (replace-escapes
         (heading replace-alist)
-        (-> (s-replace-regexp "\s+" " " heading)
+        (-> (replace-regexp-in-string "\s+" " " heading)
             (org-replace-escapes replace-alist)))
        (match-keys
         (heading)
@@ -2586,10 +2586,9 @@ transaction. CONFIG is a list like `org-sql-db-config'."
   "Convert ROW to a headline node.
 ROW is a deserialized list as produced from executing the SQL
 query given by `org-sql--format-pull-query'."
-  (-let* (((ipath file-path headline-id headline-text keyword level effort
-                  priority is-archived is-commented content tags pkeys
-                  pvals scheduled deadline closed entries clock-starts
-                  clock-ends clock-notes)
+  (-let* (((_ _ _ headline-text keyword level effort priority is-archived
+              is-commented content tags pkeys pvals scheduled deadline closed
+              entries clock-starts clock-ends clock-notes)
            row)
           (effort-prop (-some->> effort
                          (org-duration-from-minutes)
