@@ -400,8 +400,8 @@
            '(1 4 integerp integerp "this is a clock note")))
        (it "check links table"
          (expect-db-has-table-contents 'links
-           '(1 4 "/dev/null" "NULL" "file")
-           '(2 5 "//downloadmoreram.gov" nil "https"))))
+           '(1 4 "/dev/null" "NULL" nil "file")
+           '(2 5 "//downloadmoreram.gov" nil nil "https"))))
                                        
 
        ;; (expect-db-has-table-contents 'file_metadata

@@ -549,6 +549,8 @@ to store them. This is in addition to any properties specifified by
                         :constraints (notnull))
             (:link_text :desc "text of this link that isn't part of the path"
                         :type text)
+            (:link_abbrev :desc "abbreviation for this link"
+                          :type text)
             (:link_type :desc "type of this link (eg http, mu4e, file, etc)"
                         :properties (:type)
                         :type text
@@ -1380,6 +1382,17 @@ list of headline nodes."
   (let ((children (if preamble (cons preamble headlines) headlines)))
     `(org-data nil ,@children)))
 
+(defun org-sql--link-get-abbrev (link)
+  "Return the abbreviation for LINK node.
+
+This depends on the value of `org-link-abbrev-alist' and will do
+nothing if this variable is nil."
+  (when org-link-abbrev-alist
+    (let ((fullpath (->> (org-ml-to-trimmed-string link)
+                         (s-match "\\[\\[\\([^][]+\\)\\]\\(\\[[^][]+\\]\\)?\\]")
+                         (nth 1))))
+      (car (rassoc fullpath org-link-abbrev-alist)))))
+
 ;; org-element tree -> logbook entry (see `org-sql--to-entry')
 
 ;; Define these myself because the RE's in org-mode itself have lots of capture
@@ -1724,6 +1737,7 @@ CONTENTS is a list corresponding to that returned by
                    :link_id (org-sql--acc-get :link-id acc)
                    :headline_id (org-sql--acc-get :headline-id acc)
                    :link_path (org-ml-get-property :path link)
+                   :link_abbrev (org-sql--link-get-abbrev link)
                    :link_text (-some->> (org-ml-get-children link)
                                 (-map #'org-ml-to-string)
                                 (s-join ""))

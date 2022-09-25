@@ -718,12 +718,12 @@ list then join the cdr of IN with newlines."
                                          "file:///the/glass/prison")
                            "multiple (included)"
                            nil
-                           `((links (2 1 "/the/glass/prison" nil "file")
-                                    (1 1 "//example.org" nil "https")))
+                           `((links (2 1 "/the/glass/prison" nil nil "file")
+                                    (1 1 "//example.org" nil nil "https")))
 
                            "multiple (exclude some)"
                            ((org-sql-excluded-link-types '("file")))
-                           `((links (1 1 "//example.org" nil "https")))
+                           `((links (1 1 "//example.org" nil nil "https")))
 
                            "multiple (exclude all)"
                            ((org-sql-excluded-link-types 'all))
@@ -733,12 +733,18 @@ list then join the cdr of IN with newlines."
       (expect-sql-tbls (links) (list "* parent"
                                      "** child"
                                      "https://example.com")
-                       `((links (1 2 "//example.com" nil "https")))))
+                       `((links (1 2 "//example.com" nil nil "https")))))
     
     (it "with description"
       (expect-sql-tbls (links) (list "* parent"
                                      "[[https://example.org][relevant]]")
-                       `((links (1 1 "//example.org" "relevant" "https"))))))
+                       `((links (1 1 "//example.org" "relevant" nil "https")))))
+
+    (it "with abbrev"
+      (let ((org-link-abbrev-alist '(("love" . "https://ra.ge"))))
+        (expect-sql-tbls (links) (list "* parent"
+                                       "[[love][wins]]")
+                         `((links (1 1 "//ra.ge" "wins" "love" "https")))))))
 
   (describe "properties"
     (it "single"
