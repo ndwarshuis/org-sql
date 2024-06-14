@@ -1914,6 +1914,26 @@ OUTLINE-CONFIG is a list given by `org-sql--to-outline-config'."
            (-uniq)
            (-reduce-from #'add-tag acc)))))
 
+(defun org-sql--insert-alist-add-title (acc outline-config)
+  "Add row for each file tag in file to ACC.
+OUTLINE-CONFIG is a list given by `org-sql--to-outline-config'."
+  (-let (((&plist :outline-hash :top-section) outline-config))
+    (cl-flet
+        ((add-property
+          (acc keyword)
+          (-let ((value (org-ml-get-property :value keyword))
+                 (key (org-ml-get-property :key keyword)))
+            (--> (org-sql--insert-alist-add acc properties
+                   :outline_hash outline-hash
+                   :property_id (org-sql--acc-get :property-id acc)
+                   :key_text key
+                   :val_text value)
+                 (org-sql--acc-incr :property-id it)))))
+      (->> (org-ml-get-children top-section)
+           (--filter (org-ml-is-type 'keyword it))
+           (--filter (equal (org-ml-get-property :key it) "TITLE"))
+           (-reduce-from #'add-property acc)))))
+
 (defun org-sql--insert-alist-add-file-properties (acc outline-config)
   "Add row for each file property in file to ACC.
 OUTLINE-CONFIG is a list given by `org-sql--to-outline-config'."
@@ -1976,6 +1996,7 @@ OUTLINE-CONFIG is a list given by `org-sql--to-outline-config'."
       (org-sql--insert-alist-add-outline-hash outline-config)
       (org-sql--insert-alist-add-file-metadata outline-config)
       (org-sql--insert-alist-add-file-properties outline-config)
+      (org-sql--insert-alist-add-title outline-config)
       (org-sql--insert-alist-add-file-tags outline-config)
       (org-sql--insert-alist-add-headlines outline-config)))
 
