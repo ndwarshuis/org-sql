@@ -2784,7 +2784,6 @@ MySQL configs will additionally substitute tabs with
   "Return a SQL query that yields all headlines in the database.
 CONFIG is a list like `org-sql-db-config'."
   (let* ((hl-tbl (org-sql--format-table-name config "headlines"))
-         (ol-tbl (org-sql--format-table-name config "outlines"))
          (recursive-paths (org-sql--case-mode config
                             ((mysql postgres sqlite) "RECURSIVE paths")
                             (sqlserver "paths")))
@@ -2845,7 +2844,7 @@ CONFIG is a list like `org-sql-db-config'."
                  "ORDER BY h.outline_hash, p.ipath;")
                  ;; "LIMIT 50;")
                (s-join " "))))
-    (format fmt cte columns hl-tbl ol-tbl)))
+    (format fmt cte columns hl-tbl)))
 
 (defun org-sql--compile-deserializer* (config type)
   "Return a function that deserializes TYPE.
