@@ -1775,8 +1775,8 @@ CONTENTS is a list corresponding to that returned by
         (org-sql--insert-alist-add-timestamp-repeater it timestamp)
         (org-sql--insert-alist-add-timestamp-warning it timestamp)))))
 
-(defun org-sql--insert-alist-add-headline-timestamps (acc contents)
-  "Add row for each timestamp in the current headline to ACC.
+(defun org-sql--insert-alist-add-headline-timestamps-from-contents (acc contents)
+  "Add row for each timestamp in the current headline's contents to ACC.
 CONTENTS is a list corresponding to that returned by
 `org-ml-headline-get-supercontents'."
   (if (eq org-sql-excluded-contents-timestamp-types 'all) acc
@@ -1789,6 +1789,16 @@ CONTENTS is a list corresponding to that returned by
           (--reduce-from (->> (org-sql--insert-alist-add-timestamp acc it)
                               (org-sql--acc-incr :timestamp-id))
                          acc timestamps))
+      acc)))
+
+(defun org-sql--insert-alist-add-headline-timestamps-from-title (acc title)
+  "Add row for each timestamp in the current headline's title to ACC.
+TITLE is pre-parsed to contain any timestamps from headline title."
+  (if (eq org-sql-excluded-contents-timestamp-types 'all) acc
+    (-if-let (timestamps (--filter (org-ml-is-type 'timestamp it) title))
+        (--reduce-from (->> (org-sql--insert-alist-add-timestamp acc it)
+                            (org-sql--acc-incr :timestamp-id))
+                       acc timestamps)
       acc)))
 
 (defun org-sql--insert-alist-add-headline-planning (acc hstate)
@@ -1848,7 +1858,8 @@ INDEX is the order of the headline relative to its neighbors.
                                   (`(,_ 0) '(nil fraction))
                                   (`(,n ,d) `(,(/ (* 1.0 n) d) fraction))
                                   (`(,p) `(,p percent))))
-            (contents (org-ml-supercontents-get-contents supercontents)))
+            (contents (org-ml-supercontents-get-contents supercontents))
+            (title (org-ml-get-property :title headline)))
       (--> (org-sql--insert-alist-add acc headlines
              :headline_id (org-sql--acc-get :headline-id acc)
              :outline_hash outline-hash
@@ -1869,7 +1880,8 @@ INDEX is the order of the headline relative to its neighbors.
         (org-sql--insert-alist-add-headline-planning it hstate)
         (org-sql--insert-alist-add-headline-tags it hstate)
         (org-sql--insert-alist-add-headline-properties it hstate)
-        (org-sql--insert-alist-add-headline-timestamps it contents)
+        (org-sql--insert-alist-add-headline-timestamps-from-contents it contents)
+        (org-sql--insert-alist-add-headline-timestamps-from-title it title)
         (org-sql--insert-alist-add-headline-links it contents)
         (org-sql--insert-alist-add-headline-logbook-clocks it hstate logbook)
         (org-sql--insert-alist-add-headline-logbook-items it hstate logbook)
