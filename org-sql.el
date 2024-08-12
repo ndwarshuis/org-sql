@@ -324,7 +324,7 @@ to store them. This is in addition to any properties specifified by
                      :parent-keys (:timestamp_id)
                      :on-delete cascade
                      :cardinality one-or-none-to-one)))
-          
+
           (timestamp_repeaters
            (desc "Each row stores the repeater component for a timestamp."
                  "If the repeater also has a habit appended to it, this will"
@@ -447,7 +447,7 @@ to store them. This is in addition to any properties specifified by
                      :parent-keys (:headline_id)
                      :on-delete cascade
                      :cardinality many-or-none-to-one)))
-          
+
           (clocks
            (desc "Each row stores one clock entry.")
            (columns
@@ -875,7 +875,7 @@ This works analogously to `org-sql-post-init-hooks'."
 
 (defcustom org-sql-excluded-properties nil
   "List of properties to exclude from the database.
-To exclude all set to 'all' instead of a list of strings."
+To exclude all set to `all' instead of a list of strings."
   :type '(choice
           (const "Ignore All" all)
           (repeat :tag "List of properties to ignore" string))
@@ -888,7 +888,7 @@ To exclude all set to 'all' instead of a list of strings."
 
 (defcustom org-sql-excluded-tags nil
   "List of tags to exclude when building the tags table.
-To exclude all set to 'all' instead of a list of strings."
+To exclude all set to `all' instead of a list of strings."
   :type '(choice
           (const "Ignore All" all)
           (repeat :tag "List of tags to ignore" string))
@@ -899,7 +899,7 @@ To exclude all set to 'all' instead of a list of strings."
 Each member should be a string and one of `org-link-types' or
 \"file\", \"coderef\", \"custom-id\", \"fuzzy\", or \"id\". See org-element
 API documentation or`org-element-link-parser' for details.
-To exclude all set to 'all' instead of a list of strings."
+To exclude all set to `all' instead of a list of strings."
   :type '(choice
           (set :tag "List of types to ignore"
                (const :tag "File paths" "file")
@@ -923,8 +923,8 @@ exclude none set to nil."
 
 (defcustom org-sql-excluded-contents-timestamp-types nil
   "List of timestamp types to exclude from headline content sections.
-List members can be the symbols 'active', 'active-range', 'inactive',
-or 'inactive-range'. To exclude none set to nil."
+List members can be the symbols `active', `active-range', `inactive',
+or `inactive-range'. To exclude none set to nil."
   :type '(set :tag "List of types to include"
               (const :tag "Active Timestamps" active)
               (const :tag "Active Timestamp Ranges" active-range)
@@ -936,7 +936,7 @@ or 'inactive-range'. To exclude none set to nil."
 (defcustom org-sql-excluded-logbook-types nil
   "List of logbook entry types to exclude from the database.
 List members are any of the keys from `org-log-note-headings' with the
-exception of 'clock-out' as these are treated as clock-notes (see
+exception of `clock-out' as these are treated as clock-notes (see
 `org-sql-exclude-clock-notes'). To include none set to nil."
   :type '(set :tag "List of types to include"
               (const :tag "Clocks" clock)
@@ -1373,7 +1373,7 @@ plists (where the keys are the column names for the rows)."
 
 ;; TODO add this to org-ml
 (defun org-sql--build-org-data (preamble headlines)
-  "Return a new 'org-data' node type.
+  "Return a new `org-data' node type.
 PREAMBLE is a section node representing the \"preamble\" (the
 text above the first headline, if any) or nil, and HEADLINES is a
 list of headline nodes."
@@ -2916,7 +2916,7 @@ FIRST-FORM must return a cons cell like (RC . OUT) where RC is
 the return code and OUT is the output string (stdout and/or
 stderr). SUCCESS-FORM will be run if RC is 0 and ERROR-FORM will
 be run otherwise. In either case, OUT will be bound to the symbol
-'it-out'."
+`it-out'."
   (declare (indent 1))
   (let ((r (make-symbol "rc")))
     `(-let (((,r . it-out) ,first-form))
@@ -2924,7 +2924,7 @@ be run otherwise. In either case, OUT will be bound to the symbol
 
 (defmacro org-sql--on-success* (first-form &rest success-forms)
   "Run SUCCESS-FORMS on successful exit code.
-This is like `org-sql--on-success' but with '(error it-out)'
+This is like `org-sql--on-success' but with `(error it-out)'
 supplied for ERROR-FORM. FIRST-FORM has the same meaning."
   (declare (indent 1))
   `(org-sql--on-success ,first-form (progn ,@success-forms) (error it-out)))
@@ -3026,7 +3026,7 @@ Return a cons cell like (RETURNCODE . OUTPUT)."
   (with-temp-buffer
     (let ((rc (apply #'call-process path file (current-buffer) nil args)))
       (cons rc (buffer-string)))))
-    
+
 ;;; hashpathpair -> outline-config
 
 (defun org-sql--hashpathpair-get-outline-config (outline-hash file-paths)
@@ -3630,7 +3630,7 @@ connection.
 This will return a list of lists like (PATH . TREE) where PATH is
 the path to a tracked file and TREE is the org-tree for that file
 represented as an org-element node tree (specifically an
-'org-data' node). Passing TREE to `org-ml-to-string' or
+`org-data' node). Passing TREE to `org-ml-to-string' or
 `org-element-interpret-data' will produce the string
 representation of the file contents.
 
