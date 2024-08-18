@@ -691,6 +691,8 @@
       ,@postgres
       ,@mariadb
       ,@mysql
-      ,@sqlserver))))
+      ,@sqlserver)
+   t)))
+
 
 ;;; org-sql-test-stateful ends here
