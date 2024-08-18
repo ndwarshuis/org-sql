@@ -7,33 +7,23 @@ jobs:
     strategy:
       matrix:
         emacs_version:
-          - '27.1'
-          - '27.2'
-          - '28.1'
+          - '29.3'
     steps:
-    - uses: actions/checkout@v2
-    - uses: actions/setup-python@v2
+    - uses: mamba-org/setup-micromamba@v1
       with:
-        python-version: '3.6'
-        architecture: 'x64'
-    - uses: purcell/setup-emacs@master
-      with:
-        version: ${{ matrix.emacs_version }}
-    - uses: conao3/setup-cask@master
-      with:
-        version: '0.8.4'
+        version: '1.9.0'
+        micromamba-version: '1.5.8-0'
+        environment-file: env-${{ matrix.emacs_version }}.yml
+        init-shell: >-
+          bash
+        cache-environment: true
+        post-cleanup: 'all'
 
     - name: Setup testing databases
       run: docker-compose up -d
 
     - name: Run tests
-      if: matrix.allow_failure != true
       run: |
-        cask install
+        export LD_PRELOAD=/usr/lib/libc_malloc_debug.so
+        make install
         make
-
-    - name: Run tests (allow failure)
-      if: matrix.allow_failure == true
-      run: |
-        cask install
-        make || true
