@@ -7,7 +7,7 @@ jobs:
     strategy:
       matrix:
         emacs_version:
-          - '29.3'
+          - '29_3'
     steps:
     - uses: mamba-org/setup-micromamba@v1.9.0
       with:
