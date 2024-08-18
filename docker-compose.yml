@@ -11,47 +11,37 @@ services:
       - POSTGRES_PASSWORD=toor
       - POSTGRES_USER=root
     ports:
+      - 60016:5432
+
+  psql-15:
+    <<: *psql
+    build:
+      context: ./test/docker/postgres
+      args:
+        IMAGE: postgres:15.8-alpine
+    container_name: org-sql-postgres-15
+    ports:
+      - 60015:5432
+
+  psql-14:
+    <<: *psql
+    build:
+      context: ./test/docker/postgres
+      args:
+        IMAGE: postgres:14.13-alpine
+    container_name: org-sql-postgres-14
+    ports:
+      - 60014:5432
+
+  psql-13:
+    <<: *psql
+    build:
+      context: ./test/docker/postgres
+      args:
+        IMAGE: postgres:13.16-alpine
+    container_name: org-sql-postgres-13
+    ports:
       - 60013:5432
-
-  psql-12:
-    <<: *psql
-    build:
-      context: ./test/docker/postgres
-      args:
-        IMAGE: postgres:12.6-alpine
-    container_name: org-sql-postgres-12
-    ports:
-      - 60012:5432
-
-  psql-11:
-    <<: *psql
-    build:
-      context: ./test/docker/postgres
-      args:
-        IMAGE: postgres:11.11-alpine
-    container_name: org-sql-postgres-11
-    ports:
-      - 60011:5432
-
-  psql-10:
-    <<: *psql
-    build:
-      context: ./test/docker/postgres
-      args:
-        IMAGE: postgres:10.16-alpine
-    container_name: org-sql-postgres-10
-    ports:
-      - 60010:5432
-
-  psql-9:
-    <<: *psql
-    build:
-      context: ./test/docker/postgres
-      args:
-        IMAGE: postgres:9.6.21-alpine
-    container_name: org-sql-postgres-9
-    ports:
-      - 60009:5432
 
   ## mariadb
 
@@ -63,38 +53,38 @@ services:
     environment:    
       - MYSQL_ROOT_PASSWORD=toor
     ports:
+      - 60114:3306
+
+  mariadb-1011:
+    <<: *mariadb
+    build:
+      context: ./test/docker/mariadb
+      args:
+        IMAGE: mariadb:10.11.8
+    container_name: org-sql-mariadb-1011
+    ports:
+      - 60111:3306
+
+  mariadb-106:
+    <<: *mariadb
+    build:
+      context: ./test/docker/mariadb
+      args:
+        IMAGE: mariadb:10.6.18
+    container_name: org-sql-mariadb-106
+    ports:
+      - 60106:3306
+
+  mariadb-105:
+    <<: *mariadb
+    build:
+      context: ./test/docker/mariadb
+      args:
+        IMAGE: mariadb:10.5.25
+    container_name: org-sql-mariadb-105
+    ports:
       - 60105:3306
-
-  mariadb-104:
-    <<: *mariadb
-    build:
-      context: ./test/docker/mariadb
-      args:
-        IMAGE: mariadb:10.4.17
-    container_name: org-sql-mariadb-104
-    ports:
-      - 60104:3306
-
-  mariadb-103:
-    <<: *mariadb
-    build:
-      context: ./test/docker/mariadb
-      args:
-        IMAGE: mariadb:10.3.17
-    container_name: org-sql-mariadb-103
-    ports:
-      - 60103:3306
-
-  mariadb-102:
-    <<: *mariadb
-    build:
-      context: ./test/docker/mariadb
-      args:
-        IMAGE: mariadb:10.2.36
-    container_name: org-sql-mariadb-102
-    ports:
-      - 60102:3306
-
+      
   ## mysql
 
   mysql-latest:
@@ -102,19 +92,20 @@ services:
     build:
       context: ./test/docker/mariadb
       args:
-        IMAGE: mysql:8.0.23
+        IMAGE: mysql:8.4.2
     container_name: org-sql-mysql-latest
     ports:
-      - 60280:3306
+      - 60284:3306
 
-  mysql57:
+  mysql80:
+    <<: *mariadb
     build:
       context: ./test/docker/mariadb
       args:
-        IMAGE: mysql:5.7.33
-    container_name: org-sql-mysql-57
+        IMAGE: mysql:8.0.39
+    container_name: org-sql-mysql-80
     ports:
-      - 60257:3306
+      - 60280:3306
 
   ## sqlserver
 
@@ -124,7 +115,17 @@ services:
     restart: 'no'
     environment:
       - ACCEPT_EULA=Y
-      - SA_PASSWORD=org_sql222@@@
+      - SA_PASSWORD=SFDwIcGvZdx&9g1f4Uy
+    ports:
+      - 60322:1433
+
+  sqlserver-2019:
+    <<: *sqlserver
+    container_name: org-sql-sqlserver-2019
+    build:
+      context: ./test/docker/sql-server
+      args:
+        IMAGE: mcr.microsoft.com/mssql/server:2019-CU27-ubuntu-20.04
     ports:
       - 60319:1433
 
@@ -134,6 +135,6 @@ services:
     build:
       context: ./test/docker/sql-server
       args:
-        IMAGE: mcr.microsoft.com/mssql/server:2017-CU22-ubuntu-16.04
+        IMAGE: mcr.microsoft.com/mssql/server:2017-CU29-ubuntu-16.04
     ports:
       - 60317:1433

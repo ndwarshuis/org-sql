@@ -2,7 +2,7 @@
 #do this in a loop because the timing for when the SQL instance is ready is indeterminate
 for i in {1..50};
 do
-    /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P org_sql222@@@ \
+    /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "SFDwIcGvZdx&9g1f4Uy" \
                                 -d master -i /usr/src/app/setup.sql
     if [ $? -eq 0 ]
     then

@@ -655,7 +655,7 @@
                  :server (format "tcp:localhost,%s" port)
                  :args '("-C") ;; trust server cert
                  :username "org_sql"
-                 :password "org_sql333###")
+                 :password "o%4XlS14tPO!J@q@16v")
            (append key-vals)
            (mk-io-spec "SQL-Server" 'sqlserver version alt-title))))
   (let* ((sqlite (list "SQLite"
@@ -663,35 +663,37 @@
                                                "org-sql-test.db"))))
          (postgres
           (append
+           (mk-postgres 16 60016)
+           (mk-postgres 16 60016 "Non-Default Schema" '(:schema "nonpublic"))
+           (mk-postgres 16 60016 "Unlogged tables" '(:unlogged t))
+           (mk-postgres 15 60015)
+           (mk-postgres 14 60014)
            (mk-postgres 13 60013)
-           (mk-postgres 13 60013 "Non-Default Schema" '(:schema "nonpublic"))
-           (mk-postgres 13 60013 "Unlogged tables" '(:unlogged t))
-           (mk-postgres 12 60012)
-           (mk-postgres 11 60011)
-           (mk-postgres 10 60010)
-           (mk-postgres 9 60009)))
+           ))
          (mariadb
           (append
-           (mk-mysql "MariaDB" 10.5 60105)
-           (mk-mysql "MariaDB" 10.4 60104)
-           (mk-mysql "MariaDB" 10.3 60103)
-           (mk-mysql "MariaDB" 10.2 60102)))
+           (mk-mysql "MariaDB" 11.4 60114)
+           (mk-mysql "MariaDB" 10.11 60111)
+           (mk-mysql "MariaDB" 10.6 60106)
+           (mk-mysql "MariaDB" 10.5 60105)))
          (mysql
           (append
-           (mk-mysql "MySQL" 8.0 60280)
-           ;; (mk-mysql "MySQL" 5.7 60257)
-           ))
+           (mk-mysql "MySQL" 8.4 60284)
+           (mk-mysql "MySQL" 8.0 60280)))
          (sqlserver
           (append
+           (mk-sqlserver 2022 60322 nil '(:schema "nondbo"))
            (mk-sqlserver 2019 60319 nil '(:schema "nondbo"))
-           (mk-sqlserver 2017 60317 nil '(:schema "nondbo")))))
+           (mk-sqlserver 2017 60317 nil '(:schema "nondbo"))
+           )))
   (eval
    `(describe-io-specs
       ,@sqlite
       ,@postgres
       ,@mariadb
       ,@mysql
-      ,@sqlserver)
+      ,@sqlserver
+      )
    t)))
 
 
