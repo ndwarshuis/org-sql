@@ -1,6 +1,6 @@
 CREATE DATABASE org_sql;
 GO
-CREATE LOGIN org_sql WITH PASSWORD = 'org_sql333###';
+CREATE LOGIN org_sql WITH PASSWORD = 'o%4XlS14tPO!J@q@16v';
 GO
 USE org_sql;
 GO

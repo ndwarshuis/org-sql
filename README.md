@@ -420,7 +420,7 @@ In addition to all required dependencies above:
 Install all emacs dependencies:
 
 ``` sh
-cask install --dev
+cask install
 ```
 
 ## Test environment setup

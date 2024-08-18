@@ -1,0 +1,9 @@
+name: org-sql-29.3
+channels:
+  - conda-forge
+dependencies:
+  - emacs=29.3
+  - sqlite=3.46.0
+  - postgresql=16.4
+  - mysqlclient=2.2.4
+  - go-sqlcmd=1.8.0
