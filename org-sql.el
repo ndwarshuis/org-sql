@@ -1302,7 +1302,8 @@ values of one row from OUT."
                   ((mysql sqlserver) "\n")
                   ((postgres sqlite) org-sql--row-sep))))
       (->> (org-sql--case-mode config
-             ((mysql postgres sqlserver) (s-chomp out))
+             ((mysql postgres) (s-chomp out))
+             (sqlserver (s-trim-right out))
              (sqlite (s-chop-suffix rsep out)))
            (s-split rsep)
            (--map (s-split fsep it))))))
