@@ -11,7 +11,6 @@ jobs:
     steps:
     - uses: mamba-org/setup-micromamba@v1
       with:
-        version: '1.9.0'
         micromamba-version: '1.5.8-0'
         environment-file: env-${{ matrix.emacs_version }}.yml
         init-shell: >-
