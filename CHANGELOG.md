@@ -1,5 +1,18 @@
 # Changelog
 
+## 4.0.0
+
+breaking changes
+- drop support for lots of unsupported database versions (technically a breaking
+  change, hence major bump)
+  
+new features
+- timestamps in headlines are now pulled into database (thanks aviav)
+
+bugfixes
+- fix compilation and documentation errors (thanks aviav)
+- fix whitespace issues with go-sqlcmd
+
 ## 3.0.4
 
 - fix compiler errors and warnings
