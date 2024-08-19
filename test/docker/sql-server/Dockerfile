@@ -1,4 +1,4 @@
-ARG IMAGE=mcr.microsoft.com/mssql/server:2019-CU8-ubuntu-16.04
+ARG IMAGE=mcr.microsoft.com/mssql/server:2022-CU11-ubuntu-22.04
 FROM $IMAGE
 
 ## Start the sql-server docker image with an init script to set up the test db

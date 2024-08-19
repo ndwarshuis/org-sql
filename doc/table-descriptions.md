@@ -57,7 +57,7 @@ Each row stores the ancestor and depth of a headline relationship. All headlines
 
 ## timestamps
 
-Each row stores one timestamp. Any timestamps in this table that are not referenced in other tables are part of the headlines's contents (the part after the logbook).
+Each row stores one timestamp. Any timestamps in this table that are not referenced in other tables are part of the headlines's contents (the part after the logbook) or title.
 
 | Column | Description |
 |  -  |  -  |
@@ -198,4 +198,4 @@ Each row stores one link.
 | link_text | text of this link that isn't part of the path |
 | link_type | type of this link (eg http, mu4e, file, etc) |
 
-Version: 3.0.1
+Version: 4.0.0

@@ -7,3 +7,4 @@ CREATE ROLE org_sql WITH LOGIN PASSWORD 'org_sql';
 -- create alt schema to test
 CREATE SCHEMA nonpublic AUTHORIZATION org_sql;
 GRANT ALL ON SCHEMA nonpublic TO org_sql;
+GRANT ALL ON SCHEMA public TO org_sql;

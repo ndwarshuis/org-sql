@@ -1,0 +1,13 @@
+(("dash.el" . "39d067b9fbb2db65fc7a6938bfb21489ad990cb4")
+ ("el-get" . "c0713e8d8e8ad987fe1283d76b9c637a10f048ef")
+ ("emacs-buttercup" . "a1a86b027ffe030e1c78a9f43c50cd20a6fed19a")
+ ("emacsmirror-mirror" . "8cbbdaa750c897d05ee71980834699a7d7c2d208")
+ ("f.el" . "de6d4d40ddc844eee643e92d47b9d6a63fbebb48")
+ ("gnu-elpa-mirror" . "3d0759ef4792b6461f2979a4e70e1c819df7283a")
+ ("melpa" . "3126dac37def07fcaa667a325ee79349fb80d285")
+ ("nongnu-elpa" . "a9a649210a8d8b9295b5a1d0c7b60a77db03c14c")
+ ("org" . "071c6e986c424d2e496be7d0815d6e9cd83ae4e6")
+ ("org-ml" . "7a7b1e918e8440f3f6ddb37db9bd1471d0dad37d")
+ ("s.el" . "4d7d83122850cf70dc60662a73124f0be41ad186")
+ ("straight.el" . "88e574ae75344e39b436f863ef0344135c7b6517"))
+:gamma
