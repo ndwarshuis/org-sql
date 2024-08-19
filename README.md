@@ -551,8 +551,7 @@ conda env activated):
 cask install
 ```
 
-This will provide all the required dependencies but won't pin a specific
-version. May or may not work.
+Run emacs as normal, and activate the conda environment to run the tests.
 
 # Acknowledgements
 
