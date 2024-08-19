@@ -1,4 +1,4 @@
-# Org-SQL ![Github Workflow Status](https://img.shields.io/github/workflow/status/ndwarshuis/org-sql/CI) ![MELPA VERSION](https://melpa.org/packages/org-sql-badge.svg)
+# Org-SQL ![Github Workflow Status](https://github.com/ndwarshuis/org-sql/actions/workflows/test.yml/badge.svg) ![MELPA VERSION](https://melpa.org/packages/org-sql-badge.svg)
 
 This package converts org-mode files to Structured Query Language (SQL) and
 stores them in a database, which can then be used for comprehensive data
