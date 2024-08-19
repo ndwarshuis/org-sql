@@ -265,7 +265,7 @@ to store them. This is in addition to any properties specifified by
           (timestamps
            (desc "Each row stores one timestamp. Any timestamps in this"
                  "table that are not referenced in other tables are part of the"
-                 "headlines's contents (the part after the logbook).")
+                 "headlines's contents (the part after the logbook) or title.")
            (columns
             ,(timestamp-id-col)
             ,(headline-id-col "timestamp" t)
