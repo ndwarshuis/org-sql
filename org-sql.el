@@ -5,8 +5,8 @@
 ;; Author: Nathan Dwarshuis <natedwarshuis@gmail.com>
 ;; Keywords: org-mode, data
 ;; Homepage: https://github.com/ndwarshuis/org-sql
-;; Package-Requires: ((emacs "27.1") (s "1.12") (f "0.20.0") (dash "2.17") (org-ml "5.6.1"))
-;; Version: 3.0.4
+;; Package-Requires: ((emacs "27.1") (s "1.13") (f "0.20.0") (dash "2.19.1") (org-ml "5.8.8"))
+;; Version: 4.0.0
 
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -324,7 +324,7 @@ to store them. This is in addition to any properties specifified by
                      :parent-keys (:timestamp_id)
                      :on-delete cascade
                      :cardinality one-or-none-to-one)))
-          
+
           (timestamp_repeaters
            (desc "Each row stores the repeater component for a timestamp."
                  "If the repeater also has a habit appended to it, this will"
@@ -447,7 +447,7 @@ to store them. This is in addition to any properties specifified by
                      :parent-keys (:headline_id)
                      :on-delete cascade
                      :cardinality many-or-none-to-one)))
-          
+
           (clocks
            (desc "Each row stores one clock entry.")
            (columns
@@ -875,7 +875,7 @@ This works analogously to `org-sql-post-init-hooks'."
 
 (defcustom org-sql-excluded-properties nil
   "List of properties to exclude from the database.
-To exclude all set to 'all' instead of a list of strings."
+To exclude all set to `all' instead of a list of strings."
   :type '(choice
           (const "Ignore All" all)
           (repeat :tag "List of properties to ignore" string))
@@ -888,7 +888,7 @@ To exclude all set to 'all' instead of a list of strings."
 
 (defcustom org-sql-excluded-tags nil
   "List of tags to exclude when building the tags table.
-To exclude all set to 'all' instead of a list of strings."
+To exclude all set to `all' instead of a list of strings."
   :type '(choice
           (const "Ignore All" all)
           (repeat :tag "List of tags to ignore" string))
@@ -899,7 +899,7 @@ To exclude all set to 'all' instead of a list of strings."
 Each member should be a string and one of `org-link-types' or
 \"file\", \"coderef\", \"custom-id\", \"fuzzy\", or \"id\". See org-element
 API documentation or`org-element-link-parser' for details.
-To exclude all set to 'all' instead of a list of strings."
+To exclude all set to `all' instead of a list of strings."
   :type '(choice
           (set :tag "List of types to ignore"
                (const :tag "File paths" "file")
@@ -923,8 +923,8 @@ exclude none set to nil."
 
 (defcustom org-sql-excluded-contents-timestamp-types nil
   "List of timestamp types to exclude from headline content sections.
-List members can be the symbols 'active', 'active-range', 'inactive',
-or 'inactive-range'. To exclude none set to nil."
+List members can be the symbols `active', `active-range', `inactive',
+or `inactive-range'. To exclude none set to nil."
   :type '(set :tag "List of types to include"
               (const :tag "Active Timestamps" active)
               (const :tag "Active Timestamp Ranges" active-range)
@@ -936,7 +936,7 @@ or 'inactive-range'. To exclude none set to nil."
 (defcustom org-sql-excluded-logbook-types nil
   "List of logbook entry types to exclude from the database.
 List members are any of the keys from `org-log-note-headings' with the
-exception of 'clock-out' as these are treated as clock-notes (see
+exception of `clock-out' as these are treated as clock-notes (see
 `org-sql-exclude-clock-notes'). To include none set to nil."
   :type '(set :tag "List of types to include"
               (const :tag "Clocks" clock)
@@ -1302,7 +1302,8 @@ values of one row from OUT."
                   ((mysql sqlserver) "\n")
                   ((postgres sqlite) org-sql--row-sep))))
       (->> (org-sql--case-mode config
-             ((mysql postgres sqlserver) (s-chomp out))
+             ((mysql postgres) (s-chomp out))
+             (sqlserver (s-trim-right out))
              (sqlite (s-chop-suffix rsep out)))
            (s-split rsep)
            (--map (s-split fsep it))))))
@@ -1373,7 +1374,7 @@ plists (where the keys are the column names for the rows)."
 
 ;; TODO add this to org-ml
 (defun org-sql--build-org-data (preamble headlines)
-  "Return a new 'org-data' node type.
+  "Return a new `org-data' node type.
 PREAMBLE is a section node representing the \"preamble\" (the
 text above the first headline, if any) or nil, and HEADLINES is a
 list of headline nodes."
@@ -1775,8 +1776,8 @@ CONTENTS is a list corresponding to that returned by
         (org-sql--insert-alist-add-timestamp-repeater it timestamp)
         (org-sql--insert-alist-add-timestamp-warning it timestamp)))))
 
-(defun org-sql--insert-alist-add-headline-timestamps (acc contents)
-  "Add row for each timestamp in the current headline to ACC.
+(defun org-sql--insert-alist-add-headline-timestamps-from-contents (acc contents)
+  "Add row for each timestamp in the current headline's contents to ACC.
 CONTENTS is a list corresponding to that returned by
 `org-ml-headline-get-supercontents'."
   (if (eq org-sql-excluded-contents-timestamp-types 'all) acc
@@ -1789,6 +1790,16 @@ CONTENTS is a list corresponding to that returned by
           (--reduce-from (->> (org-sql--insert-alist-add-timestamp acc it)
                               (org-sql--acc-incr :timestamp-id))
                          acc timestamps))
+      acc)))
+
+(defun org-sql--insert-alist-add-headline-timestamps-from-title (acc title)
+  "Add row for each timestamp in the current headline's title to ACC.
+TITLE is pre-parsed to contain any timestamps from headline title."
+  (if (eq org-sql-excluded-contents-timestamp-types 'all) acc
+    (-if-let (timestamps (--filter (org-ml-is-type 'timestamp it) title))
+        (--reduce-from (->> (org-sql--insert-alist-add-timestamp acc it)
+                            (org-sql--acc-incr :timestamp-id))
+                       acc timestamps)
       acc)))
 
 (defun org-sql--insert-alist-add-headline-planning (acc hstate)
@@ -1848,7 +1859,8 @@ INDEX is the order of the headline relative to its neighbors.
                                   (`(,_ 0) '(nil fraction))
                                   (`(,n ,d) `(,(/ (* 1.0 n) d) fraction))
                                   (`(,p) `(,p percent))))
-            (contents (org-ml-supercontents-get-contents supercontents)))
+            (contents (org-ml-supercontents-get-contents supercontents))
+            (title (org-ml-get-property :title headline)))
       (--> (org-sql--insert-alist-add acc headlines
              :headline_id (org-sql--acc-get :headline-id acc)
              :outline_hash outline-hash
@@ -1869,7 +1881,8 @@ INDEX is the order of the headline relative to its neighbors.
         (org-sql--insert-alist-add-headline-planning it hstate)
         (org-sql--insert-alist-add-headline-tags it hstate)
         (org-sql--insert-alist-add-headline-properties it hstate)
-        (org-sql--insert-alist-add-headline-timestamps it contents)
+        (org-sql--insert-alist-add-headline-timestamps-from-contents it contents)
+        (org-sql--insert-alist-add-headline-timestamps-from-title it title)
         (org-sql--insert-alist-add-headline-links it contents)
         (org-sql--insert-alist-add-headline-logbook-clocks it hstate logbook)
         (org-sql--insert-alist-add-headline-logbook-items it hstate logbook)
@@ -2784,7 +2797,6 @@ MySQL configs will additionally substitute tabs with
   "Return a SQL query that yields all headlines in the database.
 CONFIG is a list like `org-sql-db-config'."
   (let* ((hl-tbl (org-sql--format-table-name config "headlines"))
-         (ol-tbl (org-sql--format-table-name config "outlines"))
          (recursive-paths (org-sql--case-mode config
                             ((mysql postgres sqlite) "RECURSIVE paths")
                             (sqlserver "paths")))
@@ -2845,7 +2857,7 @@ CONFIG is a list like `org-sql-db-config'."
                  "ORDER BY h.outline_hash, p.ipath;")
                  ;; "LIMIT 50;")
                (s-join " "))))
-    (format fmt cte columns hl-tbl ol-tbl)))
+    (format fmt cte columns hl-tbl)))
 
 (defun org-sql--compile-deserializer* (config type)
   "Return a function that deserializes TYPE.
@@ -2916,7 +2928,7 @@ FIRST-FORM must return a cons cell like (RC . OUT) where RC is
 the return code and OUT is the output string (stdout and/or
 stderr). SUCCESS-FORM will be run if RC is 0 and ERROR-FORM will
 be run otherwise. In either case, OUT will be bound to the symbol
-'it-out'."
+`it-out'."
   (declare (indent 1))
   (let ((r (make-symbol "rc")))
     `(-let (((,r . it-out) ,first-form))
@@ -2924,7 +2936,7 @@ be run otherwise. In either case, OUT will be bound to the symbol
 
 (defmacro org-sql--on-success* (first-form &rest success-forms)
   "Run SUCCESS-FORMS on successful exit code.
-This is like `org-sql--on-success' but with '(error it-out)'
+This is like `org-sql--on-success' but with `(error it-out)'
 supplied for ERROR-FORM. FIRST-FORM has the same meaning."
   (declare (indent 1))
   `(org-sql--on-success ,first-form (progn ,@success-forms) (error it-out)))
@@ -3026,7 +3038,7 @@ Return a cons cell like (RETURNCODE . OUTPUT)."
   (with-temp-buffer
     (let ((rc (apply #'call-process path file (current-buffer) nil args)))
       (cons rc (buffer-string)))))
-    
+
 ;;; hashpathpair -> outline-config
 
 (defun org-sql--hashpathpair-get-outline-config (outline-hash file-paths)
@@ -3630,7 +3642,7 @@ connection.
 This will return a list of lists like (PATH . TREE) where PATH is
 the path to a tracked file and TREE is the org-tree for that file
 represented as an org-element node tree (specifically an
-'org-data' node). Passing TREE to `org-ml-to-string' or
+`org-data' node). Passing TREE to `org-ml-to-string' or
 `org-element-interpret-data' will produce the string
 representation of the file contents.
 

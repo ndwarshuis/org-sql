@@ -38,40 +38,52 @@ One can also use `use-package` to automate this entire process
 
 ## Dependencies
 
-Only Emacs 27.1+ has been tested
+Only Emacs 29.3 has been tested. It will probably work for others.
 
 ### Emacs packages
 
-- org-ml.el
-- dash.el
-- s.el
-- f.el
+- org-ml.el (5.8.8)
+- dash.el (2.19.1)
+- s.el (1.13)
+- f.el (0.20.0)
+
+Versions indicated those that have been tested. Others may work but are not
+guaranteed.
+
+As of version 5.8.8, org-ml.el requires org 9.6.x to work. 9.7.x and later
+*will* break.
 
 ### Database Clients
 
 Only the client binary for your desired implementation are required (ensure they
 are in your PATH):
 
-- sqlite3
+- sqlite3 
 - psql (PostgreSQL)
 - mysql (MariaDB/MySQL)
 - sqlcmd (SQL-Server)
+
+See the conda environment file at `env-XX.Y.yml` (where XX.Y corresponds to the
+emacs version) for the exact versions of the each client used for testing. These
+were provided with the following packages:
+
+- sqlite (for sqlite)
+- postgresql (for PostgreSQL)
+- mysqlclient (for MariaDB and MySQL)
+- go-sqlcmd (for SQL-Server)
+
 
 ### Database Servers
 
 The following databases servers/versions are supported and tested:
 
-- PostgreSQL (13, 12, 11, 10, 9)
-- MariaDB (10.5, 10.4, 10.3, 10.2)
-- MySQL (8.0)
-- SQL-Server (2019, 2017)
+- PostgreSQL (16, 15, 14, 13)
+- MariaDB (11.4, 10.6, 10.5)
+- MySQL (8.4, 8.0)
+- SQL-Server (2022, 2019, 2017)
 
 Many versions besides these will likely work; these are simply those that are in
 the testing suite.
-
-MySQL 5.7 should also work for all functions except `org-sql-pull-from-db`,
-which will throw mysterious syntax errors because this function relies on
-recursive queries (which don't exist in 5.7).
 
 # Configuration
 
@@ -404,31 +416,48 @@ Contributions welcome! But please take advantage of the testing environment
 (especially when contributing to code which directly interacts with the database
 servers).
 
-## Dependencies
+## Reproducible Environment
 
-In addition to all required dependencies above:
+The entire development environment is designed to be self-contained and
+reproducible. All binaries (including emacs itself) are specified in a conda
+environment, the databases are specified in a docker-compose file, and the
+dependencies for emacs are specified in a `straight.el` profile in
+`.emacs/XX.Y/straight/versions/default.el`.
 
-- [cask](https://github.com/cask/cask)
-- docker
-- docker-compose
-- [erd](https://github.com/BurntSushi/erd)
-- make
+The only prerequisites for running this are a working conda and docker-compose
+installation.
 
+It isn't stricly necessary to use this, but doing so ensures that all tests run
+in a standardized manner across all machines and therefore minimizes 'bit rot
+bugs'.
 
-## Emacs setup
+### Conda dependencies
 
-Install all emacs dependencies:
+Assuming a working mamba installation, install all binary dependencies and
+activate:
 
 ``` sh
-cask install --dev
+mamba env create -f env-XX.Y.yml
+conda activate env-XX.Y.yml
 ```
 
-## Test environment setup
+### Emacs dependencies
+
+Run the following
+
+``` sh
+export LD_PRELOAD=/usr/lib/libc_malloc_debug.so 
+make install
+```
+
+Note, the LD_PRELOAD setting is necessary if one gets and error about undefined
+symbols for malloc_set_state. This is necessary for all `make ...` commands.
+
+### Database setup
 
 Except for SQLite, the each database for testing is encoded and set up using
-`docker-compose` (see the included `docker-compose.yml` and
-`docker-compose.override.yml` files). These are
-necessary to run the stateful tests above.
+`docker-compose` (see the included `docker-compose.yml` file). These are
+necessary to run the stateful tests (see below).
 
 To set up the environment, start the docker-daemon (may require sudo).
 
@@ -436,13 +465,15 @@ To set up the environment, start the docker-daemon (may require sudo).
 docker-compose up -d -V
 ```
 
+Add `--build` to rebuild images if altered (see below).
+
 To shut down the environment:
 
 ``` sh
 docker-compose down
 ```
 
-### Dockerfile/Docker-compose Layout
+#### Dockerfile/Docker-compose Layout
 
 Customization of the `docker-compose` files should not be necessary except when
 adding a new database for testing (or a new version). The 'base' docker images
@@ -453,7 +484,7 @@ is set to the latest version of the container to pull. Note that MariaDB and
 MySQL are assumed to share the exact same container configuration, and thus they
 share the same Dockerfile.
 
-## Running tests
+### Running tests
 
 Tests are divided into stateless (pure functions, don't rely on external
 database implementations) and stateful (impure, interacts with the database
@@ -483,7 +514,7 @@ Run all tests using both interpreted and compiled code:
 make test
 ```
 
-## Building documentation
+### Building documentation
 
 To generate documentation:
 
@@ -491,7 +522,39 @@ To generate documentation:
 make docs
 ```
 
+requires [erd](https://github.com/BurntSushi/erd) (which is unfortunately not in
+conda).
+
+## Interactive development
+
+To use Emacs to edit the code of `org-sql`, one has several options, from most
+to least reliable.
+
+### Emacs from conda
+
+Simply activate the conda environment set up from above and run emacs from the
+shell. This will have all the required dependencies, but also won't have your
+personal setup.
+
+### Personal emacs with straight dependencies
+
+More clunkily, if one wants/needs the exact versions of each emacs package, one
+can copy the hashes from `emacs.d/XX.Y/straight/versions/default.el` into their
+own straight config (or make a new profile).
+
+### Personal emacs config with cask
+
+Install [cask](https://github.com/cask/cask) and run the following (without the
+conda env activated):
+
+``` sh
+cask install
+```
+
+Run emacs as normal, and activate the conda environment to run the tests.
+
 # Acknowledgements
 
-The idea for this is based on [John Kitchin's](http://kitchingroup.cheme.cmu.edu/blog/2017/01/03/Find-stuff-in-org-mode-anywhere/)
+The idea for this is based on [John
+Kitchin's](http://kitchingroup.cheme.cmu.edu/blog/2017/01/03/Find-stuff-in-org-mode-anywhere/)
 implementation, which uses `emacsql` as the SQL backend.

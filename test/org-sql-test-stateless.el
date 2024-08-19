@@ -486,7 +486,7 @@ list then join the cdr of IN with newlines."
 
     (it "fancy"
       (expect-sql (list "stuff at the top"
-                        "* TODO [#A] COMMENT another headline [1/2]"
+                        "* TODO [#A] COMMENT another headline <2024-08-12 Mon> [1/2]"
                         ":PROPERTIES:"
                         ":Effort: 0:30"
                         ":END:"
@@ -494,10 +494,12 @@ list then join the cdr of IN with newlines."
                   `((outlines (,@testing-outlines* "stuff at the top\n"))
                     ,testing-file_metadata
                     (headlines
-                     (1 ,testing-hash "another headline [1/2]" 1 0 "TODO" 30 "A" fraction 0.5
+                     (1 ,testing-hash "another headline <2024-08-12 Mon> [1/2]" 1 0 "TODO" 30 "A" fraction 0.5
                         0 1 "this /should/ appear\n"))
                     (headline_closures
-                     (1 1 0)))))
+                     (1 1 0))
+                    (timestamps (1 1 "<2024-08-12 Mon>" 1
+                                   ,(org-ts-to-unixtime "<2024-08-12 Mon>") nil 0 nil)))))
 
     (expect-sql-tbls-multi (outlines file_metadata headlines headline_closures)
                            (list "* headline"
@@ -517,7 +519,7 @@ list then join the cdr of IN with newlines."
                              ,testing-file_metadata
                              (headlines (1 ,testing-hash "headline" 1 0 nil nil nil nil nil 0 0 nil))
                              (headline_closures (1 1 0)))
-                           
+
                            "nested (no predicate)"
                            nil
                            `((outlines (,@testing-outlines* nil))
@@ -702,7 +704,7 @@ list then join the cdr of IN with newlines."
                                             "** child"
                                             ts)
                          `((timestamps (1 2 ,ts 1 ,(org-ts-to-unixtime ts) nil 0 nil))))))
-    
+
     (it "content (ranged)"
       (let* ((ts0 "<2112-01-01 Thu>")
              (ts1 "<2112-01-02 Fri>")
@@ -734,7 +736,7 @@ list then join the cdr of IN with newlines."
                                      "** child"
                                      "https://example.com")
                        `((links (1 2 "//example.com" nil "https")))))
-    
+
     (it "with description"
       (expect-sql-tbls (links) (list "* parent"
                                      "[[https://example.org][relevant]]")
@@ -998,7 +1000,7 @@ list then join the cdr of IN with newlines."
                                                           ":END:")
                            `((clocks (1 1 ,(org-ts-to-unixtime ts0)
                                         ,(org-ts-to-unixtime ts1) nil))
-                             (logbook_entries (1 1 "done" ,(org-ts-to-unixtime ts) ,header nil)))))) 
+                             (logbook_entries (1 1 "done" ,(org-ts-to-unixtime ts) ,header nil))))))
 
       (it "non-note + clock + clock note"
         (let* ((org-log-note-clock-out t)
@@ -1184,7 +1186,7 @@ list then join the cdr of IN with newlines."
         :postgres "'foo'"
         :sqlite "'foo'"
         :sqlserver "'foo'"))
-    
+
     (it "newlines"
       (expect-formatter 'text "foo\nbar"
         :mysql "'foo\nbar'"
@@ -1376,4 +1378,3 @@ list then join the cdr of IN with newlines."
                 (files-to-delete ("789" . "/foo0.org")))))))
 
 ;;; org-sql-test-stateless.el ends here
-
