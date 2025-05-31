@@ -16,13 +16,33 @@ docs:
 stateless:
 	${EMACS} -l test/org-sql-test-stateless.el -f buttercup-run-discover
 
-stateful:
-	${EMACS} -l test/org-sql-test-stateful.el -f buttercup-run-discover
+sqlite:
+	${EMACS} -l test/org-sql-test-stateful.el \
+    -l test/org-sql-test--sqlite.el \
+    -f buttercup-run-discover
+
+postgres:
+	${EMACS} -l test/org-sql-test-stateful.el \
+    -l test/org-sql-test--postgres.el \
+    -f buttercup-run-discover
+
+mariadb:
+	${EMACS} -l test/org-sql-test-stateful.el \
+    -l test/org-sql-test--mariadb.el \
+    -f buttercup-run-discover
+
+sqlserver:
+	${EMACS} -l test/org-sql-test-stateful.el \
+    -l test/org-sql-test--sqlserver.el \
+    -f buttercup-run-discover
 
 compile:
 	${EMACS} build
 	${MAKE} stateless
-	${MAKE} stateful
+	${MAKE} sqlite
+	${MAKE} postgres
+	${MAKE} mariadb
+	${MAKE} sqlserver
 	${MAKE} clean-elc
 
 clean-elc:

@@ -625,76 +625,82 @@
     `(describe "SQL IO Spec"
        ,@forms)))
 
-(cl-flet*
-    ((mk-io-spec
-      (db-name db-sym version alt-title key-vals)
-      `(,(if alt-title (format "%s (v%s - %s)" db-name version alt-title)
-           (format "%s (v%s)" db-name version))
-        (,db-sym ,@key-vals)))
-     (mk-postgres
-      (version port &optional alt-title key-vals)
-      (->> (list :database "org_sql"
-                 :port port
-                 :hostname "localhost"
-                 :username "org_sql"
-                 :password "org_sql")
-           (append key-vals)
-           (mk-io-spec "Postgres" 'postgres version alt-title)))
-     (mk-mysql
-      (title version port &optional alt-title key-vals)
-      (->> (list :database "org_sql"
-                 :port port
-                 :hostname "127.0.0.1"
-                 :username "org_sql"
-                 :password "org_sql")
-           (append key-vals)
-           (mk-io-spec title 'mysql version alt-title)))
-     (mk-sqlserver
-      (version port &optional alt-title key-vals)
-      (->> (list :database "org_sql"
-                 :server (format "tcp:localhost,%s" port)
-                 :args '("-C") ;; trust server cert
-                 :username "org_sql"
-                 :password "o%4XlS14tPO!J@q@16v")
-           (append key-vals)
-           (mk-io-spec "SQL-Server" 'sqlserver version alt-title))))
-  (let* ((sqlite (list "SQLite"
-                       `(sqlite :path ,(f-join (temporary-file-directory)
-                                               "org-sql-test.db"))))
-         (postgres
-          (append
-           (mk-postgres 16 60016)
-           (mk-postgres 16 60016 "Non-Default Schema" '(:schema "nonpublic"))
-           (mk-postgres 16 60016 "Unlogged tables" '(:unlogged t))
-           (mk-postgres 15 60015)
-           (mk-postgres 14 60014)
-           (mk-postgres 13 60013)
-           ))
-         (mariadb
-          (append
-           (mk-mysql "MariaDB" 11.4 60114)
-           (mk-mysql "MariaDB" 10.11 60111)
-           (mk-mysql "MariaDB" 10.6 60106)
-           (mk-mysql "MariaDB" 10.5 60105)))
-         (mysql
-          (append
-           (mk-mysql "MySQL" 8.4 60284)
-           (mk-mysql "MySQL" 8.0 60280)))
-         (sqlserver
-          (append
-           (mk-sqlserver 2022 60322 nil '(:schema "nondbo"))
-           (mk-sqlserver 2019 60319 nil '(:schema "nondbo"))
-           (mk-sqlserver 2017 60317 nil '(:schema "nondbo"))
-           )))
-  (eval
-   `(describe-io-specs
-      ,@sqlite
-      ,@postgres
-      ,@mariadb
-      ,@mysql
-      ,@sqlserver
-      )
-   t)))
+
+(defun make-io-spec (db-name db-sym version alt-title key-vals)
+  `(,(if alt-title (format "%s (v%s - %s)" db-name version alt-title)
+       (format "%s (v%s)" db-name version))
+    (,db-sym ,@key-vals)))
+
+;; (cl-flet*
+;;     ((mk-io-spec
+;;       (db-name db-sym version alt-title key-vals)
+;;       `(,(if alt-title (format "%s (v%s - %s)" db-name version alt-title)
+;;            (format "%s (v%s)" db-name version))
+;;         (,db-sym ,@key-vals)))
+;;      (mk-postgres
+;;       (version port &optional alt-title key-vals)
+;;       (->> (list :database "org_sql"
+;;                  :port port
+;;                  :hostname "localhost"
+;;                  :username "org_sql"
+;;                  :password "org_sql")
+;;            (append key-vals)
+;;            (mk-io-spec "Postgres" 'postgres version alt-title)))
+;;      (mk-mysql
+;;       (title version port &optional alt-title key-vals)
+;;       (->> (list :database "org_sql"
+;;                  :port port
+;;                  :hostname "127.0.0.1"
+;;                  :username "org_sql"
+;;                  :password "org_sql")
+;;            (append key-vals)
+;;            (mk-io-spec title 'mysql version alt-title)))
+;;      (mk-sqlserver
+;;       (version port &optional alt-title key-vals)
+;;       (->> (list :database "org_sql"
+;;                  :server (format "tcp:localhost,%s" port)
+;;                  :args '("-C") ;; trust server cert
+;;                  :username "org_sql"
+;;                  :password "o%4XlS14tPO!J@q@16v")
+;;            (append key-vals)
+;;            (mk-io-spec "SQL-Server" 'sqlserver version alt-title))))
+;;   (let* ((sqlite (list "SQLite"
+;;                        `(sqlite :path ,(f-join (temporary-file-directory)
+;;                                                "org-sql-test.db"))))
+;;          (postgres
+;;           (append
+;;            (mk-postgres 16 60016)
+;;            (mk-postgres 16 60016 "Non-Default Schema" '(:schema "nonpublic"))
+;;            (mk-postgres 16 60016 "Unlogged tables" '(:unlogged t))
+;;            (mk-postgres 15 60015)
+;;            (mk-postgres 14 60014)
+;;            (mk-postgres 13 60013)
+;;            ))
+;;          (mariadb
+;;           (append
+;;            (mk-mysql "MariaDB" 11.4 60114)
+;;            (mk-mysql "MariaDB" 10.11 60111)
+;;            (mk-mysql "MariaDB" 10.6 60106)
+;;            (mk-mysql "MariaDB" 10.5 60105)))
+;;          (mysql
+;;           (append
+;;            (mk-mysql "MySQL" 8.4 60284)
+;;            (mk-mysql "MySQL" 8.0 60280)))
+;;          (sqlserver
+;;           (append
+;;            (mk-sqlserver 2022 60322 nil '(:schema "nondbo"))
+;;            (mk-sqlserver 2019 60319 nil '(:schema "nondbo"))
+;;            (mk-sqlserver 2017 60317 nil '(:schema "nondbo"))
+;;            )))
+;;   (eval
+;;    `(describe-io-specs
+;;       ,@sqlite
+;;       ,@postgres
+;;       ,@mariadb
+;;       ,@mysql
+;;       ,@sqlserver
+;;       )
+;;    t)))
 
 
 ;;; org-sql-test-stateful ends here
